@@ -111,6 +111,8 @@ export type CheckInput = {
   scope?: readonly string[];
 };
 export type CheckReport = {
+  /** 核对所依据的基线快照，接受时用于发现核对后基线已被替换。 */
+  reviewedBaseline: Baseline | null;
   declaration: {
     completeness: DeclarationCompleteness;
     bindingIds: string[];

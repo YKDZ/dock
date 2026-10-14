@@ -44,6 +44,123 @@ const facts: ReferenceFact[] = [
   { referenceId: "preview-port-exists", value: true },
 ];
 
+void test("接受只确认仍与已审阅报告相同的当前状态", () => {
+  const first = check({ references, bindings, facts });
+  const created = accept(first, undefined, ["preview-port"], first);
+  assert.equal(created.status, "accepted");
+  if (created.status !== "accepted") return;
+
+  const baseline = created.baseline;
+  const reviewed = check({ references, bindings, facts, baseline });
+  assert.equal(reviewed.bindings[0]?.consistency, "consistent");
+
+  const changedDocument = check({
+    references,
+    bindings,
+    facts: facts.map((fact) =>
+      fact.referenceId === "preview-port-doc"
+        ? { ...fact, value: "- **Default:** `4174`" }
+        : fact,
+    ),
+    baseline,
+  });
+  const changedRightSource = check({
+    references,
+    bindings,
+    facts: facts.map((fact) =>
+      fact.referenceId === "preview-port-file"
+        ? { ...fact, value: "port=4174" }
+        : fact,
+    ),
+    baseline,
+  });
+  const changedBinding = check({
+    references: [
+      ...references,
+      {
+        id: "preview-port-condition",
+        target: { path: "docs/config/preview-options.md" },
+        selection: { kind: "text", value: "If the port is occupied" },
+      },
+    ],
+    bindings: [
+      {
+        ...bindings[0]!,
+        documents: [...bindings[0]!.documents, "preview-port-condition"],
+      },
+    ],
+    facts: [
+      ...facts,
+      {
+        referenceId: "preview-port-condition",
+        value: "If the port is occupied",
+      },
+    ],
+    baseline,
+  });
+
+  for (const current of [changedDocument, changedRightSource, changedBinding]) {
+    const stale = accept(reviewed, baseline, ["preview-port"], current);
+    assert.equal(stale.status, "rejected");
+    if (stale.status === "rejected")
+      assert.ok(stale.errors.some((error) => error.code === "stale-review"));
+
+    const refreshed = accept(current, baseline, ["preview-port"], current);
+    assert.equal(refreshed.status, "accepted");
+  }
+
+  const freshError = check({
+    references,
+    bindings,
+    facts: [
+      ...facts.filter((fact) => fact.referenceId !== "preview-port-file"),
+      {
+        referenceId: "preview-port-file",
+        error: { code: "read-failed", message: "配置文件读取失败。" },
+      },
+    ],
+    baseline,
+  });
+  const rejectedEvidence = accept(
+    reviewed,
+    baseline,
+    ["preview-port"],
+    freshError,
+  );
+  assert.equal(rejectedEvidence.status, "rejected");
+  if (rejectedEvidence.status === "rejected")
+    assert.ok(
+      rejectedEvidence.errors.some((error) => error.code === "read-failed"),
+    );
+});
+
+void test("核对后被替换的基线不能用于接受旧报告", () => {
+  const first = check({ references, bindings, facts });
+  const created = accept(first, undefined, ["preview-port"], first);
+  assert.equal(created.status, "accepted");
+  if (created.status !== "accepted") return;
+
+  const baseline = created.baseline;
+  const reviewed = check({ references, bindings, facts, baseline });
+  const replacement = structuredClone(baseline);
+  replacement.bindings["preview-port"]!.references["preview-port-file"]!.value =
+    "port=4000";
+  const current = check({
+    references,
+    bindings,
+    facts,
+    baseline: replacement,
+  });
+  const rejected = accept(reviewed, replacement, ["preview-port"], current);
+  assert.equal(rejected.status, "rejected");
+  if (rejected.status === "rejected")
+    assert.ok(
+      rejected.errors.some(
+        (error) => error.code === "reviewed-baseline-changed",
+      ),
+    );
+});
+
 void test("无基线的有效关联报告新增差异，显式接受后相同事实一致", () => {
   const initial = check({ references, bindings, facts });
   const first = initial.bindings[0]!;
@@ -56,7 +173,7 @@ void test("无基线的有效关联报告新增差异，显式接受后相同事
     end: 462,
   });
 
-  const accepted = accept(initial, undefined, ["preview-port"]);
+  const accepted = accept(initial, undefined, ["preview-port"], initial);
   assert.equal(accepted.status, "accepted");
   if (accepted.status !== "accepted") return;
 
@@ -72,7 +189,7 @@ void test("无基线的有效关联报告新增差异，显式接受后相同事
 
 void test("必需引用缺少、重复或返回错误时整条关联无法判定或接受", () => {
   const initial = check({ references, bindings, facts });
-  const accepted = accept(initial, undefined, ["preview-port"]);
+  const accepted = accept(initial, undefined, ["preview-port"], initial);
   assert.equal(accepted.status, "accepted");
   if (accepted.status !== "accepted") return;
 
@@ -90,7 +207,12 @@ void test("必需引用缺少、重复或返回错误时整条关联无法判定
   );
 
   const baselineBeforeRejection = JSON.stringify(accepted.baseline);
-  const rejected = accept(missing, accepted.baseline, ["preview-port"]);
+  const rejected = accept(
+    missing,
+    accepted.baseline,
+    ["preview-port"],
+    missing,
+  );
   assert.equal(rejected.status, "rejected");
   assert.equal(JSON.stringify(accepted.baseline), baselineBeforeRejection);
 
@@ -148,7 +270,7 @@ void test("关联的两端都必须声明至少一个引用", () => {
 
 void test("当前位置变化不制造差异；事实、引用定义和关联关系分别留下解释", () => {
   const first = check({ references, bindings, facts });
-  const accepted = accept(first, undefined, ["preview-port"]);
+  const accepted = accept(first, undefined, ["preview-port"], first);
   assert.equal(accepted.status, "accepted");
   if (accepted.status !== "accepted") return;
 
@@ -335,7 +457,12 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
     declarationCompleteness: "complete",
     scope: ["alpha", "beta"],
   });
-  const firstAcceptance = accept(initial, undefined, ["alpha", "beta"]);
+  const firstAcceptance = accept(
+    initial,
+    undefined,
+    ["alpha", "beta"],
+    initial,
+  );
   assert.equal(firstAcceptance.status, "accepted");
   if (firstAcceptance.status !== "accepted") return;
 
@@ -369,14 +496,21 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
   assert.equal(beta.consistency, "inconsistent");
 
   const unchangedBaseline = JSON.stringify(firstAcceptance.baseline);
-  const rejectedBatch = accept(report, firstAcceptance.baseline, [
-    "alpha",
-    "beta",
-  ]);
+  const rejectedBatch = accept(
+    report,
+    firstAcceptance.baseline,
+    ["alpha", "beta"],
+    report,
+  );
   assert.equal(rejectedBatch.status, "rejected");
   assert.equal(JSON.stringify(firstAcceptance.baseline), unchangedBaseline);
 
-  const acceptedOnlyBeta = accept(report, firstAcceptance.baseline, ["beta"]);
+  const acceptedOnlyBeta = accept(
+    report,
+    firstAcceptance.baseline,
+    ["beta"],
+    report,
+  );
   assert.equal(acceptedOnlyBeta.status, "accepted");
   if (acceptedOnlyBeta.status !== "accepted") return;
   assert.equal(
@@ -427,7 +561,8 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
     assert.equal(alphaFault.errors[0]?.code, "undeclared-reference");
   assert.equal(unrelatedFault.bindings[1]?.consistency, "consistent");
   assert.equal(
-    accept(unrelatedFault, acceptedOnlyBeta.baseline, ["beta"]).status,
+    accept(unrelatedFault, acceptedOnlyBeta.baseline, ["beta"], unrelatedFault)
+      .status,
     "accepted",
   );
 
@@ -458,7 +593,12 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
       );
   }
   assert.equal(
-    accept(sharedReferenceFailure, acceptedOnlyBeta.baseline, ["beta"]).status,
+    accept(
+      sharedReferenceFailure,
+      acceptedOnlyBeta.baseline,
+      ["beta"],
+      sharedReferenceFailure,
+    ).status,
     "rejected",
   );
 });
@@ -478,10 +618,12 @@ void test("局部声明不证明取消跟踪；完整声明删除基线无需读
     declarationCompleteness: "complete",
     scope: ["preview-port", "preview-port-copy"],
   });
-  const accepted = accept(initial, undefined, [
-    "preview-port",
-    "preview-port-copy",
-  ]);
+  const accepted = accept(
+    initial,
+    undefined,
+    ["preview-port", "preview-port-copy"],
+    initial,
+  );
   assert.equal(accepted.status, "accepted");
   if (accepted.status !== "accepted") return;
 
@@ -516,7 +658,12 @@ void test("局部声明不证明取消跟踪；完整声明删除基线无需读
   if ("errors" in omission)
     assert.equal(omission.errors[0]?.code, "incomplete-declaration");
   assert.equal(
-    accept(omittedFromPartial, accepted.baseline, ["preview-port-copy"]).status,
+    accept(
+      omittedFromPartial,
+      accepted.baseline,
+      ["preview-port-copy"],
+      omittedFromPartial,
+    ).status,
     "rejected",
   );
 
@@ -535,9 +682,12 @@ void test("局部声明不证明取消跟踪；完整声明删除基线无需读
     assert.equal(removal.changes[0]?.kind, "binding-removed");
   }
 
-  const cancellationAcceptance = accept(cancelled, accepted.baseline, [
-    "preview-port-copy",
-  ]);
+  const cancellationAcceptance = accept(
+    cancelled,
+    accepted.baseline,
+    ["preview-port-copy"],
+    cancelled,
+  );
   assert.equal(cancellationAcceptance.status, "accepted");
   if (cancellationAcceptance.status !== "accepted") return;
   assert.equal(

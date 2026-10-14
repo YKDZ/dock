@@ -66,7 +66,7 @@ const facts: ReferenceFact[] = [
 
 function accepted() {
   const report = check({ references, bindings: [binding], facts });
-  const outcome = accept(report, undefined, [binding.id]);
+  const outcome = accept(report, undefined, [binding.id], report);
   assert.equal(outcome.status, "accepted");
   if (outcome.status !== "accepted") throw new Error("有效关联应可接受。");
   return outcome.baseline;
