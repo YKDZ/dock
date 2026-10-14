@@ -41,6 +41,7 @@ function comparableBinding(binding: CurrentBinding): JsonValue {
     references[referenceId] = {
       definition: comparableReference(fact.definition),
       value: fact.value,
+      ...(fact.valueKind === undefined ? {} : { valueKind: fact.valueKind }),
     };
   }
   return {
@@ -177,6 +178,7 @@ export function accept(
       references[referenceId] = {
         definition: structuredClone(fact.definition),
         value: structuredClone(fact.value),
+        ...(fact.valueKind === undefined ? {} : { valueKind: fact.valueKind }),
       };
     }
     nextBindings[item.bindingId] = {

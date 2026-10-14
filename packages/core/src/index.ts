@@ -11,6 +11,7 @@ export type {
   CheckReport,
   CheckWithCoverageInput,
   CheckWithCoverageResult,
+  CollectionMemberChange,
   CompleteCheckReport,
   CurrentBinding,
   CurrentReferenceFact,
@@ -31,6 +32,7 @@ export type {
   ReferenceDefinition,
   ReferenceExecution,
   ReferenceFact,
+  ReferenceMemberFact,
 } from "./contracts.ts";
 export { accept } from "./accept.ts";
 export { check, checkWithCoverage } from "./check.ts";

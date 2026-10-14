@@ -268,6 +268,483 @@ void test("关联的两端都必须声明至少一个引用", () => {
   assert.equal("errors" in emptyReferences.bindings[0]!, true);
 });
 
+void test("完整成员清单按稳定 ID 比较，接受增删后可再次核对", () => {
+  const groupReferences: ReferenceDefinition[] = [
+    { id: "preview-doc", target: { path: "docs/preview.md" } },
+    {
+      id: "preview-group",
+      target: {
+        kind: "test-group",
+        project: "web",
+        file: "tests/preview.test.ts",
+        path: ["preview"],
+      },
+    },
+  ];
+  const groupBindings: BindingDefinition[] = [
+    {
+      id: "preview-policy",
+      documents: ["preview-doc"],
+      references: ["preview-group"],
+    },
+  ];
+  const initialFacts: ReferenceFact[] = [
+    { referenceId: "preview-doc", value: "Preview policy" },
+    {
+      referenceId: "preview-group",
+      collection: {
+        completeness: "complete",
+        members: [
+          {
+            id: "suite/preview/test/keeps-query",
+            value: ["beforeEach", "query"],
+          },
+          { id: "suite/preview/test/shows-warning", value: ["warning"] },
+        ],
+      },
+    },
+  ];
+  const initial = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: initialFacts,
+  });
+  const created = accept(initial, undefined, ["preview-policy"], initial);
+  assert.equal(created.status, "accepted");
+  if (created.status !== "accepted") return;
+
+  const baseline = created.baseline;
+  const reordered = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: [
+      initialFacts[0]!,
+      {
+        referenceId: "preview-group",
+        collection: {
+          completeness: "complete",
+          members: [
+            { id: "suite/preview/test/shows-warning", value: ["warning"] },
+            {
+              id: "suite/preview/test/keeps-query",
+              value: ["beforeEach", "query"],
+            },
+          ],
+        },
+      },
+    ],
+    baseline,
+  });
+  assert.equal(reordered.bindings[0]?.consistency, "consistent");
+
+  const changedFacts: ReferenceFact[] = [
+    initialFacts[0]!,
+    {
+      referenceId: "preview-group",
+      collection: {
+        completeness: "complete",
+        members: [
+          {
+            id: "suite/preview/test/keeps-query",
+            value: ["beforeEach", "query"],
+          },
+          { id: "suite/preview/test/shows-warning", value: ["warning"] },
+          {
+            id: "suite/preview/test/rejects-empty-result",
+            value: ["renders", "rejects empty"],
+          },
+        ],
+      },
+    },
+  ];
+  const changed = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: changedFacts,
+    baseline,
+  });
+  const changedBinding = changed.bindings[0]!;
+  assert.deepEqual(
+    changedBinding.changes.map((change) => change.kind),
+    ["fact"],
+  );
+  assert.deepEqual(changedBinding.changes[0], {
+    kind: "fact",
+    referenceId: "preview-group",
+    memberChanges: [
+      {
+        memberId: "suite/preview/test/rejects-empty-result",
+        beforePresent: false,
+        afterPresent: true,
+        after: ["renders", "rejects empty"],
+      },
+    ],
+    beforeKind: "member-collection",
+    afterKind: "member-collection",
+  });
+  const accepted = accept(changed, baseline, ["preview-policy"], changed);
+  assert.equal(accepted.status, "accepted");
+  if (accepted.status !== "accepted") return;
+
+  const afterAccept = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: changedFacts,
+    baseline: accepted.baseline,
+  });
+  assert.equal(afterAccept.bindings[0]?.consistency, "consistent");
+
+  const removedFacts: ReferenceFact[] = [
+    initialFacts[0]!,
+    {
+      referenceId: "preview-group",
+      collection: {
+        completeness: "complete",
+        members: [
+          {
+            id: "suite/preview/test/keeps-query",
+            value: ["beforeEach", "query"],
+          },
+          { id: "suite/preview/test/shows-warning", value: ["warning"] },
+        ],
+      },
+    },
+  ];
+  const removed = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: removedFacts,
+    baseline: accepted.baseline,
+  });
+  assert.deepEqual(removed.bindings[0]?.changes[0], {
+    kind: "fact",
+    referenceId: "preview-group",
+    memberChanges: [
+      {
+        memberId: "suite/preview/test/rejects-empty-result",
+        beforePresent: true,
+        afterPresent: false,
+        before: ["renders", "rejects empty"],
+      },
+    ],
+    beforeKind: "member-collection",
+    afterKind: "member-collection",
+  });
+  const acceptedRemoval = accept(
+    removed,
+    accepted.baseline,
+    ["preview-policy"],
+    removed,
+  );
+  assert.equal(acceptedRemoval.status, "accepted");
+  if (acceptedRemoval.status !== "accepted") return;
+  const restored = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: removedFacts,
+    baseline: acceptedRemoval.baseline,
+  });
+  assert.equal(restored.bindings[0]?.consistency, "consistent");
+});
+
+void test("partial 成员发现不推断增删，完整发现的失败成员仍可显示差异但不能接受", () => {
+  const groupReferences: ReferenceDefinition[] = [
+    { id: "preview-doc", target: { path: "docs/preview.md" } },
+    { id: "preview-group", target: { kind: "test-group", path: ["preview"] } },
+  ];
+  const groupBindings: BindingDefinition[] = [
+    {
+      id: "preview-policy",
+      documents: ["preview-doc"],
+      references: ["preview-group"],
+    },
+  ];
+  const initial: ReferenceFact[] = [
+    { referenceId: "preview-doc", value: "Preview policy" },
+    {
+      referenceId: "preview-group",
+      collection: {
+        completeness: "complete",
+        members: [
+          { id: "test/keeps-query", value: ["query"] },
+          { id: "test/shows-warning", value: ["warning"] },
+        ],
+      },
+    },
+  ];
+  const reviewed = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: initial,
+  });
+  const created = accept(reviewed, undefined, ["preview-policy"], reviewed);
+  assert.equal(created.status, "accepted");
+  if (created.status !== "accepted") return;
+
+  const partial = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: [
+      initial[0]!,
+      {
+        referenceId: "preview-group",
+        collection: {
+          completeness: "partial",
+          members: [{ id: "test/keeps-query", value: ["query"] }],
+        },
+      },
+    ],
+    baseline: created.baseline,
+  });
+  const partialResult = partial.bindings[0]!;
+  assert.ok("errors" in partialResult);
+  if ("errors" in partialResult) {
+    assert.deepEqual(partialResult.changes, []);
+    assert.ok(
+      partialResult.errors.some(
+        (error) => error.code === "incomplete-member-discovery",
+      ),
+    );
+  }
+  assert.equal(
+    accept(partial, created.baseline, ["preview-policy"], partial).status,
+    "rejected",
+  );
+
+  const ambiguousMember = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: [
+      initial[0]!,
+      {
+        referenceId: "preview-group",
+        collection: {
+          completeness: "complete",
+          members: [
+            { id: "test/keeps-query", value: ["query"] },
+            { id: "test/keeps-query", value: ["other"] },
+          ],
+        },
+      },
+    ],
+    baseline: created.baseline,
+  });
+  const ambiguousResult = ambiguousMember.bindings[0]!;
+  assert.ok("errors" in ambiguousResult);
+  if ("errors" in ambiguousResult) {
+    assert.deepEqual(ambiguousResult.changes, []);
+    assert.ok(
+      ambiguousResult.errors.some((error) => error.code === "ambiguous-member"),
+    );
+  }
+
+  const failedMember = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: [
+      initial[0]!,
+      {
+        referenceId: "preview-group",
+        collection: {
+          completeness: "complete",
+          members: [
+            { id: "test/keeps-query", value: ["query"] },
+            {
+              id: "test/shows-warning",
+              error: {
+                code: "required-output-missing",
+                message: "未取得必要观察。",
+              },
+            },
+            {
+              id: "test/rejects-empty-result",
+              value: ["renders", "rejects empty"],
+            },
+          ],
+        },
+      },
+    ],
+    baseline: created.baseline,
+  });
+  const failedResult = failedMember.bindings[0]!;
+  assert.ok("errors" in failedResult);
+  if ("errors" in failedResult) {
+    assert.equal("current" in failedResult, false);
+    assert.deepEqual(failedResult.changes[0], {
+      kind: "fact",
+      referenceId: "preview-group",
+      memberChanges: [
+        {
+          memberId: "test/rejects-empty-result",
+          beforePresent: false,
+          afterPresent: true,
+          after: ["renders", "rejects empty"],
+        },
+      ],
+      beforeKind: "member-collection",
+      afterKind: "member-collection",
+    });
+    assert.ok(
+      failedResult.errors.some(
+        (error) => error.memberId === "test/shows-warning",
+      ),
+    );
+  }
+  assert.equal(
+    accept(failedMember, created.baseline, ["preview-policy"], failedMember)
+      .status,
+    "rejected",
+  );
+
+  const failedSameMembers = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: [
+      initial[0]!,
+      {
+        referenceId: "preview-group",
+        collection: {
+          completeness: "complete",
+          members: [
+            { id: "test/keeps-query", value: ["query"] },
+            {
+              id: "test/shows-warning",
+              error: { code: "test-skipped", message: "测试已跳过。" },
+            },
+          ],
+        },
+      },
+    ],
+    baseline: created.baseline,
+  });
+  const sameMembersResult = failedSameMembers.bindings[0]!;
+  assert.ok("errors" in sameMembersResult);
+  if ("errors" in sameMembersResult) {
+    assert.deepEqual(sameMembersResult.changes, []);
+    assert.ok(
+      sameMembersResult.errors.some((error) => error.code === "test-skipped"),
+    );
+  }
+
+  const damagedBaseline = structuredClone(created.baseline);
+  damagedBaseline.bindings["preview-policy"]!.references[
+    "preview-group"
+  ]!.value = null;
+  assert.throws(
+    () =>
+      check({
+        references: groupReferences,
+        bindings: groupBindings,
+        facts: initial,
+        baseline: damagedBaseline,
+      }),
+    /成员集合基线必须是数组/u,
+  );
+});
+
+void test("成员内部数组顺序和 scalar 到成员集合的类型变化都进入事实差异", () => {
+  const groupReferences: ReferenceDefinition[] = [
+    { id: "preview-doc", target: { path: "docs/preview.md" } },
+    { id: "preview-group", target: { kind: "test-group", path: ["preview"] } },
+  ];
+  const groupBindings: BindingDefinition[] = [
+    {
+      id: "preview-policy",
+      documents: ["preview-doc"],
+      references: ["preview-group"],
+    },
+  ];
+  const scalarFacts: ReferenceFact[] = [
+    { referenceId: "preview-doc", value: "Preview policy" },
+    {
+      referenceId: "preview-group",
+      value: [{ id: "test/keeps-query", value: ["beforeEach", "query"] }],
+    },
+  ];
+  const scalar = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: scalarFacts,
+  });
+  const created = accept(scalar, undefined, ["preview-policy"], scalar);
+  assert.equal(created.status, "accepted");
+  if (created.status !== "accepted") return;
+
+  const asCollection = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: [
+      scalarFacts[0]!,
+      {
+        referenceId: "preview-group",
+        collection: {
+          completeness: "complete",
+          members: [{ id: "test/keeps-query", value: ["beforeEach", "query"] }],
+        },
+      },
+    ],
+    baseline: created.baseline,
+  });
+  const typeChange = asCollection.bindings[0]?.changes[0];
+  assert.equal(typeChange?.kind, "fact");
+  if (typeChange?.kind === "fact") {
+    assert.equal(typeChange.beforeKind, undefined);
+    assert.equal(typeChange.afterKind, "member-collection");
+  }
+  const staleReview = accept(
+    scalar,
+    created.baseline,
+    ["preview-policy"],
+    asCollection,
+  );
+  assert.equal(staleReview.status, "rejected");
+  if (staleReview.status === "rejected") {
+    assert.ok(
+      staleReview.errors.some((error) => error.code === "stale-review"),
+    );
+  }
+
+  const collection = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: [
+      scalarFacts[0]!,
+      {
+        referenceId: "preview-group",
+        collection: {
+          completeness: "complete",
+          members: [{ id: "test/keeps-query", value: ["beforeEach", "query"] }],
+        },
+      },
+    ],
+  });
+  const acceptedCollection = accept(
+    collection,
+    undefined,
+    ["preview-policy"],
+    collection,
+  );
+  assert.equal(acceptedCollection.status, "accepted");
+  if (acceptedCollection.status !== "accepted") return;
+
+  const orderedChange = check({
+    references: groupReferences,
+    bindings: groupBindings,
+    facts: [
+      scalarFacts[0]!,
+      {
+        referenceId: "preview-group",
+        collection: {
+          completeness: "complete",
+          members: [{ id: "test/keeps-query", value: ["query", "beforeEach"] }],
+        },
+      },
+    ],
+    baseline: acceptedCollection.baseline,
+  });
+  assert.equal(orderedChange.bindings[0]?.changes[0]?.kind, "fact");
+});
+
 void test("当前位置变化不制造差异；事实、引用定义和关联关系分别留下解释", () => {
   const first = check({ references, bindings, facts });
   const accepted = accept(first, undefined, ["preview-port"], first);
