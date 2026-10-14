@@ -319,6 +319,8 @@ export function check(input: CheckInput): CheckReport {
   });
 
   return {
+    reviewedBaseline:
+      input.baseline === undefined ? null : structuredClone(input.baseline),
     declaration: { completeness, bindingIds: declaredBindingIds },
     scope,
     bindings: results,

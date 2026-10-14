@@ -7,16 +7,97 @@ import type {
   CheckReport,
   AcceptedReferenceFact,
   Baseline,
+  CurrentBinding,
+  JsonValue,
+  ReferenceDefinition,
 } from "./contracts.ts";
+
+function canonical(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  return `{${Object.entries(value)
+    .filter(([, item]) => item !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
+    .join(",")}}`;
+}
+
+function comparableReference(definition: ReferenceDefinition): JsonValue {
+  return {
+    id: definition.id,
+    target: definition.target,
+    ...(definition.selection === undefined
+      ? {}
+      : { selection: definition.selection }),
+  };
+}
+
+function comparableBinding(binding: CurrentBinding): JsonValue {
+  const references: Record<string, JsonValue> = Object.create(null) as Record<
+    string,
+    JsonValue
+  >;
+  for (const [referenceId, fact] of Object.entries(binding.references)) {
+    references[referenceId] = {
+      definition: comparableReference(fact.definition),
+      value: fact.value,
+    };
+  }
+  return {
+    definition: {
+      id: binding.definition.id,
+      documents: [...binding.definition.documents].sort(),
+      references: [...binding.definition.references].sort(),
+    },
+    references,
+  };
+}
+
+function same(left: unknown, right: unknown): boolean {
+  return canonical(left) === canonical(right);
+}
+
+function sameReviewedState(left: BindingAudit, right: BindingAudit): boolean {
+  if (left.bindingId !== right.bindingId) return false;
+  if ("untracked" in left || "untracked" in right) {
+    if (!("untracked" in left) || !("untracked" in right)) return false;
+    const leftRemoval = left.changes[0];
+    const rightRemoval = right.changes[0];
+    return (
+      leftRemoval?.kind === "binding-removed" &&
+      rightRemoval?.kind === "binding-removed" &&
+      same(leftRemoval.before, rightRemoval.before)
+    );
+  }
+  if ("errors" in left || "errors" in right) return false;
+  return same(
+    comparableBinding(left.current),
+    comparableBinding(right.current),
+  );
+}
 
 /** 仅在显式选择的全部关联都具有有效证据时创建新基线。 */
 export function accept(
-  report: CheckReport,
+  reviewed: CheckReport,
   baseline: Baseline | undefined,
   bindingIds: readonly string[],
+  current: CheckReport,
 ): AcceptanceOutcome {
   assertBaseline(baseline);
   const errors: AcceptanceIssue[] = [];
+  const expectedBaseline = baseline ?? null;
+  if (!same(reviewed.reviewedBaseline, expectedBaseline)) {
+    errors.push({
+      code: "reviewed-baseline-changed",
+      message: "审阅报告依据的基线已变化，请重新核对并阅读当前报告。",
+    });
+  }
+  if (!same(current.reviewedBaseline, expectedBaseline)) {
+    errors.push({
+      code: "current-baseline-changed",
+      message: "当前核对使用的基线与待更新基线不一致。",
+    });
+  }
   if (bindingIds.length === 0)
     errors.push({
       code: "empty-selection",
@@ -31,7 +112,10 @@ export function accept(
 
   const selected: BindingAudit[] = [];
   for (const bindingId of bindingIds) {
-    const item = report.bindings.find(
+    const item = reviewed.bindings.find(
+      (candidate) => candidate.bindingId === bindingId,
+    );
+    const freshMatches = current.bindings.filter(
       (candidate) => candidate.bindingId === bindingId,
     );
     if (!item) {
@@ -42,11 +126,36 @@ export function accept(
       });
       continue;
     }
-    if ("errors" in item) {
-      errors.push(...item.errors.map((error) => ({ bindingId, ...error })));
+    if (freshMatches.length !== 1) {
+      errors.push({
+        bindingId,
+        code: "missing-current-review",
+        message: "接受前未取得该关联唯一的当前核对结果，请重新核对。",
+      });
       continue;
     }
-    selected.push(item);
+    const fresh = freshMatches[0]!;
+    if ("errors" in fresh) {
+      errors.push(...fresh.errors.map((error) => ({ bindingId, ...error })));
+      continue;
+    }
+    if ("errors" in item) {
+      errors.push({
+        bindingId,
+        code: "stale-review",
+        message: "已审阅报告含核对错误；请修复来源、重新核对并阅读新报告。",
+      });
+      continue;
+    }
+    if (!sameReviewedState(item, fresh)) {
+      errors.push({
+        bindingId,
+        code: "stale-review",
+        message: "来源状态与已审阅报告不同；请重新核对、阅读当前差异后再接受。",
+      });
+      continue;
+    }
+    selected.push(fresh);
   }
 
   if (errors.length) return { status: "rejected", errors };
