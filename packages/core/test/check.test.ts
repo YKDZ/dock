@@ -1193,3 +1193,118 @@ void test("局部声明不证明取消跟踪；完整声明删除基线无需读
     ["preview-port"],
   );
 });
+
+void test("合法关联和引用 ID 不会被 JSON 基线的继承属性遮蔽", () => {
+  const ids = ["constructor", "toString", "__proto__"];
+  const references: ReferenceDefinition[] = [
+    { id: "guide", target: { path: "docs/guide.md" } },
+    ...ids.map((id) => ({ id, target: { path: `${id}.txt` } })),
+  ];
+  const bindings: BindingDefinition[] = ids.map((id) => ({
+    id,
+    documents: ["guide"],
+    references: [id],
+  }));
+  const facts: ReferenceFact[] = [
+    { referenceId: "guide", value: "guide" },
+    ...ids.map((referenceId) => ({ referenceId, value: referenceId })),
+  ];
+  const emptyBaseline = JSON.parse('{"version":1,"bindings":{}}');
+  const initial = check({
+    references,
+    bindings,
+    facts,
+    baseline: emptyBaseline,
+    declarationCompleteness: "complete",
+  });
+
+  assert.deepEqual(
+    initial.bindings.map((result) => result.changes[0]?.kind),
+    ["binding-added", "binding-added", "binding-added"],
+  );
+  const created = accept(initial, emptyBaseline, ids, initial);
+  assert.equal(created.status, "accepted");
+  if (created.status !== "accepted") return;
+
+  const roundTripped = JSON.parse(JSON.stringify(created.baseline));
+  assert.ok(ids.every((id) => Object.hasOwn(roundTripped.bindings, id)));
+  const afterFirstAcceptance = check({
+    references,
+    bindings,
+    facts,
+    baseline: roundTripped,
+    declarationCompleteness: "complete",
+  });
+  assert.ok(
+    afterFirstAcceptance.bindings.every(
+      (result) => result.consistency === "consistent",
+    ),
+  );
+
+  const existingReferences: ReferenceDefinition[] = [
+    { id: "base", target: { path: "config/base.txt" } },
+  ];
+  const existingBinding: BindingDefinition = {
+    id: "existing",
+    documents: ["guide"],
+    references: ["base"],
+  };
+  const existingFacts: ReferenceFact[] = [
+    { referenceId: "guide", value: "guide" },
+    { referenceId: "base", value: "base" },
+  ];
+  const existing = check({
+    references: [...references.slice(0, 1), ...existingReferences],
+    bindings: [existingBinding],
+    facts: existingFacts,
+  });
+  const existingAccepted = accept(existing, undefined, ["existing"], existing);
+  assert.equal(existingAccepted.status, "accepted");
+  if (existingAccepted.status !== "accepted") return;
+
+  const existingBaseline = JSON.parse(
+    JSON.stringify(existingAccepted.baseline),
+  );
+  const expandedBinding = {
+    ...existingBinding,
+    references: ["base", ...ids],
+  };
+  const expanded = check({
+    references: [...references, ...existingReferences],
+    bindings: [expandedBinding],
+    facts: [
+      ...existingFacts,
+      ...ids.map((referenceId) => ({ referenceId, value: referenceId })),
+    ],
+    baseline: existingBaseline,
+  });
+  assert.deepEqual(
+    expanded.bindings[0]?.changes
+      .filter((change) => change.kind === "reference-added")
+      .map((change) => change.referenceId)
+      .sort(),
+    [...ids].sort(),
+  );
+
+  const expandedAccepted = accept(
+    expanded,
+    existingBaseline,
+    ["existing"],
+    expanded,
+  );
+  assert.equal(expandedAccepted.status, "accepted");
+  if (expandedAccepted.status !== "accepted") return;
+  const expandedRoundTrip = JSON.parse(
+    JSON.stringify(expandedAccepted.baseline),
+  );
+  const rechecked = check({
+    references: [...references, ...existingReferences],
+    bindings: [expandedBinding],
+    facts: [
+      ...existingFacts,
+      ...ids.map((referenceId) => ({ referenceId, value: referenceId })),
+    ],
+    baseline: expandedRoundTrip,
+  });
+  assert.equal(rechecked.bindings[0]?.consistency, "consistent");
+});
