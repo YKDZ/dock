@@ -1,0 +1,7 @@
+{
+  "extends": ["//"],
+  "tags": ["library"],
+  "tasks": {
+    "build": { "outputs": ["dist/**"] }
+  }
+}

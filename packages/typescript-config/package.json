@@ -1,0 +1,17 @@
+{
+  "name": "@dock/typescript-config",
+  "private": true,
+  "files": [
+    "base.json"
+  ],
+  "scripts": {
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write ."
+  },
+  "devDependencies": {
+    "oxfmt": "catalog:"
+  },
+  "engines": {
+    "node": "24"
+  }
+}
