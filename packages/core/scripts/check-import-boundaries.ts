@@ -4,9 +4,10 @@ import { fileURLToPath } from "node:url";
 const sourceDirectory = fileURLToPath(new URL("../src/", import.meta.url));
 const allowedImports: Record<string, readonly string[]> = {
   contracts: [],
-  check: ["contracts"],
+  check: ["contracts", "coverage"],
+  coverage: ["contracts"],
   accept: ["contracts"],
-  index: ["contracts", "accept", "check"],
+  index: ["contracts", "accept", "check", "coverage"],
 };
 const importPattern =
   /\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/gu;

@@ -10,6 +10,8 @@ import type {
   BindingBaseline,
   CheckInput,
   CheckReport,
+  CheckWithCoverageInput,
+  CheckWithCoverageResult,
   CurrentBinding,
   CurrentReferenceFact,
   EvidenceError,
@@ -17,6 +19,7 @@ import type {
   ReferenceDefinition,
   ReferenceFact,
 } from "./contracts.ts";
+import { summarizeCoverage } from "./coverage.ts";
 
 function canonical(value: JsonValue): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -324,5 +327,24 @@ export function check(input: CheckInput): CheckReport {
     declaration: { completeness, bindingIds: declaredBindingIds },
     scope,
     bindings: results,
+  };
+}
+
+/** 只在声明、目录与运行记录完整时，合并核对报告和覆盖统计。 */
+export function checkWithCoverage(
+  input: CheckWithCoverageInput,
+): CheckWithCoverageResult {
+  const { coverage, ...checkInput } = input;
+  const report = check(checkInput);
+  const summary = summarizeCoverage({
+    bindings: checkInput.bindings,
+    declarationCompleteness: checkInput.declarationCompleteness ?? "partial",
+    validationScope: report.scope,
+    coverage,
+  });
+
+  if ("errors" in summary) return summary;
+  return {
+    report: { ...report, coverage: summary.coverage },
   };
 }

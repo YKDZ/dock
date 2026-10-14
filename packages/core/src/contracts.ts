@@ -10,6 +10,92 @@ export type JsonValue =
 /** 当前文档位置用于解释结果，不参与事实比较。 */
 export type DocumentRange = { path: string; start: number; end: number };
 
+/** 纳入文档全集的当前文本长度，以 JavaScript UTF-16 代码单元计。 */
+export type CoverageDocument = { path: string; length: number };
+export type CoverageRangeDeclaration = {
+  bindingId: string;
+  referenceId: string;
+  range: DocumentRange;
+};
+export type ReferenceExecution = { bindingId: string; referenceId: string };
+export type CoverageIssue = {
+  code: string;
+  message: string;
+  path?: string;
+  bindingId?: string;
+  referenceId?: string;
+};
+
+/** 只包含采集器已经留下的资料；归集本身不会读取或执行任何目标。 */
+export type CoverageInput = {
+  documentInventory: {
+    complete: boolean;
+    source: string;
+    exclusions: string[];
+    documents: CoverageDocument[];
+  };
+  recordsComplete: boolean;
+  collectionErrors?: CoverageIssue[];
+  /** 来自同一次外部执行的实际测试次数；归集不会增加它。 */
+  actualExecutionCount: number;
+  declarations: CoverageRangeDeclaration[];
+  readHits: DocumentRange[];
+  referenceExecutions: ReferenceExecution[];
+  sources: {
+    declarations: string;
+    readHits: string;
+    bindingExecutions: string;
+  };
+};
+
+export type CoverageInterval = { start: number; end: number };
+export type CoverageRangeSet = {
+  path: string;
+  ranges: CoverageInterval[];
+};
+export type CoverageMeasure = {
+  coveredUnits: number;
+  totalUnits: number;
+  percentage: number;
+  coveredRanges: CoverageRangeSet[];
+  uncoveredRanges: CoverageRangeSet[];
+};
+export type CoverageReport = {
+  unit: "utf16-code-unit";
+  documentInventory: {
+    source: string;
+    paths: string[];
+    exclusions: string[];
+    totalUnits: number;
+  };
+  sources: CoverageInput["sources"];
+  validationScope: string[];
+  declaration: CoverageMeasure;
+  readHits: CoverageMeasure;
+  bindingExecutionHits: CoverageMeasure;
+  bindingExecution: {
+    hitBindingIds: string[];
+    unhitBindingIds: string[];
+  };
+  actualExecutionCount: number;
+  readHitCount: number;
+  limitations: string[];
+};
+export type CoverageSummaryInput = {
+  bindings: readonly BindingDefinition[];
+  declarationCompleteness: DeclarationCompleteness;
+  validationScope: readonly string[];
+  coverage: CoverageInput;
+};
+export type CoverageSummaryResult =
+  | { coverage: CoverageReport }
+  | { errors: CoverageIssue[] };
+export type CompleteCheckReport = CheckReport & { coverage: CoverageReport };
+export type CheckWithCoverageInput = CheckInput & { coverage: CoverageInput };
+export type CheckWithCoverageResult =
+  | { report: CompleteCheckReport }
+  | { errors: CoverageIssue[] };
+
 /** 定位目标及选择规则与当前取得的值分别比较。 */
 export type ReferenceDefinition = {
   id: string;

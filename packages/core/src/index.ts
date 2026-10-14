@@ -9,14 +9,29 @@ export type {
   BindingDefinition,
   CheckInput,
   CheckReport,
+  CheckWithCoverageInput,
+  CheckWithCoverageResult,
+  CompleteCheckReport,
   CurrentBinding,
   CurrentReferenceFact,
+  CoverageDocument,
+  CoverageInput,
+  CoverageInterval,
+  CoverageIssue,
+  CoverageMeasure,
+  CoverageRangeDeclaration,
+  CoverageRangeSet,
+  CoverageReport,
+  CoverageSummaryInput,
+  CoverageSummaryResult,
   DeclarationCompleteness,
   DocumentRange,
   EvidenceError,
   JsonValue,
   ReferenceDefinition,
+  ReferenceExecution,
   ReferenceFact,
 } from "./contracts.ts";
 export { accept } from "./accept.ts";
-export { check } from "./check.ts";
+export { check, checkWithCoverage } from "./check.ts";
+export { summarizeCoverage } from "./coverage.ts";
