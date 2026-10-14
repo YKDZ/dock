@@ -56,7 +56,11 @@ export function accept(
     structuredClone(baseline?.bindings ?? {}),
   );
   for (const item of selected) {
-    if ("errors" in item) continue;
+    if ("untracked" in item) {
+      delete nextBindings[item.bindingId];
+      continue;
+    }
+    if (!("current" in item)) continue;
     const references: Record<string, AcceptedReferenceFact> = Object.create(
       null,
     ) as Record<string, AcceptedReferenceFact>;
