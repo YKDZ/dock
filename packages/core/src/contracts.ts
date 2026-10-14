@@ -119,13 +119,28 @@ export type ReferenceFact =
   | { referenceId: string; value: JsonValue; range?: DocumentRange }
   | {
       referenceId: string;
+      collection: {
+        completeness: DeclarationCompleteness;
+        members: ReferenceMemberFact[];
+      };
+      range?: DocumentRange;
+    }
+  | {
+      referenceId: string;
       error: { code: string; message: string };
       range?: DocumentRange;
     };
 
+/** 成员由适配器提供稳定身份；结果值保留其内部数组顺序。 */
+export type ReferenceMemberFact =
+  | { id: string; value: JsonValue }
+  | { id: string; error: { code: string; message: string } };
+
 export type AcceptedReferenceFact = {
   definition: ReferenceDefinition;
   value: JsonValue;
+  /** 缺省表示一般 JSON 事实；成员集合用此标记区别同形标量值。 */
+  valueKind?: "member-collection";
 };
 export type BindingBaseline = {
   definition: BindingDefinition;
@@ -144,6 +159,14 @@ export type CurrentBinding = {
   references: Record<string, CurrentReferenceFact>;
 };
 
+export type CollectionMemberChange = {
+  memberId: string;
+  beforePresent: boolean;
+  afterPresent: boolean;
+  before?: JsonValue;
+  after?: JsonValue;
+};
+
 export type BindingChange =
   | { kind: "binding-added" }
   | { kind: "binding-removed"; before: BindingDefinition }
@@ -160,10 +183,25 @@ export type BindingChange =
       before: ReferenceDefinition;
       after: ReferenceDefinition;
     }
-  | { kind: "fact"; referenceId: string; before: JsonValue; after: JsonValue };
+  | {
+      kind: "fact";
+      referenceId: string;
+      before: JsonValue;
+      after: JsonValue;
+      beforeKind?: "member-collection";
+      afterKind?: "member-collection";
+    }
+  | {
+      kind: "fact";
+      referenceId: string;
+      memberChanges: CollectionMemberChange[];
+      beforeKind?: "member-collection";
+      afterKind?: "member-collection";
+    };
 
 export type EvidenceError = {
   referenceId?: string;
+  memberId?: string;
   code: string;
   message: string;
 };
@@ -219,6 +257,43 @@ export type AcceptanceOutcome =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null || typeof value === "string" || typeof value === "boolean")
+    return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (!isRecord(value)) return false;
+  return Object.values(value).every(isJsonValue);
+}
+
+function assertMemberCollectionValue(
+  value: unknown,
+  referenceId: string,
+): void {
+  if (!Array.isArray(value)) {
+    throw new TypeError(`引用 ${referenceId} 的成员集合基线必须是数组。`);
+  }
+  const memberIds = new Set<string>();
+  for (const member of value) {
+    if (
+      !isRecord(member) ||
+      Object.keys(member).length !== 2 ||
+      !Object.hasOwn(member, "id") ||
+      !Object.hasOwn(member, "value")
+    ) {
+      throw new TypeError(`引用 ${referenceId} 的成员集合基线记录无效。`);
+    }
+    assertId(member.id, `引用 ${referenceId} 的成员 ID`);
+    if (memberIds.has(member.id)) {
+      throw new TypeError(`引用 ${referenceId} 的成员集合基线 ID 重复。`);
+    }
+    if (!isJsonValue(member.value)) {
+      throw new TypeError(`引用 ${referenceId} 的成员集合基线值无效。`);
+    }
+    memberIds.add(member.id);
+  }
 }
 
 function assertId(value: unknown, context: string): asserts value is string {
@@ -298,9 +373,14 @@ export function assertBaseline(value: Baseline | undefined): void {
       assertReferenceDefinition(reference.definition);
       if (
         reference.definition.id !== referenceId ||
-        !Object.hasOwn(reference, "value")
+        !Object.hasOwn(reference, "value") ||
+        (reference.valueKind !== undefined &&
+          reference.valueKind !== "member-collection")
       ) {
         throw new TypeError(`引用 ${referenceId} 的审阅基线记录无效。`);
+      }
+      if (reference.valueKind === "member-collection") {
+        assertMemberCollectionValue(reference.value, referenceId);
       }
     }
   }

@@ -12,14 +12,41 @@ import type {
   CheckReport,
   CheckWithCoverageInput,
   CheckWithCoverageResult,
+  CollectionMemberChange,
   CurrentBinding,
   CurrentReferenceFact,
   EvidenceError,
   JsonValue,
   ReferenceDefinition,
   ReferenceFact,
+  ReferenceMemberFact,
 } from "./contracts.ts";
 import { summarizeCoverage } from "./coverage.ts";
+
+type CollectionSnapshot = {
+  definition: ReferenceDefinition;
+  members: ReferenceMemberFact[];
+  value?: JsonValue;
+  valueKind: "member-collection";
+  range?: NonNullable<CurrentReferenceFact["range"]>;
+};
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function isValueMember(
+  member: ReferenceMemberFact,
+): member is Extract<ReferenceMemberFact, { value: JsonValue }> {
+  return "value" in member;
+}
+
+function memberValue(members: readonly ReferenceMemberFact[]): JsonValue {
+  return [...members]
+    .filter(isValueMember)
+    .sort((left, right) => compareText(left.id, right.id))
+    .map((member) => ({ id: member.id, value: structuredClone(member.value) }));
+}
 
 function canonical(value: JsonValue): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value);
@@ -59,11 +86,16 @@ function collectCurrent(
     Array<{ definition?: ReferenceDefinition; error?: string }>
   >,
   facts: Map<string, ReferenceFact[]>,
-): { current?: CurrentBinding; errors: EvidenceError[] } {
+): {
+  current?: CurrentBinding;
+  errors: EvidenceError[];
+  collections: Map<string, CollectionSnapshot>;
+} {
   const references: Record<string, CurrentReferenceFact> = Object.create(
     null,
   ) as Record<string, CurrentReferenceFact>;
   const errors: EvidenceError[] = [];
+  const collections = new Map<string, CollectionSnapshot>();
   const ids = [
     ...new Set([...binding.documents, ...binding.references]),
   ].sort();
@@ -116,6 +148,96 @@ function collectCurrent(
       });
       continue;
     }
+
+    if ("collection" in fact) {
+      if (
+        !fact.collection ||
+        !Array.isArray(fact.collection.members) ||
+        (fact.collection.completeness !== "complete" &&
+          fact.collection.completeness !== "partial")
+      ) {
+        throw new TypeError("引用成员集合必须包含有效完整度和成员数组。");
+      }
+
+      const memberIds = new Set<string>();
+      let invalidIdentity = false;
+      for (const member of fact.collection.members) {
+        if (
+          !member ||
+          typeof member.id !== "string" ||
+          member.id.length === 0
+        ) {
+          errors.push({
+            referenceId,
+            code: "invalid-member-id",
+            message: "成员身份必须是非空文本。",
+          });
+          invalidIdentity = true;
+          continue;
+        }
+        if (memberIds.has(member.id)) {
+          errors.push({
+            referenceId,
+            memberId: member.id,
+            code: "ambiguous-member",
+            message: "成员集合包含重复身份，无法比较其成员变化。",
+          });
+          invalidIdentity = true;
+          continue;
+        }
+        memberIds.add(member.id);
+      }
+      if (invalidIdentity) continue;
+
+      if (fact.collection.completeness === "partial") {
+        errors.push({
+          referenceId,
+          code: "incomplete-member-discovery",
+          message: "成员发现不完整，不能据此推断成员增删。",
+        });
+      }
+      for (const member of fact.collection.members) {
+        if ("error" in member) {
+          errors.push({
+            referenceId,
+            memberId: member.id,
+            code: member.error.code,
+            message: member.error.message,
+          });
+        }
+      }
+
+      if (fact.collection.completeness === "complete") {
+        const snapshot: CollectionSnapshot = {
+          definition: structuredClone(definition),
+          members: structuredClone(fact.collection.members),
+          valueKind: "member-collection",
+          ...(fact.collection.members.every(isValueMember)
+            ? { value: memberValue(fact.collection.members) }
+            : {}),
+          ...(fact.range === undefined
+            ? {}
+            : { range: structuredClone(fact.range) }),
+        };
+        collections.set(referenceId, snapshot);
+      }
+
+      if (
+        fact.collection.completeness !== "complete" ||
+        fact.collection.members.some((member) => "error" in member)
+      ) {
+        continue;
+      }
+      const snapshot = collections.get(referenceId)!;
+      references[referenceId] = {
+        definition: snapshot.definition,
+        value: snapshot.value!,
+        valueKind: snapshot.valueKind,
+        ...(snapshot.range === undefined ? {} : { range: snapshot.range }),
+      };
+      continue;
+    }
+
     references[referenceId] = {
       definition: structuredClone(definition),
       value: structuredClone(fact.value),
@@ -125,11 +247,95 @@ function collectCurrent(
     };
   }
 
-  if (errors.length) return { errors };
+  if (errors.length) return { errors, collections };
   return {
     current: { definition: structuredClone(binding), references },
     errors,
+    collections,
   };
+}
+
+function collectionChangesFor(
+  collections: Map<string, CollectionSnapshot>,
+  previous: BindingBaseline | undefined,
+): BindingChange[] {
+  if (!previous) return [];
+  const changes: BindingChange[] = [];
+  for (const referenceId of [...collections.keys()].sort()) {
+    const before = previous.references[referenceId];
+    const after = collections.get(referenceId)!;
+    if (!before) continue;
+    const beforeMembers =
+      before.valueKind === "member-collection"
+        ? (before.value as { id: string; value: JsonValue }[])
+        : [];
+    const memberChanges = collectionMemberChangesFor(
+      beforeMembers,
+      after.members,
+    );
+    if (
+      memberChanges.length === 0 &&
+      before.valueKind === "member-collection"
+    ) {
+      continue;
+    }
+    changes.push({
+      kind: "fact",
+      referenceId,
+      memberChanges,
+      ...(before.valueKind === undefined
+        ? {}
+        : { beforeKind: before.valueKind }),
+      afterKind: after.valueKind,
+    });
+  }
+  return changes;
+}
+
+function collectionMemberChangesFor(
+  beforeMembers: readonly { id: string; value: JsonValue }[],
+  afterMembers: readonly ReferenceMemberFact[],
+): CollectionMemberChange[] {
+  const before = new Map(
+    beforeMembers.map((member) => [member.id, member.value]),
+  );
+  const afterIds = new Set(afterMembers.map((member) => member.id));
+  const after = new Map(
+    afterMembers
+      .filter(isValueMember)
+      .map((member) => [member.id, member.value]),
+  );
+  const memberIds = [...new Set([...before.keys(), ...afterIds])].sort(
+    compareText,
+  );
+  const changes: CollectionMemberChange[] = [];
+  for (const memberId of memberIds) {
+    const beforePresent = before.has(memberId);
+    const afterPresent = afterIds.has(memberId);
+    const beforeValue = before.get(memberId);
+    const afterValue = after.get(memberId);
+    if (beforePresent === afterPresent) {
+      if (
+        !beforePresent ||
+        afterValue === undefined ||
+        same(beforeValue!, afterValue)
+      ) {
+        continue;
+      }
+    }
+    changes.push({
+      memberId,
+      beforePresent,
+      afterPresent,
+      ...(beforeValue === undefined
+        ? {}
+        : { before: structuredClone(beforeValue) }),
+      ...(afterValue === undefined
+        ? {}
+        : { after: structuredClone(afterValue) }),
+    });
+  }
+  return changes;
 }
 
 function changesFor(
@@ -182,12 +388,40 @@ function changesFor(
         after: after.definition,
       });
     }
-    if (!same(before.value, after.value)) {
+    if (
+      before.valueKind === "member-collection" &&
+      after.valueKind === "member-collection"
+    ) {
+      const memberChanges = collectionMemberChangesFor(
+        before.value as { id: string; value: JsonValue }[],
+        after.value as { id: string; value: JsonValue }[],
+      );
+      if (memberChanges.length > 0) {
+        changes.push({
+          kind: "fact",
+          referenceId,
+          memberChanges,
+          beforeKind: "member-collection",
+          afterKind: "member-collection",
+        });
+      }
+      continue;
+    }
+    if (
+      before.valueKind !== after.valueKind ||
+      !same(before.value, after.value)
+    ) {
       changes.push({
         kind: "fact",
         referenceId,
         before: before.value,
         after: after.value,
+        ...(before.valueKind === undefined
+          ? {}
+          : { beforeKind: before.valueKind }),
+        ...(after.valueKind === undefined
+          ? {}
+          : { afterKind: after.valueKind }),
       });
     }
   }
@@ -309,7 +543,11 @@ export function check(input: CheckInput): CheckReport {
 
     const collected = collectCurrent(binding, definitions, facts);
     if (!collected.current) {
-      return { bindingId: binding.id, changes: [], errors: collected.errors };
+      return {
+        bindingId: binding.id,
+        changes: collectionChangesFor(collected.collections, previous),
+        errors: collected.errors,
+      };
     }
 
     const changes = changesFor(collected.current, previous);
