@@ -11,6 +11,7 @@ export type {
   CheckReport,
   CurrentBinding,
   CurrentReferenceFact,
+  DeclarationCompleteness,
   DocumentRange,
   EvidenceError,
   JsonValue,

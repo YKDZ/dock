@@ -4,7 +4,6 @@ import {
   assertReferenceDefinition,
 } from "./contracts.ts";
 import type {
-  Baseline,
   BindingAudit,
   BindingChange,
   BindingDefinition,
@@ -52,7 +51,10 @@ function same(left: JsonValue, right: JsonValue): boolean {
 
 function collectCurrent(
   binding: BindingDefinition,
-  definitions: Map<string, ReferenceDefinition>,
+  definitions: Map<
+    string,
+    Array<{ definition?: ReferenceDefinition; error?: string }>
+  >,
   facts: Map<string, ReferenceFact[]>,
 ): { current?: CurrentBinding; errors: EvidenceError[] } {
   const references: Record<string, CurrentReferenceFact> = Object.create(
@@ -64,7 +66,31 @@ function collectCurrent(
   ].sort();
 
   for (const referenceId of ids) {
-    const definition = definitions.get(referenceId)!;
+    const candidates = definitions.get(referenceId) ?? [];
+    if (candidates.length !== 1) {
+      errors.push({
+        referenceId,
+        code:
+          candidates.length === 0
+            ? "undeclared-reference"
+            : "ambiguous-reference-definition",
+        message:
+          candidates.length === 0
+            ? "关联引用了未声明的引用定义。"
+            : "同一引用有多份定义，无法确定目标。",
+      });
+      continue;
+    }
+    const candidate = candidates[0]!;
+    if (!candidate.definition) {
+      errors.push({
+        referenceId,
+        code: "invalid-reference-definition",
+        message: candidate.error ?? "引用定义无效。",
+      });
+      continue;
+    }
+    const definition = candidate.definition;
     const matches = facts.get(referenceId) ?? [];
     if (matches.length !== 1) {
       errors.push({
@@ -170,26 +196,61 @@ function changesFor(
 export function check(input: CheckInput): CheckReport {
   assertBaseline(input.baseline);
 
-  const definitions = new Map<string, ReferenceDefinition>();
+  const definitions = new Map<
+    string,
+    Array<{ definition?: ReferenceDefinition; error?: string }>
+  >();
   for (const definition of input.references) {
-    assertReferenceDefinition(definition);
-    if (definitions.has(definition.id))
-      throw new TypeError(`引用 ID 重复：${definition.id}`);
-    definitions.set(definition.id, definition);
+    if (
+      !definition ||
+      typeof definition.id !== "string" ||
+      definition.id.length === 0
+    ) {
+      throw new TypeError("引用 ID 必须是非空文本。");
+    }
+    const candidates = definitions.get(definition.id) ?? [];
+    try {
+      assertReferenceDefinition(definition);
+      candidates.push({ definition });
+    } catch (error) {
+      candidates.push({
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    definitions.set(definition.id, candidates);
   }
 
-  const bindingIds = new Set<string>();
+  const declaredBindings = new Map<string, BindingDefinition>();
   for (const binding of input.bindings) {
-    assertBindingDefinition(binding);
-    if (bindingIds.has(binding.id))
-      throw new TypeError(`关联 ID 重复：${binding.id}`);
-    bindingIds.add(binding.id);
-    for (const referenceId of [...binding.documents, ...binding.references]) {
-      if (!definitions.has(referenceId))
-        throw new TypeError(
-          `关联 ${binding.id} 引用了未声明的引用：${referenceId}`,
-        );
+    if (!binding || typeof binding.id !== "string" || binding.id.length === 0) {
+      throw new TypeError("关联 ID 必须是非空文本。");
     }
+    if (declaredBindings.has(binding.id))
+      throw new TypeError(`关联 ID 重复：${binding.id}`);
+    declaredBindings.set(binding.id, binding);
+  }
+
+  const completeness = input.declarationCompleteness ?? "partial";
+  if (completeness !== "complete" && completeness !== "partial")
+    throw new TypeError("关联声明完整性必须是 complete 或 partial。");
+  const declaredBindingIds = [...declaredBindings.keys()].sort();
+  const defaultScope =
+    completeness === "complete"
+      ? [
+          ...new Set([
+            ...declaredBindingIds,
+            ...Object.keys(input.baseline?.bindings ?? {}),
+          ]),
+        ].sort()
+      : declaredBindingIds;
+  const scope = [...(input.scope ?? defaultScope)];
+  const seenScopeIds = new Set<string>();
+  for (const bindingId of scope) {
+    if (typeof bindingId !== "string" || bindingId.length === 0)
+      throw new TypeError("检查范围中的关联 ID 必须是非空文本。");
+    if (seenScopeIds.has(bindingId))
+      throw new TypeError(`检查范围重复选择关联：${bindingId}`);
+    seenScopeIds.add(bindingId);
   }
 
   const facts = new Map<string, ReferenceFact[]>();
@@ -202,14 +263,52 @@ export function check(input: CheckInput): CheckReport {
     facts.set(fact.referenceId, matches);
   }
 
-  const results: BindingAudit[] = input.bindings.map((binding) => {
+  const results: BindingAudit[] = scope.map((bindingId) => {
+    const binding = declaredBindings.get(bindingId);
+    const previous = input.baseline?.bindings[bindingId];
+    if (!binding) {
+      if (completeness === "complete" && previous) {
+        return {
+          bindingId,
+          consistency: "inconsistent",
+          changes: [{ kind: "binding-removed", before: previous.definition }],
+          untracked: true,
+        };
+      }
+      return {
+        bindingId,
+        changes: [],
+        errors: [
+          {
+            code: previous ? "incomplete-declaration" : "not-declared",
+            message: previous
+              ? "局部声明不能证明该关联已取消跟踪。"
+              : "检查范围中的关联没有出现在本次声明中。",
+          },
+        ],
+      };
+    }
+
+    try {
+      assertBindingDefinition(binding);
+    } catch (error) {
+      return {
+        bindingId,
+        changes: [],
+        errors: [
+          {
+            code: "invalid-binding-definition",
+            message: error instanceof Error ? error.message : String(error),
+          },
+        ],
+      };
+    }
+
     const collected = collectCurrent(binding, definitions, facts);
     if (!collected.current) {
       return { bindingId: binding.id, changes: [], errors: collected.errors };
     }
 
-    const previous: Baseline["bindings"][string] | undefined =
-      input.baseline?.bindings[binding.id];
     const changes = changesFor(collected.current, previous);
     return {
       bindingId: binding.id,
@@ -219,5 +318,9 @@ export function check(input: CheckInput): CheckReport {
     };
   });
 
-  return { bindings: results };
+  return {
+    declaration: { completeness, bindingIds: declaredBindingIds },
+    scope,
+    bindings: results,
+  };
 }

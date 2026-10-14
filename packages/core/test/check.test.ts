@@ -125,24 +125,25 @@ void test("必需引用缺少、重复或返回错误时整条关联无法判定
 });
 
 void test("关联的两端都必须声明至少一个引用", () => {
-  assert.throws(
-    () =>
-      check({
-        references,
-        bindings: [{ ...bindings[0]!, documents: [] }],
-        facts,
-      }),
-    { name: "TypeError" },
+  const emptyDocuments = check({
+    references,
+    bindings: [{ ...bindings[0]!, documents: [] }],
+    facts,
+    scope: ["preview-port"],
+  });
+  assert.equal(
+    "errors" in emptyDocuments.bindings[0]!,
+    true,
+    "无效关联只应阻止本条关联产生业务结果。",
   );
-  assert.throws(
-    () =>
-      check({
-        references,
-        bindings: [{ ...bindings[0]!, references: [] }],
-        facts,
-      }),
-    { name: "TypeError" },
-  );
+
+  const emptyReferences = check({
+    references,
+    bindings: [{ ...bindings[0]!, references: [] }],
+    facts,
+    scope: ["preview-port"],
+  });
+  assert.equal("errors" in emptyReferences.bindings[0]!, true);
 });
 
 void test("当前位置变化不制造差异；事实、引用定义和关联关系分别留下解释", () => {
@@ -297,5 +298,271 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
         change.kind === "reference-added" &&
         change.referenceId === "preview-port-condition",
     ),
+  );
+});
+
+void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单选不连带确认共享引用", () => {
+  const scopedReferences: ReferenceDefinition[] = [
+    { id: "alpha-doc", target: { path: "docs/alpha.md" } },
+    { id: "beta-doc", target: { path: "docs/beta.md" } },
+    { id: "shared-setting", target: { path: "config/shared.txt" } },
+    { id: "alpha-target", target: { path: "config/alpha.txt" } },
+    { id: "beta-target", target: { path: "config/beta.txt" } },
+  ];
+  const scopedBindings: BindingDefinition[] = [
+    {
+      id: "alpha",
+      documents: ["alpha-doc"],
+      references: ["shared-setting", "alpha-target"],
+    },
+    {
+      id: "beta",
+      documents: ["beta-doc"],
+      references: ["shared-setting", "beta-target"],
+    },
+  ];
+  const originalFacts: ReferenceFact[] = [
+    { referenceId: "alpha-doc", value: "alpha claim" },
+    { referenceId: "beta-doc", value: "beta claim" },
+    { referenceId: "shared-setting", value: "v1" },
+    { referenceId: "alpha-target", value: "alpha target" },
+    { referenceId: "beta-target", value: "beta target" },
+  ];
+  const initial = check({
+    references: scopedReferences,
+    bindings: scopedBindings,
+    facts: originalFacts,
+    declarationCompleteness: "complete",
+    scope: ["alpha", "beta"],
+  });
+  const firstAcceptance = accept(initial, undefined, ["alpha", "beta"]);
+  assert.equal(firstAcceptance.status, "accepted");
+  if (firstAcceptance.status !== "accepted") return;
+
+  const changedFacts: ReferenceFact[] = [
+    {
+      referenceId: "alpha-doc",
+      error: { code: "missing-file", message: "alpha 文档暂时无法读取。" },
+    },
+    { referenceId: "beta-doc", value: "beta claim" },
+    { referenceId: "shared-setting", value: "v2" },
+    { referenceId: "alpha-target", value: "alpha target" },
+    { referenceId: "beta-target", value: "beta target" },
+  ];
+  const report = check({
+    references: scopedReferences,
+    bindings: scopedBindings,
+    facts: changedFacts,
+    baseline: firstAcceptance.baseline,
+    declarationCompleteness: "complete",
+    scope: ["alpha", "beta"],
+  });
+  assert.deepEqual(report.scope, ["alpha", "beta"]);
+  assert.deepEqual(
+    report.bindings.map((result) => result.bindingId),
+    ["alpha", "beta"],
+  );
+  const alpha = report.bindings[0]!;
+  assert.ok("errors" in alpha);
+  if ("errors" in alpha) assert.equal(alpha.errors[0]?.code, "missing-file");
+  const beta = report.bindings[1]!;
+  assert.equal(beta.consistency, "inconsistent");
+
+  const unchangedBaseline = JSON.stringify(firstAcceptance.baseline);
+  const rejectedBatch = accept(report, firstAcceptance.baseline, [
+    "alpha",
+    "beta",
+  ]);
+  assert.equal(rejectedBatch.status, "rejected");
+  assert.equal(JSON.stringify(firstAcceptance.baseline), unchangedBaseline);
+
+  const acceptedOnlyBeta = accept(report, firstAcceptance.baseline, ["beta"]);
+  assert.equal(acceptedOnlyBeta.status, "accepted");
+  if (acceptedOnlyBeta.status !== "accepted") return;
+  assert.equal(
+    acceptedOnlyBeta.baseline.bindings.alpha?.references["shared-setting"]
+      ?.value,
+    "v1",
+  );
+  assert.equal(
+    acceptedOnlyBeta.baseline.bindings.beta?.references["shared-setting"]
+      ?.value,
+    "v2",
+  );
+
+  const repairedFacts = changedFacts.map((fact) =>
+    fact.referenceId === "alpha-doc"
+      ? { referenceId: "alpha-doc", value: "alpha claim" }
+      : fact,
+  );
+  const afterRepair = check({
+    references: scopedReferences,
+    bindings: scopedBindings,
+    facts: repairedFacts,
+    baseline: acceptedOnlyBeta.baseline,
+    declarationCompleteness: "complete",
+    scope: ["alpha", "beta"],
+  });
+  assert.deepEqual(
+    afterRepair.bindings.map((result) =>
+      "errors" in result ? "error" : result.consistency,
+    ),
+    ["inconsistent", "consistent"],
+  );
+
+  const unrelatedFault = check({
+    references: scopedReferences,
+    bindings: [
+      { ...scopedBindings[0]!, references: ["undeclared-setting"] },
+      scopedBindings[1]!,
+    ],
+    facts: repairedFacts,
+    baseline: acceptedOnlyBeta.baseline,
+    declarationCompleteness: "partial",
+    scope: ["alpha", "beta"],
+  });
+  const alphaFault = unrelatedFault.bindings[0]!;
+  assert.ok("errors" in alphaFault);
+  if ("errors" in alphaFault)
+    assert.equal(alphaFault.errors[0]?.code, "undeclared-reference");
+  assert.equal(unrelatedFault.bindings[1]?.consistency, "consistent");
+  assert.equal(
+    accept(unrelatedFault, acceptedOnlyBeta.baseline, ["beta"]).status,
+    "accepted",
+  );
+
+  const sharedReferenceFailure = check({
+    references: scopedReferences,
+    bindings: scopedBindings,
+    facts: repairedFacts.map((fact) =>
+      fact.referenceId === "shared-setting"
+        ? {
+            referenceId: "shared-setting",
+            error: { code: "read-failed", message: "共享配置无法读取。" },
+          }
+        : fact,
+    ),
+    baseline: acceptedOnlyBeta.baseline,
+    declarationCompleteness: "complete",
+    scope: ["alpha", "beta"],
+  });
+  for (const result of sharedReferenceFailure.bindings) {
+    assert.ok("errors" in result);
+    if ("errors" in result)
+      assert.ok(
+        result.errors.some(
+          (error) =>
+            error.referenceId === "shared-setting" &&
+            error.code === "read-failed",
+        ),
+      );
+  }
+  assert.equal(
+    accept(sharedReferenceFailure, acceptedOnlyBeta.baseline, ["beta"]).status,
+    "rejected",
+  );
+});
+
+void test("局部声明不证明取消跟踪；完整声明删除基线无需读取旧目标", () => {
+  const initial = check({
+    references,
+    bindings: [
+      bindings[0]!,
+      {
+        id: "preview-port-copy",
+        documents: ["preview-port-doc"],
+        references: ["preview-port-file"],
+      },
+    ],
+    facts,
+    declarationCompleteness: "complete",
+    scope: ["preview-port", "preview-port-copy"],
+  });
+  const accepted = accept(initial, undefined, [
+    "preview-port",
+    "preview-port-copy",
+  ]);
+  assert.equal(accepted.status, "accepted");
+  if (accepted.status !== "accepted") return;
+
+  const partial = check({
+    references,
+    bindings: [bindings[0]!],
+    facts,
+    baseline: accepted.baseline,
+    declarationCompleteness: "partial",
+    scope: ["preview-port"],
+  });
+  assert.deepEqual(partial.declaration, {
+    completeness: "partial",
+    bindingIds: ["preview-port"],
+  });
+  assert.deepEqual(partial.scope, ["preview-port"]);
+  assert.deepEqual(
+    partial.bindings.map((result) => result.bindingId),
+    ["preview-port"],
+  );
+
+  const omittedFromPartial = check({
+    references,
+    bindings: [bindings[0]!],
+    facts,
+    baseline: accepted.baseline,
+    declarationCompleteness: "partial",
+    scope: ["preview-port-copy"],
+  });
+  const omission = omittedFromPartial.bindings[0]!;
+  assert.ok("errors" in omission);
+  if ("errors" in omission)
+    assert.equal(omission.errors[0]?.code, "incomplete-declaration");
+  assert.equal(
+    accept(omittedFromPartial, accepted.baseline, ["preview-port-copy"]).status,
+    "rejected",
+  );
+
+  const cancelled = check({
+    references: [],
+    bindings: [bindings[0]!],
+    facts: [],
+    baseline: accepted.baseline,
+    declarationCompleteness: "complete",
+    scope: ["preview-port-copy"],
+  });
+  const removal = cancelled.bindings[0]!;
+  assert.equal("untracked" in removal, true);
+  if ("untracked" in removal) {
+    assert.equal(removal.consistency, "inconsistent");
+    assert.equal(removal.changes[0]?.kind, "binding-removed");
+  }
+
+  const cancellationAcceptance = accept(cancelled, accepted.baseline, [
+    "preview-port-copy",
+  ]);
+  assert.equal(cancellationAcceptance.status, "accepted");
+  if (cancellationAcceptance.status !== "accepted") return;
+  assert.equal(
+    Object.hasOwn(
+      cancellationAcceptance.baseline.bindings,
+      "preview-port-copy",
+    ),
+    false,
+  );
+  assert.equal(
+    Object.hasOwn(cancellationAcceptance.baseline.bindings, "preview-port"),
+    true,
+  );
+
+  const afterCancellation = check({
+    references,
+    bindings: [bindings[0]!],
+    facts,
+    baseline: cancellationAcceptance.baseline,
+    declarationCompleteness: "complete",
+    scope: ["preview-port"],
+  });
+  assert.equal(afterCancellation.bindings[0]?.consistency, "consistent");
+  assert.deepEqual(
+    afterCancellation.bindings.map((result) => result.bindingId),
+    ["preview-port"],
   );
 });
