@@ -26,6 +26,9 @@ export type BindingDefinition = {
   note?: string;
 };
 
+/** 声明集合表示全部已登记关联，或仅表示本次提供的局部子集。 */
+export type DeclarationCompleteness = "complete" | "partial";
+
 export type ReferenceFact =
   | { referenceId: string; value: JsonValue; range?: DocumentRange }
   | {
@@ -57,6 +60,7 @@ export type CurrentBinding = {
 
 export type BindingChange =
   | { kind: "binding-added" }
+  | { kind: "binding-removed"; before: BindingDefinition }
   | {
       kind: "binding-definition";
       before: BindingDefinition;
@@ -73,7 +77,7 @@ export type BindingChange =
   | { kind: "fact"; referenceId: string; before: JsonValue; after: JsonValue };
 
 export type EvidenceError = {
-  referenceId: string;
+  referenceId?: string;
   code: string;
   message: string;
 };
@@ -88,6 +92,14 @@ export type BindingAudit =
       errors: EvidenceError[];
       consistency?: never;
       current?: never;
+      untracked?: never;
+    })
+  | (BindingAuditBase & {
+      untracked: true;
+      consistency: "inconsistent";
+      changes: [{ kind: "binding-removed"; before: BindingDefinition }];
+      current?: never;
+      errors?: never;
     });
 
 export type CheckInput = {
@@ -95,8 +107,17 @@ export type CheckInput = {
   bindings: BindingDefinition[];
   facts: ReferenceFact[];
   baseline?: Baseline;
+  declarationCompleteness?: DeclarationCompleteness;
+  scope?: readonly string[];
 };
-export type CheckReport = { bindings: BindingAudit[] };
+export type CheckReport = {
+  declaration: {
+    completeness: DeclarationCompleteness;
+    bindingIds: string[];
+  };
+  scope: string[];
+  bindings: BindingAudit[];
+};
 
 export type AcceptanceIssue = {
   bindingId?: string;
