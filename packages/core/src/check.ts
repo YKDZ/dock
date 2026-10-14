@@ -35,6 +35,13 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
+function ownEntry<T>(
+  record: Readonly<Record<string, T>>,
+  key: string,
+): T | undefined {
+  return Object.hasOwn(record, key) ? record[key] : undefined;
+}
+
 function isValueMember(
   member: ReferenceMemberFact,
 ): member is Extract<ReferenceMemberFact, { value: JsonValue }> {
@@ -262,7 +269,7 @@ function collectionChangesFor(
   if (!previous) return [];
   const changes: BindingChange[] = [];
   for (const referenceId of [...collections.keys()].sort()) {
-    const before = previous.references[referenceId];
+    const before = ownEntry(previous.references, referenceId);
     const after = collections.get(referenceId)!;
     if (!before) continue;
     const beforeMembers =
@@ -365,7 +372,7 @@ function changesFor(
     ]),
   ].sort();
   for (const referenceId of ids) {
-    const before = previous.references[referenceId];
+    const before = ownEntry(previous.references, referenceId);
     const after = current.references[referenceId];
     if (!before) {
       changes.push({ kind: "reference-added", referenceId });
@@ -502,7 +509,9 @@ export function check(input: CheckInput): CheckReport {
 
   const results: BindingAudit[] = scope.map((bindingId) => {
     const binding = declaredBindings.get(bindingId);
-    const previous = input.baseline?.bindings[bindingId];
+    const previous = input.baseline
+      ? ownEntry(input.baseline.bindings, bindingId)
+      : undefined;
     if (!binding) {
       if (completeness === "complete" && previous) {
         return {
