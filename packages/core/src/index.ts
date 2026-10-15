@@ -21,4 +21,5 @@ export type {
   ReferenceMemberFact,
 } from "./contracts.ts";
 export { check } from "./check.ts";
+export { isJsonValue } from "./contracts.ts";
 export { updateBaseline } from "./update-baseline.ts";
