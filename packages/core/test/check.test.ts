@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { accept, check } from "@dock/core";
+import { check, updateBaseline } from "@dock/core";
 import type {
   BindingDefinition,
+  CheckInput,
   ReferenceDefinition,
   ReferenceFact,
 } from "@dock/core";
@@ -29,8 +30,11 @@ const references: ReferenceDefinition[] = [
 const bindings: BindingDefinition[] = [
   {
     id: "preview-port",
-    documents: ["preview-port-doc"],
-    references: ["preview-port-exists", "preview-port-file"],
+    references: [
+      "preview-port-doc",
+      "preview-port-exists",
+      "preview-port-file",
+    ],
   },
 ];
 
@@ -44,125 +48,54 @@ const facts: ReferenceFact[] = [
   { referenceId: "preview-port-exists", value: true },
 ];
 
-void test("接受只确认仍与已审阅报告相同的当前状态", () => {
-  const first = check({ references, bindings, facts });
-  const created = accept(first, undefined, ["preview-port"], first);
-  assert.equal(created.status, "accepted");
-  if (created.status !== "accepted") return;
-
-  const baseline = created.baseline;
-  const reviewed = check({ references, bindings, facts, baseline });
-  assert.equal(reviewed.bindings[0]?.consistency, "consistent");
-
-  const changedDocument = check({
-    references,
-    bindings,
-    facts: facts.map((fact) =>
-      fact.referenceId === "preview-port-doc"
-        ? { ...fact, value: "- **Default:** `4174`" }
-        : fact,
-    ),
-    baseline,
-  });
-  const changedRightSource = check({
-    references,
-    bindings,
-    facts: facts.map((fact) =>
-      fact.referenceId === "preview-port-file"
-        ? { ...fact, value: "port=4174" }
-        : fact,
-    ),
-    baseline,
-  });
-  const changedBinding = check({
+void test("非空引用集合直接核对单个测试和无文档的测试组合", () => {
+  const reportInput: CheckInput = {
     references: [
-      ...references,
-      {
-        id: "preview-port-condition",
-        target: { path: "docs/config/preview-options.md" },
-        selection: { kind: "text", value: "If the port is occupied" },
-      },
+      { id: "first-test", target: { kind: "test", id: "first" } },
+      { id: "second-test", target: { kind: "test", id: "second" } },
     ],
     bindings: [
-      {
-        ...bindings[0]!,
-        documents: [...bindings[0]!.documents, "preview-port-condition"],
-      },
+      { id: "one-test", references: ["first-test"] },
+      { id: "two-tests", references: ["first-test", "second-test"] },
     ],
     facts: [
-      ...facts,
-      {
-        referenceId: "preview-port-condition",
-        value: "If the port is occupied",
-      },
+      { referenceId: "first-test", value: { status: "passed" } },
+      { referenceId: "second-test", value: { status: "passed" } },
     ],
-    baseline,
-  });
+  };
+  const report = check(reportInput);
 
-  for (const current of [changedDocument, changedRightSource, changedBinding]) {
-    const stale = accept(reviewed, baseline, ["preview-port"], current);
-    assert.equal(stale.status, "rejected");
-    if (stale.status === "rejected")
-      assert.ok(stale.errors.some((error) => error.code === "stale-review"));
-
-    const refreshed = accept(current, baseline, ["preview-port"], current);
-    assert.equal(refreshed.status, "accepted");
-  }
-
-  const freshError = check({
-    references,
-    bindings,
-    facts: [
-      ...facts.filter((fact) => fact.referenceId !== "preview-port-file"),
-      {
-        referenceId: "preview-port-file",
-        error: { code: "read-failed", message: "配置文件读取失败。" },
-      },
-    ],
-    baseline,
-  });
-  const rejectedEvidence = accept(
-    reviewed,
-    baseline,
-    ["preview-port"],
-    freshError,
+  assert.deepEqual(
+    report.bindings.map((binding) => binding.consistency),
+    ["inconsistent", "inconsistent"],
   );
-  assert.equal(rejectedEvidence.status, "rejected");
-  if (rejectedEvidence.status === "rejected")
-    assert.ok(
-      rejectedEvidence.errors.some((error) => error.code === "read-failed"),
-    );
+  assert.deepEqual(report.bindings[1]?.current?.definition.references, [
+    "first-test",
+    "second-test",
+  ]);
 });
 
-void test("核对后被替换的基线不能用于接受旧报告", () => {
-  const first = check({ references, bindings, facts });
-  const created = accept(first, undefined, ["preview-port"], first);
-  assert.equal(created.status, "accepted");
-  if (created.status !== "accepted") return;
-
-  const baseline = created.baseline;
-  const reviewed = check({ references, bindings, facts, baseline });
-  const replacement = structuredClone(baseline);
-  replacement.bindings["preview-port"]!.references["preview-port-file"]!.value =
-    "port=4000";
-  const current = check({
-    references,
-    bindings,
-    facts,
-    baseline: replacement,
-  });
-  const rejected = accept(reviewed, replacement, ["preview-port"], current);
-  assert.equal(rejected.status, "rejected");
-  if (rejected.status === "rejected")
-    assert.ok(
-      rejected.errors.some(
-        (error) => error.code === "reviewed-baseline-changed",
-      ),
-    );
+void test("空集合、重复身份及未声明的必需引用不能取得关联结果", () => {
+  for (const [ids, code] of [
+    [[], "invalid-binding-definition"],
+    [["preview-port-file", "preview-port-file"], "invalid-binding-definition"],
+    [["unknown"], "undeclared-reference"],
+  ] as const) {
+    const input: CheckInput = {
+      references,
+      bindings: [{ id: "invalid", references: [...ids] }],
+      facts,
+    };
+    const result = check(input).bindings[0]!;
+    assert.equal(result.consistency, undefined);
+    assert.equal(result.errors?.[0]?.code, code);
+    assert.equal(updateBaseline(input).status, "rejected");
+  }
 });
 
-void test("无基线的有效关联报告新增差异，显式接受后相同事实一致", () => {
-  const initial = check({ references, bindings, facts });
+void test("无基线的有效关联报告新增差异，显式更新基线后相同事实一致", () => {
+  const initialInput: CheckInput = { references, bindings, facts };
+  const initial = check(initialInput);
   const first = initial.bindings[0]!;
 
   assert.equal(first.consistency, "inconsistent");
@@ -173,32 +106,33 @@ void test("无基线的有效关联报告新增差异，显式接受后相同事
     end: 462,
   });
 
-  const accepted = accept(initial, undefined, ["preview-port"], initial);
-  assert.equal(accepted.status, "accepted");
-  if (accepted.status !== "accepted") return;
+  const updated = updateBaseline({ ...initialInput, scope: ["preview-port"] });
+  assert.equal(updated.status, "updated");
+  if (updated.status !== "updated") return;
 
   const unchanged = check({
     references,
     bindings,
     facts,
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   assert.equal(unchanged.bindings[0]?.consistency, "consistent");
   assert.deepEqual(unchanged.bindings[0]?.changes, []);
 });
 
-void test("必需引用缺少、重复或返回错误时整条关联无法判定或接受", () => {
-  const initial = check({ references, bindings, facts });
-  const accepted = accept(initial, undefined, ["preview-port"], initial);
-  assert.equal(accepted.status, "accepted");
-  if (accepted.status !== "accepted") return;
+void test("必需引用缺少、重复或返回错误时整条关联无法判定或更新基线", () => {
+  const initialInput: CheckInput = { references, bindings, facts };
+  const updated = updateBaseline({ ...initialInput, scope: ["preview-port"] });
+  assert.equal(updated.status, "updated");
+  if (updated.status !== "updated") return;
 
-  const missing = check({
+  const missingInput: CheckInput = {
     references,
     bindings,
     facts: facts.filter((fact) => fact.referenceId !== "preview-port-file"),
-    baseline: accepted.baseline,
-  });
+    baseline: updated.baseline,
+  };
+  const missing = check(missingInput);
   const missingResult = missing.bindings[0]!;
   if (!("errors" in missingResult)) throw new Error("缺失引用应产生核对错误。");
   assert.deepEqual(
@@ -206,21 +140,20 @@ void test("必需引用缺少、重复或返回错误时整条关联无法判定
     [["preview-port-file", "missing-evidence"]],
   );
 
-  const baselineBeforeRejection = JSON.stringify(accepted.baseline);
-  const rejected = accept(
-    missing,
-    accepted.baseline,
-    ["preview-port"],
-    missing,
-  );
+  const baselineBeforeRejection = JSON.stringify(updated.baseline);
+  const rejected = updateBaseline({
+    ...missingInput,
+    baseline: updated.baseline,
+    scope: ["preview-port"],
+  });
   assert.equal(rejected.status, "rejected");
-  assert.equal(JSON.stringify(accepted.baseline), baselineBeforeRejection);
+  assert.equal(JSON.stringify(updated.baseline), baselineBeforeRejection);
 
   const duplicate = check({
     references,
     bindings,
     facts: [...facts, facts[1]!],
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   const duplicateResult = duplicate.bindings[0]!;
   if (!("errors" in duplicateResult))
@@ -238,7 +171,7 @@ void test("必需引用缺少、重复或返回错误时整条关联无法判定
         error: { code: "missing-file", message: "配置文件无法读取。" },
       },
     ],
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   const failedResult = failed.bindings[0]!;
   if (!("errors" in failedResult))
@@ -246,29 +179,7 @@ void test("必需引用缺少、重复或返回错误时整条关联无法判定
   assert.equal(failedResult.errors[0]?.code, "missing-file");
 });
 
-void test("关联的两端都必须声明至少一个引用", () => {
-  const emptyDocuments = check({
-    references,
-    bindings: [{ ...bindings[0]!, documents: [] }],
-    facts,
-    scope: ["preview-port"],
-  });
-  assert.equal(
-    "errors" in emptyDocuments.bindings[0]!,
-    true,
-    "无效关联只应阻止本条关联产生业务结果。",
-  );
-
-  const emptyReferences = check({
-    references,
-    bindings: [{ ...bindings[0]!, references: [] }],
-    facts,
-    scope: ["preview-port"],
-  });
-  assert.equal("errors" in emptyReferences.bindings[0]!, true);
-});
-
-void test("完整成员清单按稳定 ID 比较，接受增删后可再次核对", () => {
+void test("完整成员清单按稳定 ID 比较，更新基线增删后可再次核对", () => {
   const groupReferences: ReferenceDefinition[] = [
     { id: "preview-doc", target: { path: "docs/preview.md" } },
     {
@@ -284,8 +195,7 @@ void test("完整成员清单按稳定 ID 比较，接受增删后可再次核�
   const groupBindings: BindingDefinition[] = [
     {
       id: "preview-policy",
-      documents: ["preview-doc"],
-      references: ["preview-group"],
+      references: ["preview-doc", "preview-group"],
     },
   ];
   const initialFacts: ReferenceFact[] = [
@@ -304,14 +214,17 @@ void test("完整成员清单按稳定 ID 比较，接受增删后可再次核�
       },
     },
   ];
-  const initial = check({
+  const initialInput: CheckInput = {
     references: groupReferences,
     bindings: groupBindings,
     facts: initialFacts,
+  };
+  const created = updateBaseline({
+    ...initialInput,
+    scope: ["preview-policy"],
   });
-  const created = accept(initial, undefined, ["preview-policy"], initial);
-  assert.equal(created.status, "accepted");
-  if (created.status !== "accepted") return;
+  assert.equal(created.status, "updated");
+  if (created.status !== "updated") return;
 
   const baseline = created.baseline;
   const reordered = check({
@@ -357,12 +270,13 @@ void test("完整成员清单按稳定 ID 比较，接受增删后可再次核�
       },
     },
   ];
-  const changed = check({
+  const changedInput: CheckInput = {
     references: groupReferences,
     bindings: groupBindings,
     facts: changedFacts,
     baseline,
-  });
+  };
+  const changed = check(changedInput);
   const changedBinding = changed.bindings[0]!;
   assert.deepEqual(
     changedBinding.changes.map((change) => change.kind),
@@ -382,17 +296,21 @@ void test("完整成员清单按稳定 ID 比较，接受增删后可再次核�
     beforeKind: "member-collection",
     afterKind: "member-collection",
   });
-  const accepted = accept(changed, baseline, ["preview-policy"], changed);
-  assert.equal(accepted.status, "accepted");
-  if (accepted.status !== "accepted") return;
+  const updated = updateBaseline({
+    ...changedInput,
+    baseline: baseline,
+    scope: ["preview-policy"],
+  });
+  assert.equal(updated.status, "updated");
+  if (updated.status !== "updated") return;
 
-  const afterAccept = check({
+  const afterUpdate = check({
     references: groupReferences,
     bindings: groupBindings,
     facts: changedFacts,
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
-  assert.equal(afterAccept.bindings[0]?.consistency, "consistent");
+  assert.equal(afterUpdate.bindings[0]?.consistency, "consistent");
 
   const removedFacts: ReferenceFact[] = [
     initialFacts[0]!,
@@ -410,12 +328,13 @@ void test("完整成员清单按稳定 ID 比较，接受增删后可再次核�
       },
     },
   ];
-  const removed = check({
+  const removedInput: CheckInput = {
     references: groupReferences,
     bindings: groupBindings,
     facts: removedFacts,
-    baseline: accepted.baseline,
-  });
+    baseline: updated.baseline,
+  };
+  const removed = check(removedInput);
   assert.deepEqual(removed.bindings[0]?.changes[0], {
     kind: "fact",
     referenceId: "preview-group",
@@ -430,24 +349,23 @@ void test("完整成员清单按稳定 ID 比较，接受增删后可再次核�
     beforeKind: "member-collection",
     afterKind: "member-collection",
   });
-  const acceptedRemoval = accept(
-    removed,
-    accepted.baseline,
-    ["preview-policy"],
-    removed,
-  );
-  assert.equal(acceptedRemoval.status, "accepted");
-  if (acceptedRemoval.status !== "accepted") return;
+  const updatedRemoval = updateBaseline({
+    ...removedInput,
+    baseline: updated.baseline,
+    scope: ["preview-policy"],
+  });
+  assert.equal(updatedRemoval.status, "updated");
+  if (updatedRemoval.status !== "updated") return;
   const restored = check({
     references: groupReferences,
     bindings: groupBindings,
     facts: removedFacts,
-    baseline: acceptedRemoval.baseline,
+    baseline: updatedRemoval.baseline,
   });
   assert.equal(restored.bindings[0]?.consistency, "consistent");
 });
 
-void test("partial 成员发现不推断增删，完整发现的失败成员仍可显示差异但不能接受", () => {
+void test("partial 成员发现不推断增删，完整发现的失败成员仍可显示差异但不能更新基线", () => {
   const groupReferences: ReferenceDefinition[] = [
     { id: "preview-doc", target: { path: "docs/preview.md" } },
     { id: "preview-group", target: { kind: "test-group", path: ["preview"] } },
@@ -455,8 +373,7 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
   const groupBindings: BindingDefinition[] = [
     {
       id: "preview-policy",
-      documents: ["preview-doc"],
-      references: ["preview-group"],
+      references: ["preview-doc", "preview-group"],
     },
   ];
   const initial: ReferenceFact[] = [
@@ -472,16 +389,19 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
       },
     },
   ];
-  const reviewed = check({
+  const reviewedInput: CheckInput = {
     references: groupReferences,
     bindings: groupBindings,
     facts: initial,
+  };
+  const created = updateBaseline({
+    ...reviewedInput,
+    scope: ["preview-policy"],
   });
-  const created = accept(reviewed, undefined, ["preview-policy"], reviewed);
-  assert.equal(created.status, "accepted");
-  if (created.status !== "accepted") return;
+  assert.equal(created.status, "updated");
+  if (created.status !== "updated") return;
 
-  const partial = check({
+  const partialInput: CheckInput = {
     references: groupReferences,
     bindings: groupBindings,
     facts: [
@@ -495,7 +415,8 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
       },
     ],
     baseline: created.baseline,
-  });
+  };
+  const partial = check(partialInput);
   const partialResult = partial.bindings[0]!;
   assert.ok("errors" in partialResult);
   if ("errors" in partialResult) {
@@ -507,7 +428,11 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
     );
   }
   assert.equal(
-    accept(partial, created.baseline, ["preview-policy"], partial).status,
+    updateBaseline({
+      ...partialInput,
+      baseline: created.baseline,
+      scope: ["preview-policy"],
+    }).status,
     "rejected",
   );
 
@@ -538,7 +463,7 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
     );
   }
 
-  const failedMember = check({
+  const failedMemberInput: CheckInput = {
     references: groupReferences,
     bindings: groupBindings,
     facts: [
@@ -565,7 +490,8 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
       },
     ],
     baseline: created.baseline,
-  });
+  };
+  const failedMember = check(failedMemberInput);
   const failedResult = failedMember.bindings[0]!;
   assert.ok("errors" in failedResult);
   if ("errors" in failedResult) {
@@ -591,8 +517,11 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
     );
   }
   assert.equal(
-    accept(failedMember, created.baseline, ["preview-policy"], failedMember)
-      .status,
+    updateBaseline({
+      ...failedMemberInput,
+      baseline: created.baseline,
+      scope: ["preview-policy"],
+    }).status,
     "rejected",
   );
 
@@ -650,8 +579,7 @@ void test("成员内部数组顺序和 scalar 到成员集合的类型变化都�
   const groupBindings: BindingDefinition[] = [
     {
       id: "preview-policy",
-      documents: ["preview-doc"],
-      references: ["preview-group"],
+      references: ["preview-doc", "preview-group"],
     },
   ];
   const scalarFacts: ReferenceFact[] = [
@@ -661,14 +589,14 @@ void test("成员内部数组顺序和 scalar 到成员集合的类型变化都�
       value: [{ id: "test/keeps-query", value: ["beforeEach", "query"] }],
     },
   ];
-  const scalar = check({
+  const scalarInput: CheckInput = {
     references: groupReferences,
     bindings: groupBindings,
     facts: scalarFacts,
-  });
-  const created = accept(scalar, undefined, ["preview-policy"], scalar);
-  assert.equal(created.status, "accepted");
-  if (created.status !== "accepted") return;
+  };
+  const created = updateBaseline({ ...scalarInput, scope: ["preview-policy"] });
+  assert.equal(created.status, "updated");
+  if (created.status !== "updated") return;
 
   const asCollection = check({
     references: groupReferences,
@@ -691,20 +619,7 @@ void test("成员内部数组顺序和 scalar 到成员集合的类型变化都�
     assert.equal(typeChange.beforeKind, undefined);
     assert.equal(typeChange.afterKind, "member-collection");
   }
-  const staleReview = accept(
-    scalar,
-    created.baseline,
-    ["preview-policy"],
-    asCollection,
-  );
-  assert.equal(staleReview.status, "rejected");
-  if (staleReview.status === "rejected") {
-    assert.ok(
-      staleReview.errors.some((error) => error.code === "stale-review"),
-    );
-  }
-
-  const collection = check({
+  const collectionInput: CheckInput = {
     references: groupReferences,
     bindings: groupBindings,
     facts: [
@@ -717,15 +632,13 @@ void test("成员内部数组顺序和 scalar 到成员集合的类型变化都�
         },
       },
     ],
+  };
+  const updatedCollection = updateBaseline({
+    ...collectionInput,
+    scope: ["preview-policy"],
   });
-  const acceptedCollection = accept(
-    collection,
-    undefined,
-    ["preview-policy"],
-    collection,
-  );
-  assert.equal(acceptedCollection.status, "accepted");
-  if (acceptedCollection.status !== "accepted") return;
+  assert.equal(updatedCollection.status, "updated");
+  if (updatedCollection.status !== "updated") return;
 
   const orderedChange = check({
     references: groupReferences,
@@ -740,16 +653,16 @@ void test("成员内部数组顺序和 scalar 到成员集合的类型变化都�
         },
       },
     ],
-    baseline: acceptedCollection.baseline,
+    baseline: updatedCollection.baseline,
   });
   assert.equal(orderedChange.bindings[0]?.changes[0]?.kind, "fact");
 });
 
 void test("当前位置变化不制造差异；事实、引用定义和关联关系分别留下解释", () => {
-  const first = check({ references, bindings, facts });
-  const accepted = accept(first, undefined, ["preview-port"], first);
-  assert.equal(accepted.status, "accepted");
-  if (accepted.status !== "accepted") return;
+  const firstInput: CheckInput = { references, bindings, facts };
+  const updated = updateBaseline({ ...firstInput, scope: ["preview-port"] });
+  assert.equal(updated.status, "updated");
+  if (updated.status !== "updated") return;
 
   const moved = check({
     references: references.map((reference) => ({
@@ -769,7 +682,7 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
           }
         : fact,
     ),
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   assert.equal(moved.bindings[0]?.consistency, "consistent");
   if ("current" in moved.bindings[0]!) {
@@ -787,7 +700,7 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
         ? { ...fact, value: "- **Default:** `4174`" }
         : fact,
     ),
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   assert.deepEqual(changedFact.bindings[0]?.changes, [
     {
@@ -798,7 +711,7 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
     },
   ]);
 
-  const changedRightFact = check({
+  const changedFileFact = check({
     references,
     bindings,
     facts: facts.map((fact) =>
@@ -806,16 +719,16 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
         ? { ...fact, value: "port=4174" }
         : fact,
     ),
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   assert.deepEqual(
-    changedRightFact.bindings[0]?.changes.map((change) =>
+    changedFileFact.bindings[0]?.changes.map((change) =>
       change.kind === "fact" ? change.referenceId : change.kind,
     ),
     ["preview-port-file"],
   );
 
-  const bothEndsChanged = check({
+  const multipleFactsChanged = check({
     references,
     bindings,
     facts: facts.map((fact) => {
@@ -825,10 +738,10 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
         return { ...fact, value: "port=4174" };
       return fact;
     }),
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   assert.deepEqual(
-    bothEndsChanged.bindings[0]?.changes.map((change) =>
+    multipleFactsChanged.bindings[0]?.changes.map((change) =>
       change.kind === "fact" ? change.referenceId : change.kind,
     ),
     ["preview-port-doc", "preview-port-file"],
@@ -838,7 +751,7 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
     references,
     bindings,
     facts,
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   assert.equal(reverted.bindings[0]?.consistency, "consistent");
   assert.deepEqual(reverted.bindings[0]?.changes, []);
@@ -851,7 +764,7 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
     ),
     bindings,
     facts,
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   assert.equal(changedDefinition.bindings[0]?.consistency, "inconsistent");
   assert.ok(
@@ -874,7 +787,7 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
     bindings: [
       {
         ...bindings[0]!,
-        documents: ["preview-port-doc", "preview-port-condition"],
+        references: [...bindings[0]!.references, "preview-port-condition"],
       },
     ],
     facts: [
@@ -884,7 +797,7 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
         value: "If the port is occupied",
       },
     ],
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
   });
   assert.ok(
     withCondition.bindings[0]?.changes.some(
@@ -900,7 +813,7 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
   );
 });
 
-void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单选不连带确认共享引用", () => {
+void test("局部错误只阻止依赖它的关联，批次更新基线全拒绝且单选不连带确认共享引用", () => {
   const scopedReferences: ReferenceDefinition[] = [
     { id: "alpha-doc", target: { path: "docs/alpha.md" } },
     { id: "beta-doc", target: { path: "docs/beta.md" } },
@@ -911,13 +824,11 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
   const scopedBindings: BindingDefinition[] = [
     {
       id: "alpha",
-      documents: ["alpha-doc"],
-      references: ["shared-setting", "alpha-target"],
+      references: ["alpha-doc", "shared-setting", "alpha-target"],
     },
     {
       id: "beta",
-      documents: ["beta-doc"],
-      references: ["shared-setting", "beta-target"],
+      references: ["beta-doc", "shared-setting", "beta-target"],
     },
   ];
   const originalFacts: ReferenceFact[] = [
@@ -927,21 +838,19 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
     { referenceId: "alpha-target", value: "alpha target" },
     { referenceId: "beta-target", value: "beta target" },
   ];
-  const initial = check({
+  const initialInput: CheckInput = {
     references: scopedReferences,
     bindings: scopedBindings,
     facts: originalFacts,
     declarationCompleteness: "complete",
     scope: ["alpha", "beta"],
+  };
+  const firstUpdate = updateBaseline({
+    ...initialInput,
+    scope: ["alpha", "beta"],
   });
-  const firstAcceptance = accept(
-    initial,
-    undefined,
-    ["alpha", "beta"],
-    initial,
-  );
-  assert.equal(firstAcceptance.status, "accepted");
-  if (firstAcceptance.status !== "accepted") return;
+  assert.equal(firstUpdate.status, "updated");
+  if (firstUpdate.status !== "updated") return;
 
   const changedFacts: ReferenceFact[] = [
     {
@@ -953,14 +862,15 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
     { referenceId: "alpha-target", value: "alpha target" },
     { referenceId: "beta-target", value: "beta target" },
   ];
-  const report = check({
+  const reportInput: CheckInput = {
     references: scopedReferences,
     bindings: scopedBindings,
     facts: changedFacts,
-    baseline: firstAcceptance.baseline,
+    baseline: firstUpdate.baseline,
     declarationCompleteness: "complete",
     scope: ["alpha", "beta"],
-  });
+  };
+  const report = check(reportInput);
   assert.deepEqual(report.scope, ["alpha", "beta"]);
   assert.deepEqual(
     report.bindings.map((result) => result.bindingId),
@@ -972,32 +882,29 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
   const beta = report.bindings[1]!;
   assert.equal(beta.consistency, "inconsistent");
 
-  const unchangedBaseline = JSON.stringify(firstAcceptance.baseline);
-  const rejectedBatch = accept(
-    report,
-    firstAcceptance.baseline,
-    ["alpha", "beta"],
-    report,
-  );
+  const unchangedBaseline = JSON.stringify(firstUpdate.baseline);
+  const rejectedBatch = updateBaseline({
+    ...reportInput,
+    baseline: firstUpdate.baseline,
+    scope: ["alpha", "beta"],
+  });
   assert.equal(rejectedBatch.status, "rejected");
-  assert.equal(JSON.stringify(firstAcceptance.baseline), unchangedBaseline);
+  assert.equal(JSON.stringify(firstUpdate.baseline), unchangedBaseline);
 
-  const acceptedOnlyBeta = accept(
-    report,
-    firstAcceptance.baseline,
-    ["beta"],
-    report,
-  );
-  assert.equal(acceptedOnlyBeta.status, "accepted");
-  if (acceptedOnlyBeta.status !== "accepted") return;
+  const updatedOnlyBeta = updateBaseline({
+    ...reportInput,
+    baseline: firstUpdate.baseline,
+    scope: ["beta"],
+  });
+  assert.equal(updatedOnlyBeta.status, "updated");
+  if (updatedOnlyBeta.status !== "updated") return;
   assert.equal(
-    acceptedOnlyBeta.baseline.bindings.alpha?.references["shared-setting"]
+    updatedOnlyBeta.baseline.bindings.alpha?.references["shared-setting"]
       ?.value,
     "v1",
   );
   assert.equal(
-    acceptedOnlyBeta.baseline.bindings.beta?.references["shared-setting"]
-      ?.value,
+    updatedOnlyBeta.baseline.bindings.beta?.references["shared-setting"]?.value,
     "v2",
   );
 
@@ -1010,7 +917,7 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
     references: scopedReferences,
     bindings: scopedBindings,
     facts: repairedFacts,
-    baseline: acceptedOnlyBeta.baseline,
+    baseline: updatedOnlyBeta.baseline,
     declarationCompleteness: "complete",
     scope: ["alpha", "beta"],
   });
@@ -1021,29 +928,33 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
     ["inconsistent", "consistent"],
   );
 
-  const unrelatedFault = check({
+  const unrelatedFaultInput: CheckInput = {
     references: scopedReferences,
     bindings: [
       { ...scopedBindings[0]!, references: ["undeclared-setting"] },
       scopedBindings[1]!,
     ],
     facts: repairedFacts,
-    baseline: acceptedOnlyBeta.baseline,
+    baseline: updatedOnlyBeta.baseline,
     declarationCompleteness: "partial",
     scope: ["alpha", "beta"],
-  });
+  };
+  const unrelatedFault = check(unrelatedFaultInput);
   const alphaFault = unrelatedFault.bindings[0]!;
   assert.ok("errors" in alphaFault);
   if ("errors" in alphaFault)
     assert.equal(alphaFault.errors[0]?.code, "undeclared-reference");
   assert.equal(unrelatedFault.bindings[1]?.consistency, "consistent");
   assert.equal(
-    accept(unrelatedFault, acceptedOnlyBeta.baseline, ["beta"], unrelatedFault)
-      .status,
-    "accepted",
+    updateBaseline({
+      ...unrelatedFaultInput,
+      baseline: updatedOnlyBeta.baseline,
+      scope: ["beta"],
+    }).status,
+    "updated",
   );
 
-  const sharedReferenceFailure = check({
+  const sharedReferenceFailureInput: CheckInput = {
     references: scopedReferences,
     bindings: scopedBindings,
     facts: repairedFacts.map((fact) =>
@@ -1054,10 +965,11 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
           }
         : fact,
     ),
-    baseline: acceptedOnlyBeta.baseline,
+    baseline: updatedOnlyBeta.baseline,
     declarationCompleteness: "complete",
     scope: ["alpha", "beta"],
-  });
+  };
+  const sharedReferenceFailure = check(sharedReferenceFailureInput);
   for (const result of sharedReferenceFailure.bindings) {
     assert.ok("errors" in result);
     if ("errors" in result)
@@ -1070,48 +982,45 @@ void test("局部错误只阻止依赖它的关联，批次接受全拒绝且单
       );
   }
   assert.equal(
-    accept(
-      sharedReferenceFailure,
-      acceptedOnlyBeta.baseline,
-      ["beta"],
-      sharedReferenceFailure,
-    ).status,
+    updateBaseline({
+      ...sharedReferenceFailureInput,
+      baseline: updatedOnlyBeta.baseline,
+      scope: ["beta"],
+    }).status,
     "rejected",
   );
 });
 
 void test("局部声明不证明取消跟踪；完整声明删除基线无需读取旧目标", () => {
-  const initial = check({
+  const initialInput: CheckInput = {
     references,
     bindings: [
       bindings[0]!,
       {
         id: "preview-port-copy",
-        documents: ["preview-port-doc"],
-        references: ["preview-port-file"],
+        references: ["preview-port-doc", "preview-port-file"],
       },
     ],
     facts,
     declarationCompleteness: "complete",
     scope: ["preview-port", "preview-port-copy"],
+  };
+  const updated = updateBaseline({
+    ...initialInput,
+    scope: ["preview-port", "preview-port-copy"],
   });
-  const accepted = accept(
-    initial,
-    undefined,
-    ["preview-port", "preview-port-copy"],
-    initial,
-  );
-  assert.equal(accepted.status, "accepted");
-  if (accepted.status !== "accepted") return;
+  assert.equal(updated.status, "updated");
+  if (updated.status !== "updated") return;
 
-  const partial = check({
+  const partialInput: CheckInput = {
     references,
     bindings: [bindings[0]!],
     facts,
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
     declarationCompleteness: "partial",
     scope: ["preview-port"],
-  });
+  };
+  const partial = check(partialInput);
   assert.deepEqual(partial.declaration, {
     completeness: "partial",
     bindingIds: ["preview-port"],
@@ -1122,36 +1031,37 @@ void test("局部声明不证明取消跟踪；完整声明删除基线无需读
     ["preview-port"],
   );
 
-  const omittedFromPartial = check({
+  const omittedFromPartialInput: CheckInput = {
     references,
     bindings: [bindings[0]!],
     facts,
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
     declarationCompleteness: "partial",
     scope: ["preview-port-copy"],
-  });
+  };
+  const omittedFromPartial = check(omittedFromPartialInput);
   const omission = omittedFromPartial.bindings[0]!;
   assert.ok("errors" in omission);
   if ("errors" in omission)
     assert.equal(omission.errors[0]?.code, "incomplete-declaration");
   assert.equal(
-    accept(
-      omittedFromPartial,
-      accepted.baseline,
-      ["preview-port-copy"],
-      omittedFromPartial,
-    ).status,
+    updateBaseline({
+      ...omittedFromPartialInput,
+      baseline: updated.baseline,
+      scope: ["preview-port-copy"],
+    }).status,
     "rejected",
   );
 
-  const cancelled = check({
+  const cancelledInput: CheckInput = {
     references: [],
     bindings: [bindings[0]!],
     facts: [],
-    baseline: accepted.baseline,
+    baseline: updated.baseline,
     declarationCompleteness: "complete",
     scope: ["preview-port-copy"],
-  });
+  };
+  const cancelled = check(cancelledInput);
   const removal = cancelled.bindings[0]!;
   assert.equal("untracked" in removal, true);
   if ("untracked" in removal) {
@@ -1159,23 +1069,19 @@ void test("局部声明不证明取消跟踪；完整声明删除基线无需读
     assert.equal(removal.changes[0]?.kind, "binding-removed");
   }
 
-  const cancellationAcceptance = accept(
-    cancelled,
-    accepted.baseline,
-    ["preview-port-copy"],
-    cancelled,
-  );
-  assert.equal(cancellationAcceptance.status, "accepted");
-  if (cancellationAcceptance.status !== "accepted") return;
+  const cancellationUpdate = updateBaseline({
+    ...cancelledInput,
+    baseline: updated.baseline,
+    scope: ["preview-port-copy"],
+  });
+  assert.equal(cancellationUpdate.status, "updated");
+  if (cancellationUpdate.status !== "updated") return;
   assert.equal(
-    Object.hasOwn(
-      cancellationAcceptance.baseline.bindings,
-      "preview-port-copy",
-    ),
+    Object.hasOwn(cancellationUpdate.baseline.bindings, "preview-port-copy"),
     false,
   );
   assert.equal(
-    Object.hasOwn(cancellationAcceptance.baseline.bindings, "preview-port"),
+    Object.hasOwn(cancellationUpdate.baseline.bindings, "preview-port"),
     true,
   );
 
@@ -1183,7 +1089,7 @@ void test("局部声明不证明取消跟踪；完整声明删除基线无需读
     references,
     bindings: [bindings[0]!],
     facts,
-    baseline: cancellationAcceptance.baseline,
+    baseline: cancellationUpdate.baseline,
     declarationCompleteness: "complete",
     scope: ["preview-port"],
   });
@@ -1202,33 +1108,37 @@ void test("合法关联和引用 ID 不会被 JSON 基线的继承属性遮蔽",
   ];
   const bindings: BindingDefinition[] = ids.map((id) => ({
     id,
-    documents: ["guide"],
-    references: [id],
+    references: ["guide", id],
   }));
   const facts: ReferenceFact[] = [
     { referenceId: "guide", value: "guide" },
     ...ids.map((referenceId) => ({ referenceId, value: referenceId })),
   ];
-  const emptyBaseline = JSON.parse('{"version":1,"bindings":{}}');
-  const initial = check({
+  const emptyBaseline = JSON.parse('{"version":2,"bindings":{}}');
+  const initialInput: CheckInput = {
     references,
     bindings,
     facts,
     baseline: emptyBaseline,
     declarationCompleteness: "complete",
-  });
+  };
+  const initial = check(initialInput);
 
   assert.deepEqual(
     initial.bindings.map((result) => result.changes[0]?.kind),
     ["binding-added", "binding-added", "binding-added"],
   );
-  const created = accept(initial, emptyBaseline, ids, initial);
-  assert.equal(created.status, "accepted");
-  if (created.status !== "accepted") return;
+  const created = updateBaseline({
+    ...initialInput,
+    baseline: emptyBaseline,
+    scope: ids,
+  });
+  assert.equal(created.status, "updated");
+  if (created.status !== "updated") return;
 
   const roundTripped = JSON.parse(JSON.stringify(created.baseline));
   assert.ok(ids.every((id) => Object.hasOwn(roundTripped.bindings, id)));
-  const afterFirstAcceptance = check({
+  const afterFirstUpdate = check({
     references,
     bindings,
     facts,
@@ -1236,7 +1146,7 @@ void test("合法关联和引用 ID 不会被 JSON 基线的继承属性遮蔽",
     declarationCompleteness: "complete",
   });
   assert.ok(
-    afterFirstAcceptance.bindings.every(
+    afterFirstUpdate.bindings.every(
       (result) => result.consistency === "consistent",
     ),
   );
@@ -1246,30 +1156,30 @@ void test("合法关联和引用 ID 不会被 JSON 基线的继承属性遮蔽",
   ];
   const existingBinding: BindingDefinition = {
     id: "existing",
-    documents: ["guide"],
-    references: ["base"],
+    references: ["guide", "base"],
   };
   const existingFacts: ReferenceFact[] = [
     { referenceId: "guide", value: "guide" },
     { referenceId: "base", value: "base" },
   ];
-  const existing = check({
+  const existingInput: CheckInput = {
     references: [...references.slice(0, 1), ...existingReferences],
     bindings: [existingBinding],
     facts: existingFacts,
+  };
+  const existingUpdated = updateBaseline({
+    ...existingInput,
+    scope: ["existing"],
   });
-  const existingAccepted = accept(existing, undefined, ["existing"], existing);
-  assert.equal(existingAccepted.status, "accepted");
-  if (existingAccepted.status !== "accepted") return;
+  assert.equal(existingUpdated.status, "updated");
+  if (existingUpdated.status !== "updated") return;
 
-  const existingBaseline = JSON.parse(
-    JSON.stringify(existingAccepted.baseline),
-  );
+  const existingBaseline = JSON.parse(JSON.stringify(existingUpdated.baseline));
   const expandedBinding = {
     ...existingBinding,
     references: ["base", ...ids],
   };
-  const expanded = check({
+  const expandedInput: CheckInput = {
     references: [...references, ...existingReferences],
     bindings: [expandedBinding],
     facts: [
@@ -1277,7 +1187,8 @@ void test("合法关联和引用 ID 不会被 JSON 基线的继承属性遮蔽",
       ...ids.map((referenceId) => ({ referenceId, value: referenceId })),
     ],
     baseline: existingBaseline,
-  });
+  };
+  const expanded = check(expandedInput);
   assert.deepEqual(
     expanded.bindings[0]?.changes
       .filter((change) => change.kind === "reference-added")
@@ -1286,16 +1197,15 @@ void test("合法关联和引用 ID 不会被 JSON 基线的继承属性遮蔽",
     [...ids].sort(),
   );
 
-  const expandedAccepted = accept(
-    expanded,
-    existingBaseline,
-    ["existing"],
-    expanded,
-  );
-  assert.equal(expandedAccepted.status, "accepted");
-  if (expandedAccepted.status !== "accepted") return;
+  const expandedUpdated = updateBaseline({
+    ...expandedInput,
+    baseline: existingBaseline,
+    scope: ["existing"],
+  });
+  assert.equal(expandedUpdated.status, "updated");
+  if (expandedUpdated.status !== "updated") return;
   const expandedRoundTrip = JSON.parse(
-    JSON.stringify(expandedAccepted.baseline),
+    JSON.stringify(expandedUpdated.baseline),
   );
   const rechecked = check({
     references: [...references, ...existingReferences],

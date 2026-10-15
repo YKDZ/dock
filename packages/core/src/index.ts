@@ -1,7 +1,7 @@
 export type {
-  AcceptedReferenceFact,
-  AcceptanceIssue,
-  AcceptanceOutcome,
+  BaselineReferenceFact,
+  BaselineUpdateIssue,
+  BaselineUpdateOutcome,
   Baseline,
   BindingAudit,
   BindingBaseline,
@@ -9,31 +9,16 @@ export type {
   BindingDefinition,
   CheckInput,
   CheckReport,
-  CheckWithCoverageInput,
-  CheckWithCoverageResult,
   CollectionMemberChange,
-  CompleteCheckReport,
   CurrentBinding,
   CurrentReferenceFact,
-  CoverageDocument,
-  CoverageInput,
-  CoverageInterval,
-  CoverageIssue,
-  CoverageMeasure,
-  CoverageRangeDeclaration,
-  CoverageRangeSet,
-  CoverageReport,
-  CoverageSummaryInput,
-  CoverageSummaryResult,
   DeclarationCompleteness,
   DocumentRange,
   EvidenceError,
   JsonValue,
   ReferenceDefinition,
-  ReferenceExecution,
   ReferenceFact,
   ReferenceMemberFact,
 } from "./contracts.ts";
-export { accept } from "./accept.ts";
-export { check, checkWithCoverage } from "./check.ts";
-export { summarizeCoverage } from "./coverage.ts";
+export { check } from "./check.ts";
+export { updateBaseline } from "./update-baseline.ts";

@@ -10,92 +10,6 @@ export type JsonValue =
 /** 当前文档位置用于解释结果，不参与事实比较。 */
 export type DocumentRange = { path: string; start: number; end: number };
 
-/** 纳入文档全集的当前文本长度，以 JavaScript UTF-16 代码单元计。 */
-export type CoverageDocument = { path: string; length: number };
-export type CoverageRangeDeclaration = {
-  bindingId: string;
-  referenceId: string;
-  range: DocumentRange;
-};
-export type ReferenceExecution = { bindingId: string; referenceId: string };
-export type CoverageIssue = {
-  code: string;
-  message: string;
-  path?: string;
-  bindingId?: string;
-  referenceId?: string;
-};
-
-/** 只包含采集器已经留下的资料；归集本身不会读取或执行任何目标。 */
-export type CoverageInput = {
-  documentInventory: {
-    complete: boolean;
-    source: string;
-    exclusions: string[];
-    documents: CoverageDocument[];
-  };
-  recordsComplete: boolean;
-  collectionErrors?: CoverageIssue[];
-  /** 来自同一次外部执行的实际测试次数；归集不会增加它。 */
-  actualExecutionCount: number;
-  declarations: CoverageRangeDeclaration[];
-  readHits: DocumentRange[];
-  referenceExecutions: ReferenceExecution[];
-  sources: {
-    declarations: string;
-    readHits: string;
-    bindingExecutions: string;
-  };
-};
-
-export type CoverageInterval = { start: number; end: number };
-export type CoverageRangeSet = {
-  path: string;
-  ranges: CoverageInterval[];
-};
-export type CoverageMeasure = {
-  coveredUnits: number;
-  totalUnits: number;
-  percentage: number;
-  coveredRanges: CoverageRangeSet[];
-  uncoveredRanges: CoverageRangeSet[];
-};
-export type CoverageReport = {
-  unit: "utf16-code-unit";
-  documentInventory: {
-    source: string;
-    paths: string[];
-    exclusions: string[];
-    totalUnits: number;
-  };
-  sources: CoverageInput["sources"];
-  validationScope: string[];
-  declaration: CoverageMeasure;
-  readHits: CoverageMeasure;
-  bindingExecutionHits: CoverageMeasure;
-  bindingExecution: {
-    hitBindingIds: string[];
-    unhitBindingIds: string[];
-  };
-  actualExecutionCount: number;
-  readHitCount: number;
-  limitations: string[];
-};
-export type CoverageSummaryInput = {
-  bindings: readonly BindingDefinition[];
-  declarationCompleteness: DeclarationCompleteness;
-  validationScope: readonly string[];
-  coverage: CoverageInput;
-};
-export type CoverageSummaryResult =
-  | { coverage: CoverageReport }
-  | { errors: CoverageIssue[] };
-export type CompleteCheckReport = CheckReport & { coverage: CoverageReport };
-export type CheckWithCoverageInput = CheckInput & { coverage: CoverageInput };
-export type CheckWithCoverageResult =
-  | { report: CompleteCheckReport }
-  | { errors: CoverageIssue[] };
-
 /** 定位目标及选择规则与当前取得的值分别比较。 */
 export type ReferenceDefinition = {
   id: string;
@@ -104,10 +18,9 @@ export type ReferenceDefinition = {
   note?: string;
 };
 
-/** 关联两端的每条引用都是取得一致性结果的必需条件。 */
+/** 无方向的非空引用集合，每条引用都是取得一致性结果的必需条件。 */
 export type BindingDefinition = {
   id: string;
-  documents: string[];
   references: string[];
   note?: string;
 };
@@ -136,7 +49,7 @@ export type ReferenceMemberFact =
   | { id: string; value: JsonValue }
   | { id: string; error: { code: string; message: string } };
 
-export type AcceptedReferenceFact = {
+export type BaselineReferenceFact = {
   definition: ReferenceDefinition;
   value: JsonValue;
   /** 缺省表示一般 JSON 事实；成员集合用此标记区别同形标量值。 */
@@ -144,14 +57,14 @@ export type AcceptedReferenceFact = {
 };
 export type BindingBaseline = {
   definition: BindingDefinition;
-  references: Record<string, AcceptedReferenceFact>;
+  references: Record<string, BaselineReferenceFact>;
 };
 export type Baseline = {
-  version: 1;
+  version: 2;
   bindings: Record<string, BindingBaseline>;
 };
 
-export type CurrentReferenceFact = AcceptedReferenceFact & {
+export type CurrentReferenceFact = BaselineReferenceFact & {
   range?: DocumentRange;
 };
 export type CurrentBinding = {
@@ -235,8 +148,6 @@ export type CheckInput = {
   scope?: readonly string[];
 };
 export type CheckReport = {
-  /** 核对所依据的基线快照，接受时用于发现核对后基线已被替换。 */
-  reviewedBaseline: Baseline | null;
   declaration: {
     completeness: DeclarationCompleteness;
     bindingIds: string[];
@@ -245,25 +156,26 @@ export type CheckReport = {
   bindings: BindingAudit[];
 };
 
-export type AcceptanceIssue = {
-  bindingId?: string;
-  referenceId?: string;
-  code: string;
-  message: string;
-};
-export type AcceptanceOutcome =
-  | { status: "accepted"; baseline: Baseline }
-  | { status: "rejected"; errors: AcceptanceIssue[] };
+export type BaselineUpdateIssue = EvidenceError & { bindingId?: string };
+export type BaselineUpdateOutcome =
+  | { status: "updated"; baseline: Baseline; report: CheckReport }
+  | { status: "rejected"; errors: BaselineUpdateIssue[]; report: CheckReport };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function isJsonValue(value: unknown): value is JsonValue {
+export function isJsonValue(value: unknown): value is JsonValue {
   if (value === null || typeof value === "string" || typeof value === "boolean")
     return true;
   if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index++) {
+      if (!Object.hasOwn(value, index) || !isJsonValue(value[index]))
+        return false;
+    }
+    return true;
+  }
   if (!isRecord(value)) return false;
   return Object.values(value).every(isJsonValue);
 }
@@ -304,17 +216,16 @@ function assertId(value: unknown, context: string): asserts value is string {
 
 function assertReferenceIds(
   ids: unknown,
-  side: string,
   bindingId: string,
 ): asserts ids is string[] {
   if (!Array.isArray(ids) || ids.length === 0) {
-    throw new TypeError(`关联 ${bindingId} 的 ${side} 端不能为空。`);
+    throw new TypeError(`关联 ${bindingId} 的引用集合不能为空。`);
   }
   const seen = new Set<string>();
   for (const id of ids) {
     assertId(id, `关联 ${bindingId} 的引用 ID`);
     if (seen.has(id))
-      throw new TypeError(`关联 ${bindingId} 的 ${side} 端包含重复引用：${id}`);
+      throw new TypeError(`关联 ${bindingId} 的引用集合包含重复身份：${id}`);
     seen.add(id);
   }
 }
@@ -324,8 +235,7 @@ export function assertBindingDefinition(
 ): asserts value is BindingDefinition {
   if (!isRecord(value)) throw new TypeError("关联定义必须是对象。");
   assertId(value.id, "关联 ID");
-  assertReferenceIds(value.documents, "documents", value.id);
-  assertReferenceIds(value.references, "references", value.id);
+  assertReferenceIds(value.references, value.id);
   if (value.note !== undefined && typeof value.note !== "string") {
     throw new TypeError(`关联 ${value.id} 的 note 必须是文本。`);
   }
@@ -338,6 +248,12 @@ export function assertReferenceDefinition(
   assertId(value.id, "引用 ID");
   if (!Object.hasOwn(value, "target"))
     throw new TypeError(`引用 ${value.id} 缺少 target。`);
+  if (!isJsonValue(value.target)) {
+    throw new TypeError(`引用 ${value.id} 的 target 必须是有效 JSON 值。`);
+  }
+  if (value.selection !== undefined && !isJsonValue(value.selection)) {
+    throw new TypeError(`引用 ${value.id} 的 selection 必须是有效 JSON 值。`);
+  }
   if (value.note !== undefined && typeof value.note !== "string") {
     throw new TypeError(`引用 ${value.id} 的 note 必须是文本。`);
   }
@@ -345,39 +261,42 @@ export function assertReferenceDefinition(
 
 export function assertBaseline(value: Baseline | undefined): void {
   if (value === undefined) return;
-  if (!isRecord(value) || value.version !== 1 || !isRecord(value.bindings)) {
-    throw new TypeError("审阅基线格式无效。");
+  if (!isRecord(value) || !isRecord(value.bindings)) {
+    throw new TypeError("基线格式无效。");
+  }
+  if (value.version !== 2) {
+    throw new TypeError(
+      `不支持基线版本 ${String(value.version)}，需要版本 2。`,
+    );
   }
   for (const [id, binding] of Object.entries(value.bindings)) {
     if (!isRecord(binding) || !isRecord(binding.references)) {
-      throw new TypeError(`关联 ${id} 的审阅基线格式无效。`);
+      throw new TypeError(`关联 ${id} 的基线格式无效。`);
     }
     assertBindingDefinition(binding.definition);
     if (binding.definition.id !== id)
-      throw new TypeError(`关联 ${id} 的审阅基线 ID 不匹配。`);
+      throw new TypeError(`关联 ${id} 的基线 ID 不匹配。`);
 
-    const required = new Set([
-      ...binding.definition.documents,
-      ...binding.definition.references,
-    ]);
+    const required = new Set(binding.definition.references);
     const actual = Object.keys(binding.references);
     if (
       actual.length !== required.size ||
       actual.some((referenceId) => !required.has(referenceId))
     ) {
-      throw new TypeError(`关联 ${id} 的审阅基线没有保存全部必需引用。`);
+      throw new TypeError(`关联 ${id} 的基线没有保存全部必需引用。`);
     }
     for (const [referenceId, reference] of Object.entries(binding.references)) {
       if (!isRecord(reference))
-        throw new TypeError(`引用 ${referenceId} 的审阅基线格式无效。`);
+        throw new TypeError(`引用 ${referenceId} 的基线格式无效。`);
       assertReferenceDefinition(reference.definition);
       if (
         reference.definition.id !== referenceId ||
         !Object.hasOwn(reference, "value") ||
+        !isJsonValue(reference.value) ||
         (reference.valueKind !== undefined &&
           reference.valueKind !== "member-collection")
       ) {
-        throw new TypeError(`引用 ${referenceId} 的审阅基线记录无效。`);
+        throw new TypeError(`引用 ${referenceId} 的基线记录无效。`);
       }
       if (reference.valueKind === "member-collection") {
         assertMemberCollectionValue(reference.value, referenceId);

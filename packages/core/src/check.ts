@@ -2,6 +2,7 @@ import {
   assertBaseline,
   assertBindingDefinition,
   assertReferenceDefinition,
+  isJsonValue,
 } from "./contracts.ts";
 import type {
   BindingAudit,
@@ -10,8 +11,6 @@ import type {
   BindingBaseline,
   CheckInput,
   CheckReport,
-  CheckWithCoverageInput,
-  CheckWithCoverageResult,
   CollectionMemberChange,
   CurrentBinding,
   CurrentReferenceFact,
@@ -21,7 +20,6 @@ import type {
   ReferenceFact,
   ReferenceMemberFact,
 } from "./contracts.ts";
-import { summarizeCoverage } from "./coverage.ts";
 
 type CollectionSnapshot = {
   definition: ReferenceDefinition;
@@ -77,7 +75,6 @@ function comparableReference(definition: ReferenceDefinition): JsonValue {
 function comparableBinding(definition: BindingDefinition): JsonValue {
   return {
     id: definition.id,
-    documents: [...definition.documents].sort(),
     references: [...definition.references].sort(),
   };
 }
@@ -103,9 +100,7 @@ function collectCurrent(
   ) as Record<string, CurrentReferenceFact>;
   const errors: EvidenceError[] = [];
   const collections = new Map<string, CollectionSnapshot>();
-  const ids = [
-    ...new Set([...binding.documents, ...binding.references]),
-  ].sort();
+  const ids = [...binding.references].sort();
 
   for (const referenceId of ids) {
     const candidates = definitions.get(referenceId) ?? [];
@@ -196,6 +191,18 @@ function collectCurrent(
       }
       if (invalidIdentity) continue;
 
+      const members: ReferenceMemberFact[] = fact.collection.members.map(
+        (member) =>
+          !("error" in member) && !isJsonValue(member.value)
+            ? {
+                id: member.id,
+                error: {
+                  code: "invalid-fact",
+                  message: "成员事实必须是有效 JSON 值，数值必须有限。",
+                },
+              }
+            : member,
+      );
       if (fact.collection.completeness === "partial") {
         errors.push({
           referenceId,
@@ -203,7 +210,7 @@ function collectCurrent(
           message: "成员发现不完整，不能据此推断成员增删。",
         });
       }
-      for (const member of fact.collection.members) {
+      for (const member of members) {
         if ("error" in member) {
           errors.push({
             referenceId,
@@ -217,10 +224,10 @@ function collectCurrent(
       if (fact.collection.completeness === "complete") {
         const snapshot: CollectionSnapshot = {
           definition: structuredClone(definition),
-          members: structuredClone(fact.collection.members),
+          members: structuredClone(members),
           valueKind: "member-collection",
-          ...(fact.collection.members.every(isValueMember)
-            ? { value: memberValue(fact.collection.members) }
+          ...(members.every(isValueMember)
+            ? { value: memberValue(members) }
             : {}),
           ...(fact.range === undefined
             ? {}
@@ -231,7 +238,7 @@ function collectCurrent(
 
       if (
         fact.collection.completeness !== "complete" ||
-        fact.collection.members.some((member) => "error" in member)
+        members.some((member) => "error" in member)
       ) {
         continue;
       }
@@ -245,6 +252,14 @@ function collectCurrent(
       continue;
     }
 
+    if (!isJsonValue(fact.value)) {
+      errors.push({
+        referenceId,
+        code: "invalid-fact",
+        message: "引用事实必须是有效 JSON 值，数值必须有限。",
+      });
+      continue;
+    }
     references[referenceId] = {
       definition: structuredClone(definition),
       value: structuredClone(fact.value),
@@ -436,7 +451,7 @@ function changesFor(
   return changes;
 }
 
-/** 将当前完整证据与审阅基线比较，不修改已有基线。 */
+/** 将当前完整证据与基线比较，不修改已有基线。 */
 export function check(input: CheckInput): CheckReport {
   assertBaseline(input.baseline);
 
@@ -569,29 +584,8 @@ export function check(input: CheckInput): CheckReport {
   });
 
   return {
-    reviewedBaseline:
-      input.baseline === undefined ? null : structuredClone(input.baseline),
     declaration: { completeness, bindingIds: declaredBindingIds },
     scope,
     bindings: results,
-  };
-}
-
-/** 只在声明、目录与运行记录完整时，合并核对报告和覆盖统计。 */
-export function checkWithCoverage(
-  input: CheckWithCoverageInput,
-): CheckWithCoverageResult {
-  const { coverage, ...checkInput } = input;
-  const report = check(checkInput);
-  const summary = summarizeCoverage({
-    bindings: checkInput.bindings,
-    declarationCompleteness: checkInput.declarationCompleteness ?? "partial",
-    validationScope: report.scope,
-    coverage,
-  });
-
-  if ("errors" in summary) return summary;
-  return {
-    report: { ...report, coverage: summary.coverage },
   };
 }

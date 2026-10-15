@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { accept, check } from "@dock/core";
+import { check, updateBaseline } from "@dock/core";
 import type {
   BindingDefinition,
+  CheckInput,
   ReferenceDefinition,
   ReferenceFact,
 } from "@dock/core";
@@ -49,8 +50,12 @@ const references: ReferenceDefinition[] = [
 
 const binding: BindingDefinition = {
   id: "env-contract",
-  documents: ["doc-paragraph", "doc-table-cell"],
-  references: ["code-symbol", "ordered-output"],
+  references: [
+    "doc-paragraph",
+    "doc-table-cell",
+    "code-symbol",
+    "ordered-output",
+  ],
   note: "initial binding note",
 };
 
@@ -64,16 +69,16 @@ const facts: ReferenceFact[] = [
   { referenceId: "ordered-output", value: ["first", "second"] },
 ];
 
-function accepted() {
-  const report = check({ references, bindings: [binding], facts });
-  const outcome = accept(report, undefined, [binding.id], report);
-  assert.equal(outcome.status, "accepted");
-  if (outcome.status !== "accepted") throw new Error("有效关联应可接受。");
+function updated() {
+  const reportInput: CheckInput = { references, bindings: [binding], facts };
+  const outcome = updateBaseline({ ...reportInput, scope: [binding.id] });
+  assert.equal(outcome.status, "updated");
+  if (outcome.status !== "updated") throw new Error("有效关联应可更新基线。");
   return outcome.baseline;
 }
 
-void test("备注、对象键顺序和关联端点集合顺序不改变已接受定义", () => {
-  const baseline = accepted();
+void test("备注、对象键顺序和关联引用集合顺序不改变基线定义", () => {
+  const baseline = updated();
   const currentReferences: ReferenceDefinition[] = [
     {
       id: "doc-paragraph",
@@ -114,8 +119,12 @@ void test("备注、对象键顺序和关联端点集合顺序不改变已接受
   ];
   const currentBinding: BindingDefinition = {
     id: "env-contract",
-    documents: ["doc-table-cell", "doc-paragraph"],
-    references: ["ordered-output", "code-symbol"],
+    references: [
+      "doc-table-cell",
+      "doc-paragraph",
+      "ordered-output",
+      "code-symbol",
+    ],
     note: "updated binding note",
   };
 
@@ -131,7 +140,7 @@ void test("备注、对象键顺序和关联端点集合顺序不改变已接受
 });
 
 void test("选择步骤定义与有序结果内容保留顺序并产生可解释差异", () => {
-  const baseline = accepted();
+  const baseline = updated();
   const changedSteps = references.map((reference) =>
     reference.id === "doc-paragraph"
       ? {
