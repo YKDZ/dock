@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, copyFile, cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import {
+  access,
+  copyFile,
+  cp,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -99,6 +107,7 @@ async function main(): Promise<void> {
     await verifyOperationLocalExecution(consumer);
     await verifyFailureIsolation(bin, consumer);
     await verifyRunLifecycle(bin, consumer);
+    await verifyAfterEndFailure(bin, consumer);
     await verifyInterruptedProcess(bin, consumer);
     await verifyStatusesAndIdentity(bin, consumer);
     await verifyConflictPreflight(bin, consumer);
@@ -345,6 +354,61 @@ async function verifyInterruptedProcess(
   assertBindingError(updateReport, "中断状态", "run-lifecycle-failed");
   assert.equal(updateReport.execution?.commandAttempts, 1);
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
+}
+
+async function verifyAfterEndFailure(
+  bin: string,
+  consumer: string,
+): Promise<void> {
+  const configuration = "after-end.config.mts";
+  const marker = join(consumer, "after-end.marker");
+  const baselinePath = join(consumer, "after-end.baseline.json");
+  const initialUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", configuration, "--json"],
+    consumer,
+  );
+  assert.equal(initialUpdate.code, 0, initialUpdate.stderr);
+  assert.equal(parseEnvelope(initialUpdate.stdout).variant, "updated");
+  const baselineBytes = await readFile(baselinePath);
+
+  await writeFile(marker, "trigger");
+  try {
+    const check = await runDock(
+      bin,
+      ["check", "--config", configuration, "--json"],
+      consumer,
+    );
+    const update = await runDock(
+      bin,
+      ["baseline", "update", "--config", configuration, "--json"],
+      consumer,
+    );
+    assert.equal(
+      check.code,
+      1,
+      `check stdout:\n${check.stdout}\ncheck stderr:\n${check.stderr}\nupdate stdout:\n${update.stdout}\nupdate stderr:\n${update.stderr}`,
+    );
+    const checkEnvelope = parseEnvelope(check.stdout);
+    assert.equal(checkEnvelope.variant, "errors");
+    const checkReport = requireReport(checkEnvelope);
+    assertBindingError(checkReport, "异步失败状态", "run-lifecycle-failed");
+    assertExecutionSummary(checkReport, 1, 1);
+
+    assert.equal(
+      update.code,
+      1,
+      `update stdout:\n${update.stdout}\nupdate stderr:\n${update.stderr}`,
+    );
+    const updateEnvelope = parseEnvelope(update.stdout);
+    assert.equal(updateEnvelope.variant, "rejected");
+    const updateReport = requireReport(updateEnvelope);
+    assertBindingError(updateReport, "异步失败状态", "run-lifecycle-failed");
+    assertExecutionSummary(updateReport, 1, 1);
+    assert.deepEqual(await readFile(baselinePath), baselineBytes);
+  } finally {
+    await rm(marker, { force: true });
+  }
 }
 
 async function verifyStatusesAndIdentity(

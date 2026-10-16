@@ -109,6 +109,9 @@ type NodeTestPlugin = ReferencePlugin<
 const nodeTestImplementation: NodeTestPlugin = definePlugin({
   id: nodeTestPluginId,
   validate(reference: NodeTestReference): void {
+    if (reference.selection !== undefined) {
+      throw new TypeError("Node 测试状态引用不支持 selection。");
+    }
     assertRun(reference.target.run.identity, reference.target.run);
     assertTestTarget(reference.target);
   },

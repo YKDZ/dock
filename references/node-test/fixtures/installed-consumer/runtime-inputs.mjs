@@ -43,3 +43,22 @@ assert.throws(
     }),
   /至少一个测试文件/,
 );
+
+const validStatus = nodeTestStatus("正常状态", validRun, {
+  file: "test/happy.test.mts",
+  name: "正常测试通过",
+});
+const unsupportedSelection = createReference(
+  nodeTestPluginId,
+  "不支持选择",
+  validStatus.target,
+  { selection: { kind: "unsupported" } },
+);
+assert.throws(
+  () =>
+    defineConfig({
+      plugins: [nodeTest],
+      bindings: [binding("不支持选择", [unsupportedSelection])],
+    }),
+  /不支持 selection/,
+);

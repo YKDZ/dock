@@ -66,7 +66,7 @@ export function collectNodeRun(
 
     const node = nodeForEvent(nodes, data);
     if (node === undefined) {
-      if (event.type === "test:fail" && data.testId === undefined) {
+      if (event.type === "test:fail") {
         errors.push({
           code: "node-test-unattributed-failure",
           message: failureMessage(data),
