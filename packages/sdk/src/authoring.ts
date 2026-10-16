@@ -86,8 +86,8 @@ export function validateConfig(value: unknown): asserts value is Config {
     throw new TypeError("配置入口必须导出对象。");
   }
   const config = value as Record<string, unknown>;
-  if (!Array.isArray(config.plugins) || config.plugins.length === 0) {
-    throw new TypeError("配置必须显式登记至少一个引用插件。");
+  if (!Array.isArray(config.plugins)) {
+    throw new TypeError("配置必须提供 plugins 插件列表。");
   }
   const plugins = new Map<string, ReferencePlugin>();
   for (const candidate of config.plugins) {
@@ -98,8 +98,8 @@ export function validateConfig(value: unknown): asserts value is Config {
     plugins.set(candidate.id, candidate);
   }
 
-  if (!Array.isArray(config.bindings) || config.bindings.length === 0) {
-    throw new TypeError("配置必须声明至少一个非空关联；空声明不能取消跟踪。");
+  if (!Array.isArray(config.bindings)) {
+    throw new TypeError("配置必须提供 bindings 关联列表。");
   }
   if (
     config.root !== undefined &&
@@ -162,6 +162,7 @@ export function validateConfig(value: unknown): asserts value is Config {
           `插件 ${reference.pluginId} 不支持引用 ${reference.id} 的声明类型。`,
         );
       }
+      plugin.validate?.(reference);
       const prior = references.get(reference.id);
       if (prior !== undefined && !sameReferenceDefinition(prior, reference)) {
         throw new TypeError(
@@ -180,9 +181,13 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     Array.isArray(value) ||
     typeof (value as { id?: unknown }).id !== "string" ||
     (value as { id: string }).id.length === 0 ||
-    typeof (value as { collect?: unknown }).collect !== "function"
+    typeof (value as { collect?: unknown }).collect !== "function" ||
+    ((value as { validate?: unknown }).validate !== undefined &&
+      typeof (value as { validate?: unknown }).validate !== "function")
   ) {
-    throw new TypeError("引用插件必须提供非空 id 和 collect 函数。");
+    throw new TypeError(
+      "引用插件必须提供非空 id 和 collect 函数；validate 若提供必须为函数。",
+    );
   }
 }
 

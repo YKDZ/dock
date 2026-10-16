@@ -60,31 +60,55 @@ void test("普通文件全文可经公开 SDK 建立、核对和更新基线", a
   }
 });
 
-void test("普通文件引用拒绝尚未支持的选择器", async () => {
-  const root = await mkdtemp(join(tmpdir(), "dock-file-selection-"));
+void test("显式空完整声明可取消最后一条关联跟踪", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-file-untracking-"));
+  const baselinePath = join(root, "dock.baseline.json");
 
   try {
-    const selected = createReference<
-      typeof filePluginId,
-      "selected-guide",
-      string,
-      string
-    >(filePluginId, "selected-guide", "guide.md", {
-      selection: { start: 0 },
-    });
-    const config = defineConfig({
+    await writeFile(join(root, "guide.txt"), "正文\n", "utf8");
+    const initial = defineConfig({
       root,
       plugins: [file],
-      bindings: [binding("selected-policy", [selected])],
+      bindings: [
+        binding("guide-policy", [file.from("guide.txt").reference("guide")]),
+      ],
     });
+    assert.equal((await updateBaseline(initial)).status, "updated");
 
-    const report = await check(config);
-    const result = report.bindings[0];
-    assert.ok(result && "errors" in result);
-    assert.equal(result.errors[0]?.code, "unsupported-file-selection");
+    const untrack = defineConfig({ root, plugins: [], bindings: [] });
+    const result = await updateBaseline(untrack);
+    assert.equal(result.status, "updated");
+    assert.deepEqual(result.report.scope, ["guide-policy"]);
+    const removedBinding = result.report.bindings[0];
+    assert.ok(removedBinding && "untracked" in removedBinding);
+    assert.equal(removedBinding.untracked, true);
+
+    const baseline = JSON.parse(await readFile(baselinePath, "utf8")) as {
+      readonly bindings: Record<string, unknown>;
+    };
+    assert.deepEqual(Object.keys(baseline.bindings), []);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+void test("普通文件引用在声明组装时拒绝尚未支持的选择器", () => {
+  const selected = createReference<
+    typeof filePluginId,
+    "selected-guide",
+    string,
+    string
+  >(filePluginId, "selected-guide", "guide.md", {
+    selection: { start: 0 },
+  });
+  assert.throws(
+    () =>
+      defineConfig({
+        plugins: [file],
+        bindings: [binding("selected-policy", [selected])],
+      }),
+    /只支持全文，不能传入 selection/,
+  );
 });
 
 void test("JSON 键顺序和备注不制造引用身份冲突", () => {

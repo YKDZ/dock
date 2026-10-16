@@ -1,4 +1,8 @@
-import type { BindingCheckResult, CheckReport } from "@dock/core";
+import type {
+  BaselineUpdateIssue,
+  BindingCheckResult,
+  CheckReport,
+} from "@dock/core";
 import {
   defineCli,
   helpCapability,
@@ -11,6 +15,17 @@ import { check, MaintenanceError, updateBaseline } from "./maintenance.ts";
 
 const define = defineCli();
 const reportPayload = z.object({ report: z.unknown() });
+const updateIssueSchema = z.object({
+  bindingId: z.string().optional(),
+  referenceId: z.string().optional(),
+  memberId: z.string().optional(),
+  code: z.string(),
+  message: z.string(),
+});
+const rejectedUpdatePayload = z.object({
+  report: z.unknown(),
+  errors: z.array(updateIssueSchema),
+});
 const failurePayload = z.object({ code: z.string(), message: z.string() });
 
 const checkCommand = define.command("check")({
@@ -96,10 +111,16 @@ const updateCommand = define.command("update")({
         text: ({ report }) => text.lines(formatReport(report as CheckReport)),
       },
       rejected: {
-        description: "采集错误阻止基线更新",
-        schema: reportPayload,
+        description: "当前证据或更新范围不允许保存基线",
+        schema: rejectedUpdatePayload,
         exitCode: 1,
-        text: ({ report }) => text.lines(formatReport(report as CheckReport)),
+        text: ({ report, errors }) =>
+          text.lines(
+            formatRejectedUpdate(
+              report as CheckReport,
+              errors as BaselineUpdateIssue[],
+            ),
+          ),
       },
     },
   },
@@ -114,9 +135,13 @@ const updateCommand = define.command("update")({
   async handler({ input, outcome }) {
     try {
       const result = await updateBaseline(input.config);
-      return result.status === "updated"
-        ? outcome.data.updated({ report: result.report })
-        : outcome.data.rejected({ report: result.report });
+      if (result.status === "updated") {
+        return outcome.data.updated({ report: result.report });
+      }
+      return outcome.data.rejected({
+        report: result.report,
+        errors: result.errors,
+      });
     } catch (error) {
       return outcome.failure.maintenanceFailed(asFailure(error));
     }
@@ -192,6 +217,22 @@ function formatReport(report: CheckReport): [string, ...string[]] {
     lines.push(...formatBinding(binding));
   }
   return lines as [string, ...string[]];
+}
+
+function formatRejectedUpdate(
+  report: CheckReport,
+  errors: readonly BaselineUpdateIssue[],
+): [string, ...string[]] {
+  const lines = formatReport(report);
+  for (const error of errors) {
+    const identity = [error.bindingId, error.referenceId, error.memberId]
+      .filter(Boolean)
+      .join(" / ");
+    lines.push(
+      `更新错误${identity === "" ? "" : ` ${identity}`}（${error.code}）：${error.message}`,
+    );
+  }
+  return lines;
 }
 
 function formatBinding(binding: BindingCheckResult): string[] {

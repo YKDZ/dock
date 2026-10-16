@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
   access,
+  chmod,
   copyFile,
   mkdir,
   mkdtemp,
@@ -19,11 +20,23 @@ type ProcessResult = {
   readonly stderr: string;
 };
 
+type ProcessIdentity = {
+  readonly uid: number;
+  readonly gid: number;
+};
+
 type CliEnvelope = {
   readonly schemaVersion: string;
   readonly kind: string;
   readonly variant?: string;
-  readonly data?: { readonly report?: unknown; readonly code?: string };
+  readonly data?: {
+    readonly report?: unknown;
+    readonly code?: string;
+    readonly errors?: readonly {
+      readonly code: string;
+      readonly message: string;
+    }[];
+  };
 };
 
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -110,6 +123,18 @@ async function runInstalledCli(
   );
   await runConsumerTypechecks(consumer);
 
+  await copyFixture(consumer, "sdk-consumer.mjs");
+  const sdkConsumer = await run(
+    "node",
+    [join(consumer, "sdk-consumer.mjs")],
+    consumer,
+  );
+  assert.equal(
+    sdkConsumer.code,
+    0,
+    `安装制品 SDK 业务结果往返失败：\n${sdkConsumer.stdout}\n${sdkConsumer.stderr}`,
+  );
+
   const installedPackages = await run(
     "npm",
     ["ls", "--all", "--json", "--prefix", consumer],
@@ -194,6 +219,37 @@ async function runInstalledCli(
   assert.equal(update.code, 0, update.stderr);
   assert.equal(parseEnvelope(update.stdout).variant, "updated");
   const oldBaseline = await readFile(join(consumer, "dock.baseline.json"));
+  await verifyBaselineFilesystemFailures(bin, consumer);
+
+  const emptyConfigDirectory = join(consumer, "empty-config");
+  await mkdir(emptyConfigDirectory);
+  await writeFile(
+    join(emptyConfigDirectory, "dock.config.mjs"),
+    'import { defineConfig } from "@dock/sdk";\nexport default defineConfig({ plugins: [], bindings: [] });\n',
+  );
+  const emptyUpdate = await runDock(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "empty-config/dock.config.mjs",
+      "--json",
+    ],
+    consumer,
+  );
+  assert.equal(emptyUpdate.code, 1, emptyUpdate.stderr);
+  const emptyUpdateEnvelope = parseEnvelope(emptyUpdate.stdout);
+  assert.equal(emptyUpdateEnvelope.kind, "data");
+  assert.equal(emptyUpdateEnvelope.variant, "rejected");
+  assert.equal(emptyUpdateEnvelope.data?.errors?.[0]?.code, "empty-selection");
+  const emptyUpdateText = await runDock(
+    bin,
+    ["baseline", "update", "--config", "empty-config/dock.config.mjs"],
+    consumer,
+  );
+  assert.equal(emptyUpdateText.code, 1, emptyUpdateText.stderr);
+  assert.match(emptyUpdateText.stdout, /更新错误（empty-selection）/);
 
   const textCheck = await runDock(
     bin,
@@ -301,18 +357,23 @@ async function runInstalledCli(
 
   await writeFile(
     join(consumer, "invalid.mjs"),
-    'export default { plugins: [{ id: "unused", collect() { throw new Error("不得采集"); } }], bindings: [] };\n',
+    'export default { plugins: [{ id: "unused", collect() { throw new Error("不得采集"); } }] };\n',
   );
   const invalidConfig = await runDock(
     bin,
-    ["check", "--config", "invalid.mjs", "--json"],
+    ["baseline", "update", "--config", "invalid.mjs", "--json"],
     consumer,
   );
   assert.equal(invalidConfig.code, 1, invalidConfig.stderr);
   const invalidEnvelope = parseEnvelope(invalidConfig.stderr);
   assert.equal(invalidEnvelope.kind, "failure");
   assert.match(invalidEnvelope.data?.code ?? "", /maintenance-failed/);
-  assert.match(invalidConfig.stderr, /空声明/);
+  assert.match(invalidConfig.stderr, /bindings 关联列表/);
+  assert.doesNotMatch(invalidConfig.stderr, /不得采集/);
+  assert.deepEqual(
+    await readFile(join(consumer, "dock.baseline.json")),
+    currentBaseline,
+  );
 
   await writeFile(
     join(consumer, "unsupported-selection.mjs"),
@@ -330,6 +391,44 @@ async function runInstalledCli(
   );
   assert.equal(unsupportedSelection.code, 1, unsupportedSelection.stderr);
   assert.match(unsupportedSelection.stderr, /全文，不能传入 selection/);
+
+  await writeFile(
+    join(consumer, "invalid-builder-target.mjs"),
+    [
+      'import { file } from "@dock/reference-file";',
+      'import { binding, defineConfig } from "@dock/sdk";',
+      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
+      'const invalid = file.from(42).reference("invalid-target");',
+      'export default defineConfig({ plugins: [file, unused], bindings: [binding("invalid-target-policy", [invalid])] });',
+    ].join("\n"),
+  );
+  const invalidBuilderTarget = await runDock(
+    bin,
+    ["check", "--config", "invalid-builder-target.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(invalidBuilderTarget.code, 1, invalidBuilderTarget.stderr);
+  assert.match(invalidBuilderTarget.stderr, /config-load-failed/);
+  assert.match(invalidBuilderTarget.stderr, /普通文件引用目标必须/);
+  assert.doesNotMatch(invalidBuilderTarget.stderr, /不得采集/);
+
+  await writeFile(
+    join(consumer, "invalid-raw-target.mjs"),
+    [
+      'import { file } from "@dock/reference-file";',
+      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
+      'export default { plugins: [file, unused], bindings: [{ id: "invalid-target-policy", references: [{ id: "invalid-target", pluginId: "@dock/reference-file", target: 42 }, { id: "unused-reference", pluginId: "unused", target: "guide.md" }] }] };',
+    ].join("\n"),
+  );
+  const invalidRawTarget = await runDock(
+    bin,
+    ["check", "--config", "invalid-raw-target.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(invalidRawTarget.code, 1, invalidRawTarget.stderr);
+  assert.match(invalidRawTarget.stderr, /文件引用 invalid-target 的目标无效/);
+  assert.match(invalidRawTarget.stderr, /普通文件引用目标必须/);
+  assert.doesNotMatch(invalidRawTarget.stderr, /不得采集/);
 
   await writeFile(
     join(consumer, "unregistered.mjs"),
@@ -366,6 +465,25 @@ async function runInstalledCli(
   assert.match(duplicateBinding.stderr, /关联身份重复：duplicate-policy/);
   assert.doesNotMatch(duplicateBinding.stderr, /不得采集/);
 
+  await writeFile(
+    join(consumer, "conflicting-reference.mjs"),
+    [
+      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
+      'export default { plugins: [unused], bindings: [{ id: "first-policy", references: [{ id: "shared-guide", pluginId: "unused", target: "guide.md" }] }, { id: "second-policy", references: [{ id: "shared-guide", pluginId: "unused", target: "copy.md" }] }] };',
+    ].join("\n"),
+  );
+  const conflictingReference = await runDock(
+    bin,
+    ["check", "--config", "conflicting-reference.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(conflictingReference.code, 1, conflictingReference.stderr);
+  assert.match(
+    conflictingReference.stderr,
+    /引用身份 shared-guide 对应多个不同定义/,
+  );
+  assert.doesNotMatch(conflictingReference.stderr, /不得采集/);
+
   await writeFile(join(consumer, "dock.baseline.json"), "{not json", "utf8");
   const corruptBaseline = await runDock(
     bin,
@@ -384,21 +502,115 @@ async function copyFixture(consumer: string, name: string): Promise<void> {
   await copyFile(join(fixtureDirectory, name), join(consumer, name));
 }
 
+async function verifyBaselineFilesystemFailures(
+  bin: string,
+  consumer: string,
+): Promise<void> {
+  const currentUid = process.getuid?.();
+  assert.notEqual(
+    currentUid,
+    undefined,
+    "基线权限验收需要支持 POSIX uid/gid 的运行环境。",
+  );
+  const identity = currentUid === 0 ? { uid: 65534, gid: 65534 } : undefined;
+  const directory = join(consumer, "restricted-baseline");
+  const config = join(directory, "dock.config.mjs");
+  const target = join(directory, "guide.txt");
+  const baseline = join(directory, "dock.baseline.json");
+
+  await mkdir(directory);
+  await writeFile(
+    config,
+    [
+      'import { file } from "@dock/reference-file";',
+      'import { binding, defineConfig } from "@dock/sdk";',
+      'export default defineConfig({ plugins: [file], bindings: [binding("restricted-policy", [file.from("guide.txt").reference("restricted-guide")])] });',
+    ].join("\n"),
+  );
+  await writeFile(target, "原始事实\n", "utf8");
+  const initial = await runDock(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "restricted-baseline/dock.config.mjs",
+      "--json",
+    ],
+    consumer,
+  );
+  assert.equal(initial.code, 0, initial.stderr);
+  const originalBytes = await readFile(baseline);
+
+  await writeFile(target, "更新事实\n", "utf8");
+  await chmod(consumer, 0o755);
+  await chmod(config, 0o444);
+  await chmod(target, 0o444);
+  await chmod(baseline, 0o444);
+  await chmod(directory, currentUid === 0 ? 0o1777 : 0o555);
+
+  try {
+    const failedUpdate = await runDock(
+      bin,
+      [
+        "baseline",
+        "update",
+        "--config",
+        "restricted-baseline/dock.config.mjs",
+        "--json",
+      ],
+      consumer,
+      identity,
+    );
+    assert.equal(failedUpdate.code, 1, failedUpdate.stderr);
+    const failedUpdateEnvelope = parseEnvelope(failedUpdate.stderr);
+    assert.equal(failedUpdateEnvelope.kind, "failure");
+    assert.match(
+      failedUpdateEnvelope.data?.code ?? "",
+      /baseline-write-failed/,
+    );
+    assert.deepEqual(await readFile(baseline), originalBytes);
+
+    await chmod(baseline, 0);
+    const unreadableBaseline = await runDock(
+      bin,
+      ["check", "--config", "restricted-baseline/dock.config.mjs", "--json"],
+      consumer,
+      identity,
+    );
+    assert.equal(unreadableBaseline.code, 1, unreadableBaseline.stderr);
+    const unreadableEnvelope = parseEnvelope(unreadableBaseline.stderr);
+    assert.equal(unreadableEnvelope.kind, "failure");
+    assert.match(unreadableEnvelope.data?.code ?? "", /baseline-read-failed/);
+    assert.deepEqual(await readFile(baseline), originalBytes);
+  } finally {
+    await chmod(directory, 0o755).catch(() => undefined);
+    await chmod(config, 0o644).catch(() => undefined);
+    await chmod(target, 0o644).catch(() => undefined);
+    await chmod(baseline, 0o644).catch(() => undefined);
+  }
+}
+
 async function runDock(
   bin: string,
   arguments_: readonly string[],
   cwd: string,
+  identity?: ProcessIdentity,
 ): Promise<ProcessResult> {
-  return await run(bin, arguments_, cwd);
+  return await run(bin, arguments_, cwd, identity);
 }
 
 function run(
   command: string,
   arguments_: readonly string[],
   cwd: string,
+  identity?: ProcessIdentity,
 ): Promise<ProcessResult> {
   return new Promise((resolveResult, rejectResult) => {
-    const child = spawn(command, [...arguments_], { cwd });
+    const child = spawn(command, [...arguments_], {
+      cwd,
+      ...(identity === undefined ? {} : identity),
+    });
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => {

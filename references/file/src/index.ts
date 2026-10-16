@@ -43,6 +43,21 @@ export type FilePlugin = ReferencePlugin<
 const implementation = definePlugin<typeof filePluginId, FileReference, string>(
   {
     id: filePluginId,
+    validate(reference): void {
+      if (reference.selection !== undefined) {
+        throw new TypeError(
+          `文件引用 ${reference.id} 当前只支持全文，不能传入 selection。`,
+        );
+      }
+      try {
+        assertFileTarget(reference.target);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new TypeError(`文件引用 ${reference.id} 的目标无效：${message}`, {
+          cause: error,
+        });
+      }
+    },
     async collect(reference, context): Promise<PluginResult<string>> {
       if (reference.selection !== undefined) {
         return {
@@ -113,6 +128,7 @@ const implementation = definePlugin<typeof filePluginId, FileReference, string>(
 export const file: FilePlugin = {
   ...implementation,
   from(target: string | URL): FileReferenceBuilder {
+    assertFileTarget(target);
     const normalizedTarget = target instanceof URL ? target.href : target;
     return {
       reference<Id extends string>(
@@ -139,6 +155,29 @@ export const file: FilePlugin = {
     };
   },
 };
+
+function assertFileTarget(target: unknown): asserts target is string | URL {
+  if (typeof target === "string") {
+    if (target.length === 0 || target.includes("\0")) {
+      throw new TypeError("普通文件引用目标必须是非空、有效的路径文本。");
+    }
+    if (!target.startsWith("file:")) return;
+    try {
+      fileURLToPath(new URL(target));
+      return;
+    } catch {
+      throw new TypeError("普通文件引用目标必须是有效 file: URL。");
+    }
+  }
+  if (!(target instanceof URL) || target.protocol !== "file:") {
+    throw new TypeError("普通文件引用目标必须是非空路径文本或 file: URL。");
+  }
+  try {
+    fileURLToPath(target);
+  } catch {
+    throw new TypeError("普通文件引用目标必须是有效 file: URL。");
+  }
+}
 
 function resolveTarget(target: string, root: string): string {
   if (target.startsWith("file:")) return fileURLToPath(new URL(target));

@@ -25,6 +25,12 @@ defineConfig({
   bindings: [invalidBinding],
 });
 
+// @ts-expect-error 配置入口必须显式提供 bindings 列表。
+defineConfig({ plugins: [] });
+
+// @ts-expect-error 配置入口必须显式提供 plugins 列表。
+defineConfig({ bindings: [] });
+
 definePlugin<
   "typed-plugin",
   Reference<"typed-plugin", "string-fact", string, string>,
@@ -39,3 +45,6 @@ definePlugin<
 
 // @ts-expect-error 普通文件引用当前只支持全文，不接受文本选择器。
 file.from("guide.md").reference("selected", { selection: { start: 0 } });
+
+// @ts-expect-error 普通文件目标必须是路径文本或 file: URL。
+file.from(42);

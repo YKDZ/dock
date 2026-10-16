@@ -57,6 +57,8 @@ export interface ReferencePlugin<
   Value extends JsonValue = JsonValue,
 > {
   readonly id: PluginId;
+  /** 在任何引用开始采集前验证插件专属声明形状；不得读取外部目标。 */
+  validate?(reference: Ref): void;
   collect(
     reference: Ref,
     context: PluginContext,

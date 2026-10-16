@@ -54,3 +54,5 @@ export const config = defineConfig({
   ],
   declarationSources: [new URL("./dock.config.mjs", import.meta.url)],
 });
+
+export const emptyConfig = defineConfig({ plugins: [], bindings: [] });
