@@ -71,6 +71,7 @@ async function main(): Promise<void> {
     await copyFixtures(consumer);
     await verifyInstalledTypes(consumer);
     await verifyInstalledReads(consumer);
+    await verifyInstalledInlineScript(consumer);
     await verifyInstalledEmptyCells(consumer);
     await verifyInstalledCli(consumer);
     process.stdout.write("Markdown 安装制品公开类型、读取与 CLI 验收通过。\n");
@@ -118,6 +119,9 @@ async function copyFixtures(consumer: string): Promise<void> {
     "dock.config.mjs",
     "empty-cells.mjs",
     "guide.md",
+    "inline-script-config.mjs",
+    "inline-script-guide.md",
+    "inline-script-runtime.mjs",
     "invalid-marker-config.mjs",
     "invalid-config.mjs",
     "markers-guide.md",
@@ -202,6 +206,143 @@ async function verifyInstalledReads(consumer: string): Promise<void> {
   assert.equal(initial["ordinary-file"].value, source);
   assert.equal(initial["ordinary-file"].range.start, 0);
   assert.equal(initial["ordinary-file"].range.end, source.length);
+}
+
+async function verifyInstalledInlineScript(consumer: string): Promise<void> {
+  const guidePath = join(consumer, "inline-script-guide.md");
+  const config = "inline-script-config.mjs";
+  const baselinePath = join(consumer, "inline-script.baseline.json");
+  const bin = join(
+    consumer,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "dock.cmd" : "dock",
+  );
+  const sourceWithReal = await readFile(guidePath, "utf8");
+
+  const initial = await installedInlineRuntime(consumer);
+  assert.equal(initial.source, sourceWithReal);
+  assertInlineValue(initial, "real", sourceWithReal);
+  assert.equal(
+    initial.whole,
+    sourceWithReal.replace(
+      "<!-- dock:start sample -->real<!-- dock:end sample -->",
+      "real",
+    ),
+  );
+
+  const baselineUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", config, "--json"],
+    consumer,
+  );
+  assert.equal(baselineUpdate.code, 0, baselineUpdate.stderr);
+  assert.equal(parseEnvelope(baselineUpdate.stdout).variant, "updated");
+  const baseline = await readFile(baselinePath);
+
+  const fakeOnly = sourceWithReal.replace(
+    "<!-- dock:start sample -->real<!-- dock:end sample -->\n",
+    "",
+  );
+  await writeFile(guidePath, fakeOnly, "utf8");
+  const fakeRead = await installedInlineRuntime(consumer);
+  assert.equal(fakeRead.source, fakeOnly);
+  assertInlineError(fakeRead, "missing-selection");
+  assert.equal(fakeRead.whole, fakeOnly);
+
+  const check = await runDock(
+    bin,
+    ["check", "--config", config, "--json"],
+    consumer,
+  );
+  assert.equal(check.code, 1, check.stderr);
+  assert.equal(parseEnvelope(check.stdout).variant, "errors");
+  assertReferenceError(check.stdout, "missing-selection", "sample");
+  const rejectedUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", config, "--json"],
+    consumer,
+  );
+  assert.equal(rejectedUpdate.code, 1, rejectedUpdate.stderr);
+  assert.equal(parseEnvelope(rejectedUpdate.stdout).variant, "rejected");
+  assert.deepEqual(await readFile(baselinePath), baseline);
+
+  await writeFile(guidePath, sourceWithReal, "utf8");
+  const restored = await installedInlineRuntime(consumer);
+  assertInlineValue(restored, "real", sourceWithReal);
+  assert.equal(
+    restored.whole,
+    sourceWithReal.replace(
+      "<!-- dock:start sample -->real<!-- dock:end sample -->",
+      "real",
+    ),
+  );
+}
+
+type InstalledInlineRuntime = {
+  readonly source: string;
+  readonly selected: RecordValue;
+  readonly collected: RecordValue;
+  readonly whole: string;
+};
+
+async function installedInlineRuntime(
+  consumer: string,
+): Promise<InstalledInlineRuntime> {
+  const result = await run(
+    "node",
+    [join(consumer, "inline-script-runtime.mjs")],
+    consumer,
+  );
+  assert.equal(
+    result.code,
+    0,
+    `安装制品段内脚本定位场景失败：\n${result.stdout}\n${result.stderr}`,
+  );
+  const parsed: unknown = JSON.parse(result.stdout);
+  assert.ok(isRecord(parsed));
+  assert.ok(typeof parsed.source === "string");
+  assert.ok(isRecord(parsed.selected));
+  assert.ok(isRecord(parsed.collected));
+  assert.ok(typeof parsed.whole === "string");
+  return parsed as InstalledInlineRuntime;
+}
+
+function assertInlineValue(
+  runtime: InstalledInlineRuntime,
+  expected: string,
+  source: string,
+): void {
+  assert.equal(runtime.selected.kind, "value");
+  assert.equal(runtime.selected.value, expected);
+  assert.ok(isRecord(runtime.selected.range));
+  assert.equal(runtime.selected.range.path, "inline-script-guide.md");
+  assert.equal(runtime.selected.range.start, source.indexOf(expected));
+  assert.equal(
+    runtime.selected.range.end,
+    source.indexOf(expected) + expected.length,
+  );
+  assert.equal(
+    source.slice(
+      runtime.selected.range.start as number,
+      runtime.selected.range.end as number,
+    ),
+    expected,
+  );
+  assert.equal(runtime.collected.kind, "value");
+  assert.equal(runtime.collected.value, expected);
+  assert.deepEqual(runtime.collected.range, runtime.selected.range);
+}
+
+function assertInlineError(
+  runtime: InstalledInlineRuntime,
+  expected: string,
+): void {
+  assert.equal(runtime.selected.kind, "error");
+  assert.equal(runtime.selected.code, expected);
+  assert.equal(runtime.collected.kind, "error");
+  assert.ok(isRecord(runtime.collected.error));
+  assert.equal(runtime.collected.error.code, expected);
 }
 
 async function verifyInstalledEmptyCells(consumer: string): Promise<void> {

@@ -386,38 +386,49 @@ type HtmlNode = {
 
 function documentMarkers(source: string): MarkdownMarker[] {
   const markers: MarkdownMarker[] = [];
-  for (const node of allNodes(parseMarkdown(source))) {
+  const nodes = allNodes(parseMarkdown(source));
+  const masked: string[] = source
+    .split("")
+    .map((character) =>
+      character === "\r" || character === "\n" ? character : " ",
+    );
+  for (const node of nodes) {
     if (node.type !== "html") continue;
     const { start, end } = nodeOffsets(source, node);
-    const fragment = parseFragment(source.slice(start, end), {
-      sourceCodeLocationInfo: true,
-    }) as unknown as HtmlNode;
-    const visit = (html: HtmlNode): void => {
-      const location = html.sourceCodeLocation;
-      if (
-        html.nodeName === "#comment" &&
-        location !== null &&
-        location !== undefined
-      ) {
-        const markerStart = start + location.startOffset;
-        const markerEnd = start + location.endOffset;
-        const match = /^<!--\s*dock:(start|end)\s+([^\s]+)\s*-->$/u.exec(
-          source.slice(markerStart, markerEnd),
-        );
-        if (match !== null) {
-          markers.push({
-            id: match[2]!,
-            kind: match[1]! as MarkdownMarker["kind"],
-            start: markerStart,
-            end: markerEnd,
-          });
-        }
-      }
-      html.childNodes?.forEach(visit);
-      if (html.content !== undefined) visit(html.content);
-    };
-    visit(fragment);
+    for (let offset = start; offset < end; offset++) {
+      masked[offset] = source[offset]!;
+    }
   }
+
+  // 保留 Markdown 识别出的 HTML 片段，再统一解析，维持段内 script 的 raw-text 上下文。
+  const fragment = parseFragment(masked.join(""), {
+    sourceCodeLocationInfo: true,
+  }) as unknown as HtmlNode;
+  const visit = (html: HtmlNode): void => {
+    const location = html.sourceCodeLocation;
+    if (
+      html.nodeName === "#comment" &&
+      location !== null &&
+      location !== undefined
+    ) {
+      const markerStart = location.startOffset;
+      const markerEnd = location.endOffset;
+      const match = /^<!--\s*dock:(start|end)\s+([^\s]+)\s*-->$/u.exec(
+        source.slice(markerStart, markerEnd),
+      );
+      if (match !== null) {
+        markers.push({
+          id: match[2]!,
+          kind: match[1]! as MarkdownMarker["kind"],
+          start: markerStart,
+          end: markerEnd,
+        });
+      }
+    }
+    html.childNodes?.forEach(visit);
+    if (html.content !== undefined) visit(html.content);
+  };
+  visit(fragment);
   return markers.sort((left, right) => left.start - right.start);
 }
 

@@ -241,6 +241,42 @@ test("标记选择读取段内当前内容并返回原文 UTF-16 范围", async 
   });
 });
 
+test("段内脚本字符串中的同形注释不参与标记选择或事实清理", async () => {
+  const script =
+    '前文 <script>const example = "<!-- dock:start sample -->fake<!-- dock:end sample -->";</script> 后文';
+  await withDocument(script, async (_root, config) => {
+    const selection = markdown.from("guide.md").marker("sample");
+    await assert.rejects(
+      readReference(config, selection.reference("sample")),
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "missing-selection",
+    );
+
+    const whole = await readReference(
+      config,
+      markdown.from("guide.md").reference("whole"),
+    );
+    assert.equal(whole.value, script);
+
+    const withReal = `${script}\n\n<!-- dock:start sample -->real<!-- dock:end sample -->`;
+    await writeFile(join(_root, "guide.md"), withReal, "utf8");
+    const selected = await readReference(config, selection.reference("sample"));
+    assert.equal(selected.value, "real");
+    assert.equal(
+      withReal.slice(selected.range!.start, selected.range!.end),
+      "real",
+    );
+    const fact = await readReference(
+      config,
+      markdown.from("guide.md").reference("whole"),
+    );
+    assert.equal(fact.value, `${script}\n\nreal`);
+  });
+});
+
 test("比较事实只移除真实定位注释并保留普通注释与示例文字", async () => {
   const source = [
     "😀事实 <!-- dock:start port -->4173<!-- dock:end port -->。",
