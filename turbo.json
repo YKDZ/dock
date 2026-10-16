@@ -54,7 +54,8 @@
         "@dock/core#pack",
         "@dock/sdk#pack",
         "@dock/reference-file#pack",
-        "@dock/reference-markdown#pack"
+        "@dock/reference-markdown#pack",
+        "@dock/reference-node-test#pack"
       ],
       "cache": false,
       "outputs": [],

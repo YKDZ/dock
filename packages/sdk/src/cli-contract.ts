@@ -1,8 +1,4 @@
-import type {
-  BaselineUpdateIssue,
-  BindingCheckResult,
-  CheckReport,
-} from "@dock/core";
+import type { BaselineUpdateIssue, BindingCheckResult } from "@dock/core";
 import {
   defineCli,
   helpCapability,
@@ -12,6 +8,7 @@ import {
 import { z } from "zod";
 
 import { check, MaintenanceError, updateBaseline } from "./maintenance.ts";
+import type { CheckReport } from "./maintenance.ts";
 
 const define = defineCli();
 const reportPayload = z.object({ report: z.unknown() });
@@ -213,6 +210,11 @@ function formatReport(report: CheckReport): [string, ...string[]] {
   const lines = [
     `范围：${report.scope.length === 0 ? "无关联" : report.scope.join("、")}`,
   ];
+  if (report.execution !== undefined) {
+    lines.push(
+      `执行：${report.execution.testExecutions} 个测试，${report.execution.commandAttempts} 次命令尝试`,
+    );
+  }
   for (const binding of report.bindings) {
     lines.push(...formatBinding(binding));
   }
