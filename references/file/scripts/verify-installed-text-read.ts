@@ -163,6 +163,7 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
     assert.deepEqual(await readFile(baselinePath), savedBaseline);
 
     await verifyInstalledExistence(bin, directory);
+    await verifyInstalledAuthorSelection(bin, directory);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -265,6 +266,61 @@ async function verifyInstalledExistence(
   assert.equal(rejected.code, 1, rejected.stderr);
   assert.equal(parseEnvelope(rejected.stdout).variant, "rejected");
   assert.deepEqual(await readFile(baselinePath), originalBaseline);
+}
+
+async function verifyInstalledAuthorSelection(
+  bin: string,
+  directory: string,
+): Promise<void> {
+  const consumer = join(directory, `author-options-${randomUUID()}`);
+  await mkdir(consumer);
+  await writeFile(join(consumer, "guide.md"), "previous content\n", "utf8");
+  await writeFile(
+    join(consumer, "baseline-config.mjs"),
+    [
+      'import { file } from "@dock/reference-file";',
+      'import { binding, defineConfig } from "@dock/sdk";',
+      'const reference = file.from("guide.md").reference("guide");',
+      'export default defineConfig({ plugins: [file], bindings: [binding("author-policy", [reference])] });',
+    ].join("\n"),
+  );
+  const initialUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", "baseline-config.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(initialUpdate.code, 0, initialUpdate.stderr);
+  const baselinePath = join(consumer, "dock.baseline.json");
+  const savedBaseline = await readFile(baselinePath);
+
+  await writeFile(join(consumer, "guide.md"), "whole file\n", "utf8");
+  await writeFile(
+    join(consumer, "invalid-selection.mjs"),
+    [
+      'import { file } from "@dock/reference-file";',
+      'import { binding, defineConfig } from "@dock/sdk";',
+      'const reference = file.from("guide.md").reference("guide", { selection: { kind: "unsupported" } });',
+      'export default defineConfig({ plugins: [file], bindings: [binding("author-policy", [reference])] });',
+    ].join("\n"),
+  );
+  const invalidCheck = await runDock(
+    bin,
+    ["check", "--config", "invalid-selection.mjs", "--json"],
+    consumer,
+  );
+  const invalidUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", "invalid-selection.mjs", "--json"],
+    consumer,
+  );
+  const currentBaseline = await readFile(baselinePath);
+  assert.match(
+    invalidCheck.stderr,
+    /selection/,
+    `JS 作者入口未拒绝非法 selection：check stdout=${invalidCheck.stdout}；update exit=${invalidUpdate.code} stdout=${invalidUpdate.stdout} stderr=${invalidUpdate.stderr}；baseline=${currentBaseline.toString("utf8")}`,
+  );
+  assert.equal(invalidUpdate.code, 1, invalidUpdate.stderr);
+  assert.deepEqual(currentBaseline, savedBaseline);
 }
 
 function assertSelectedValue(
