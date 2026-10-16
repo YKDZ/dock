@@ -7,6 +7,11 @@
       "outputs": ["dist/**"],
       "tags": ["quality:light"]
     },
+    "pack": {
+      "dependsOn": ["build"],
+      "outputs": [".artifacts/*.tgz"],
+      "tags": ["work:preparation"]
+    },
     "format:check": {
       "outputs": [],
       "tags": ["quality:light"]
@@ -28,6 +33,11 @@
     },
     "typecheck": {
       "dependsOn": ["^typecheck"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "test": {
+      "dependsOn": [],
       "outputs": [],
       "tags": ["quality:light"]
     }
