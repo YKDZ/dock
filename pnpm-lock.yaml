@@ -336,6 +336,9 @@ importers:
 
   references/node-test:
     devDependencies:
+      '@dock/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       '@dock/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config

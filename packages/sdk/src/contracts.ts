@@ -5,6 +5,8 @@ import type {
   TextRange,
 } from "@dock/core";
 
+import type { ExecutionRegistry } from "./execution.ts";
+
 export type { JsonValue, TextRange } from "@dock/core";
 
 /** 显式记录的声明出处；它与引用目标和配置加载入口各自独立。 */
@@ -54,6 +56,11 @@ export type PluginMemberResult<Value extends JsonValue = JsonValue> =
 
 export type PluginContext = { readonly root: string };
 
+/** 采集插件可使用的执行会话；读取插件只获得 root。 */
+export type PluginExecutionContext = PluginContext & {
+  readonly execution: ExecutionRegistry;
+};
+
 export type PluginReadResult<Value extends JsonValue = JsonValue> = {
   readonly value: Value;
   readonly range?: TextRange;
@@ -75,8 +82,13 @@ export interface ReferencePlugin<
   /** 在任何引用开始采集前验证插件专属声明形状；不得读取外部目标。 */
   readonly validate: BivariantHandler<[reference: Ref], void>;
   readonly collect: BivariantHandler<
-    [reference: Ref, context: PluginContext],
+    [reference: Ref, context: PluginExecutionContext],
     PluginResult<Value> | Promise<PluginResult<Value>>
+  >;
+  /** 在执行启动前一次准备该插件本次涉及的全部引用。 */
+  readonly prepare?: BivariantHandler<
+    [references: readonly Ref[], context: PluginExecutionContext],
+    void | Promise<void>
   >;
 }
 

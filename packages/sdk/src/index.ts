@@ -1,10 +1,8 @@
 export type {
   Baseline,
-  BaselineUpdateOutcome,
   BindingChange,
   BindingCheckResult,
   CheckError,
-  CheckReport,
   ReferenceDefinition,
   ReferenceResult,
   TextRange,
@@ -16,6 +14,7 @@ export type {
   ConfigInput,
   DeclarationSource,
   PluginContext,
+  PluginExecutionContext,
   PluginMemberResult,
   PluginReadResult,
   PluginResult,
@@ -33,5 +32,19 @@ export {
 } from "./authoring.ts";
 export type { ReferenceOptions } from "./authoring.ts";
 export { check, MaintenanceError, updateBaseline } from "./maintenance.ts";
-export type { MaintenanceConfig } from "./maintenance.ts";
+export type {
+  BaselineUpdateOutcome,
+  CheckReport,
+  MaintenanceConfig,
+} from "./maintenance.ts";
+export { createExecutionSession } from "./execution.ts";
+export type {
+  ExecutionCallback,
+  ExecutionRegistry,
+  ExecutionRunRecord,
+  ExecutionSession,
+  ExecutionSummary,
+  ExecutionTestRecord,
+  ExecutionTestStatus,
+} from "./execution.ts";
 export { readReference } from "./read.ts";

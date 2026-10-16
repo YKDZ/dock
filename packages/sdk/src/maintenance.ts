@@ -9,18 +9,41 @@ import {
   isJsonValue,
   updateBaseline as updateBaselineCore,
   type Baseline,
-  type BaselineUpdateOutcome,
+  type BaselineUpdateIssue,
   type BindingDefinition,
-  type CheckReport,
+  type CheckReport as CoreCheckReport,
   type ReferenceDefinition,
   type ReferenceResult,
 } from "@dock/core";
 
 import { normalizeConfig, type NormalizedReference } from "./authoring.ts";
-import type { Config, PluginResult } from "./contracts.ts";
+import type {
+  Config,
+  PluginExecutionContext,
+  PluginResult,
+} from "./contracts.ts";
+import {
+  createExecutionSession,
+  type ExecutionSession,
+  type ExecutionSummary,
+} from "./execution.ts";
 
 export type MaintenanceConfig = Config | string | URL;
 export type Operation = "check" | "updateBaseline";
+export type CheckReport = CoreCheckReport & {
+  readonly execution?: ExecutionSummary;
+};
+export type BaselineUpdateOutcome =
+  | {
+      readonly status: "updated";
+      readonly baseline: Baseline;
+      readonly report: CheckReport;
+    }
+  | {
+      readonly status: "rejected";
+      readonly errors: BaselineUpdateIssue[];
+      readonly report: CheckReport;
+    };
 
 export class MaintenanceError extends Error {
   readonly code: string;
@@ -62,14 +85,16 @@ export async function checkConfig(
 ): Promise<CheckReport> {
   const config = prepareConfig(value, defaultRoot);
   const baseline = await readBaseline(config.baselinePath);
-  const facts = await collect(config);
-  return checkCore({
+  const session = await prepareExecution(config);
+  const facts = await collect(config, session);
+  const report = checkCore({
     references: referenceDefinitions(config.references),
     bindings: config.bindings,
     facts,
     ...(baseline === undefined ? {} : { baseline }),
     declarationCompleteness: "complete",
   });
+  return withExecutionSummary(report, session);
 }
 
 export async function updateConfig(
@@ -78,7 +103,8 @@ export async function updateConfig(
 ): Promise<BaselineUpdateOutcome> {
   const config = prepareConfig(value, defaultRoot);
   const baseline = await readBaseline(config.baselinePath);
-  const facts = await collect(config);
+  const session = await prepareExecution(config);
+  const facts = await collect(config, session);
   const outcome = updateBaselineCore({
     references: referenceDefinitions(config.references),
     bindings: config.bindings,
@@ -89,7 +115,10 @@ export async function updateConfig(
   if (outcome.status === "updated") {
     await writeBaseline(config.baselinePath, outcome.baseline);
   }
-  return outcome;
+  return {
+    ...outcome,
+    report: withExecutionSummary(outcome.report, session),
+  };
 }
 
 export function prepareConfig(
@@ -120,7 +149,42 @@ export function prepareConfig(
   };
 }
 
-async function collect(config: PreparedConfig): Promise<ReferenceResult[]> {
+async function prepareExecution(
+  config: PreparedConfig,
+): Promise<ExecutionSession> {
+  const session = createExecutionSession();
+  const context: PluginExecutionContext = {
+    root: config.root,
+    execution: session,
+  };
+  for (const plugin of config.plugins.values()) {
+    if (plugin.prepare === undefined) continue;
+    const references = config.references.filter(
+      (reference) => reference.pluginId === plugin.id,
+    );
+    if (references.length === 0) continue;
+    try {
+      await plugin.prepare(references, context);
+    } catch (error) {
+      throw new MaintenanceError(
+        "plugin-prepare-failed",
+        `插件 ${plugin.id} 准备执行失败：${errorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  }
+  await session.run();
+  return session;
+}
+
+async function collect(
+  config: PreparedConfig,
+  session: ExecutionSession,
+): Promise<ReferenceResult[]> {
+  const context: PluginExecutionContext = {
+    root: config.root,
+    execution: session,
+  };
   return await Promise.all(
     config.references.map(async (reference) => {
       const plugin = config.plugins.get(reference.pluginId);
@@ -136,7 +200,7 @@ async function collect(config: PreparedConfig): Promise<ReferenceResult[]> {
       try {
         return toReferenceResult(
           reference.id,
-          await plugin.collect(reference, { root: config.root }),
+          await plugin.collect(reference, context),
         );
       } catch (error) {
         return {
@@ -149,6 +213,14 @@ async function collect(config: PreparedConfig): Promise<ReferenceResult[]> {
       }
     }),
   );
+}
+
+function withExecutionSummary(
+  report: CoreCheckReport,
+  session: ExecutionSession,
+): CheckReport {
+  const execution = session.summary();
+  return execution === undefined ? report : { ...report, execution };
 }
 
 function toReferenceResult(id: string, result: PluginResult): ReferenceResult {
