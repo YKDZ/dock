@@ -7,6 +7,7 @@ import type {
   DeclarationSource,
   Reference,
   ReferencePlugin,
+  RegisteredReference,
 } from "./contracts.ts";
 
 export type {
@@ -16,8 +17,8 @@ export type {
   Reference,
 } from "./contracts.ts";
 
-export type ReferenceOptions = {
-  readonly selection?: JsonValue;
+export type ReferenceOptions<Selection extends JsonValue = JsonValue> = {
+  readonly selection?: Selection;
   readonly note?: string;
   readonly declaredAt?: DeclarationSource;
 };
@@ -27,12 +28,13 @@ export function createReference<
   Id extends string,
   Target extends JsonValue,
   Value extends JsonValue = JsonValue,
+  Selection extends JsonValue = JsonValue,
 >(
   pluginId: PluginId,
   id: Id,
   target: Target,
-  options: ReferenceOptions = {},
-): Reference<PluginId, Id, Target, Value> {
+  options: ReferenceOptions<Selection> = {},
+): Reference<PluginId, Id, Target, Value, Selection> {
   const result = {
     id,
     pluginId,
@@ -44,13 +46,9 @@ export function createReference<
   return result;
 }
 
-export function definePlugin<
-  PluginId extends string,
-  Ref extends Reference<PluginId>,
-  Value extends JsonValue,
->(
-  plugin: ReferencePlugin<PluginId, Ref, Value>,
-): ReferencePlugin<PluginId, Ref, Value> {
+export function definePlugin<Plugin extends ReferencePlugin>(
+  plugin: Plugin,
+): Plugin {
   assertPlugin(plugin);
   return plugin;
 }
@@ -74,14 +72,30 @@ export function binding<
   return { id, references, ...options };
 }
 
-export function defineConfig<const Plugins extends readonly ReferencePlugin[]>(
-  input: ConfigInput<Plugins>,
-): Config<Plugins> {
+export function defineConfig<
+  const Plugins extends readonly ReferencePlugin[],
+  const Bindings extends readonly Binding<
+    readonly RegisteredReference<Plugins>[]
+  >[],
+>(input: ConfigInput<Plugins, Bindings>): Config<Plugins, Bindings> {
   validateConfig(input);
   return input;
 }
 
+export type NormalizedReference = Reference & {
+  readonly declarationSources: readonly DeclarationSource[];
+};
+
+export type NormalizedConfig = {
+  readonly config: Config;
+  readonly references: readonly NormalizedReference[];
+};
+
 export function validateConfig(value: unknown): asserts value is Config {
+  normalizeConfig(value);
+}
+
+export function normalizeConfig(value: unknown): NormalizedConfig {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError("配置入口必须导出对象。");
   }
@@ -123,7 +137,7 @@ export function validateConfig(value: unknown): asserts value is Config {
   }
 
   const bindings = new Map<string, Binding>();
-  const references = new Map<string, Reference>();
+  const references = new Map<string, NormalizedReference>();
   for (const candidate of config.bindings) {
     if (
       typeof candidate !== "object" ||
@@ -135,9 +149,7 @@ export function validateConfig(value: unknown): asserts value is Config {
     const current = candidate as Binding;
     assertBindingDefinitionLocal(
       current.id,
-      Array.isArray(current.references)
-        ? current.references.map((reference) => reference.id)
-        : current.references,
+      referenceIds(current.references),
       current.note,
     );
     assertDeclarationSource(current.declaredAt, `关联 ${current.id}`);
@@ -151,27 +163,48 @@ export function validateConfig(value: unknown): asserts value is Config {
 
     for (const reference of current.references) {
       assertReference(reference);
-      const plugin = plugins.get(reference.pluginId);
-      if (plugin === undefined) {
-        throw new TypeError(
-          `引用 ${reference.id} 使用了未登记插件：${reference.pluginId}${formatDeclarationSources([reference.declaredAt])}`,
-        );
-      }
-      if (!isPluginReference(plugin, reference)) {
-        throw new TypeError(
-          `插件 ${reference.pluginId} 不支持引用 ${reference.id} 的声明类型。`,
-        );
-      }
-      plugin.validate?.(reference);
       const prior = references.get(reference.id);
       if (prior !== undefined && !sameReferenceDefinition(prior, reference)) {
         throw new TypeError(
-          `引用身份 ${reference.id} 对应多个不同定义${formatDeclarationSources([prior.declaredAt, reference.declaredAt])}。`,
+          `引用身份 ${reference.id} 对应多个不同定义${formatDeclarationSources([...prior.declarationSources, reference.declaredAt])}。`,
         );
       }
-      if (prior === undefined) references.set(reference.id, reference);
+      references.set(
+        reference.id,
+        prior === undefined
+          ? {
+              ...reference,
+              declarationSources: declarationSources([reference.declaredAt]),
+            }
+          : {
+              ...prior,
+              declarationSources: declarationSources([
+                ...prior.declarationSources,
+                reference.declaredAt,
+              ]),
+            },
+      );
     }
   }
+
+  for (const reference of references.values()) {
+    const plugin = plugins.get(reference.pluginId);
+    if (plugin === undefined) {
+      throw new TypeError(
+        `引用 ${reference.id} 使用了未登记插件：${reference.pluginId}${formatDeclarationSources(reference.declarationSources)}。`,
+      );
+    }
+    try {
+      plugin.validate(reference);
+    } catch (error) {
+      throw new TypeError(
+        `插件 ${reference.pluginId} 拒绝引用 ${reference.id} 的声明：${errorMessage(error)}${formatDeclarationSources(reference.declarationSources)}`,
+        { cause: error },
+      );
+    }
+  }
+
+  return { config: config as Config, references: [...references.values()] };
 }
 
 function assertPlugin(value: unknown): asserts value is ReferencePlugin {
@@ -182,13 +215,18 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     typeof (value as { id?: unknown }).id !== "string" ||
     (value as { id: string }).id.length === 0 ||
     typeof (value as { collect?: unknown }).collect !== "function" ||
-    ((value as { validate?: unknown }).validate !== undefined &&
-      typeof (value as { validate?: unknown }).validate !== "function")
+    typeof (value as { validate?: unknown }).validate !== "function"
   ) {
-    throw new TypeError(
-      "引用插件必须提供非空 id 和 collect 函数；validate 若提供必须为函数。",
-    );
+    throw new TypeError("引用插件必须提供非空 id、validate 和 collect 函数。");
   }
+}
+
+function referenceIds(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((reference) => {
+    if (typeof reference !== "object" || reference === null) return undefined;
+    return (reference as { readonly id?: unknown }).id;
+  });
 }
 
 function assertReference(value: unknown): asserts value is Reference {
@@ -247,13 +285,6 @@ function assertBindingDefinitionLocal(
   }
 }
 
-function isPluginReference(
-  plugin: ReferencePlugin,
-  reference: Reference,
-): boolean {
-  return plugin.id === reference.pluginId;
-}
-
 function sameReferenceDefinition(left: Reference, right: Reference): boolean {
   return (
     left.pluginId === right.pluginId &&
@@ -278,17 +309,32 @@ function canonicalJson(value: JsonValue | undefined): string {
     .join(",")}}`;
 }
 
+function declarationSources(
+  sources: readonly (DeclarationSource | undefined)[],
+): DeclarationSource[] {
+  return [
+    ...new Map(
+      sources
+        .filter((source): source is DeclarationSource => source !== undefined)
+        .map((source) => [
+          source instanceof URL ? source.href : source,
+          source,
+        ]),
+    ).values(),
+  ];
+}
+
 function formatDeclarationSources(
   sources: readonly (DeclarationSource | undefined)[],
 ): string {
-  const locations = [
-    ...new Set(
-      sources
-        .filter((source): source is DeclarationSource => source !== undefined)
-        .map((source) => (source instanceof URL ? source.href : source)),
-    ),
-  ];
+  const locations = declarationSources(sources).map((source) =>
+    source instanceof URL ? source.href : source,
+  );
   return locations.length === 0 ? "" : `；声明来源：${locations.join("、")}`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function assertDeclarationSource(
