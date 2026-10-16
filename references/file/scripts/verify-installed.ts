@@ -598,6 +598,7 @@ async function verifyBaselineFilesystemFailures(
     const unreadableEnvelope = parseEnvelope(unreadableBaseline.stderr);
     assert.equal(unreadableEnvelope.kind, "failure");
     assert.match(unreadableEnvelope.data?.code ?? "", /baseline-read-failed/);
+    await chmod(baseline, 0o644);
     assert.deepEqual(await readFile(baseline), originalBytes);
   } finally {
     await chmod(directory, 0o755).catch(() => undefined);
