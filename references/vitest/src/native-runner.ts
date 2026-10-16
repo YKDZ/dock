@@ -167,27 +167,26 @@ const configuredPattern = userTest.testNamePattern;
 const selectedTargets = ${JSON.stringify(
     options.names.map((name) => {
       const filterName = name.replaceAll(" > ", " ");
+      const escapedName = escapeRegExp(name);
       return {
         name,
         filterName,
-        patterns: [...new Set([name, filterName])].map(escapeRegExp),
+        patterns: [
+          ...new Set([
+            escapedName,
+            escapeRegExp(filterName),
+            escapedName.replaceAll(" > ", "(?: > | )"),
+          ]),
+        ],
       };
     }),
   )};
-const selectedPatterns = [...new Set(selectedTargets.filter(({ name, filterName }) => {
-  if (configuredPattern === undefined) return true;
-  const pattern = configuredPattern instanceof RegExp
-    ? configuredPattern
-    : new RegExp(configuredPattern);
-  pattern.lastIndex = 0;
-  const matchesReportedTitle = pattern.test(name);
-  pattern.lastIndex = 0;
-  return matchesReportedTitle || pattern.test(filterName);
-}).flatMap(({ patterns }) => patterns))];
+const selectedPatterns = [...new Set(selectedTargets.flatMap(({ patterns }) => patterns))];
 const suitePatterns = ${JSON.stringify(
-    options.suitePaths.map(
-      (suitePath) =>
-        `^${escapeRegExp(`${suitePath.join(" > ")} > `)}[\\s\\S]*$`,
+    options.suitePaths.flatMap((suitePath) =>
+      [`${suitePath.join(" > ")} > `, `${suitePath.join(" ")} `].map(
+        (prefix) => `^${escapeRegExp(prefix)}[\\s\\S]*$`,
+      ),
     ),
   )};
 const selectedPatternsForRun = [...new Set([...selectedPatterns, ...suitePatterns])];
