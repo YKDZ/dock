@@ -217,6 +217,9 @@ function createFileReference<
   options: FileReferenceOptions,
   selection: Selection | undefined,
 ): FileReference<Id, Value, Selection> {
+  if (Object.hasOwn(options, "selection")) {
+    throw new TypeError("普通文件引用的 selection 必须通过公开定位器构造。");
+  }
   return createReference<typeof filePluginId, Id, string, Value, Selection>(
     filePluginId,
     id,
