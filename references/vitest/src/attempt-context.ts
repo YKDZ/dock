@@ -20,6 +20,7 @@ type AttemptRecord = {
 
 type ActiveAttempt = {
   readonly record: AttemptRecord;
+  readonly taskId: string;
   readonly signal: AbortSignal;
   active: boolean;
 };
@@ -45,8 +46,18 @@ const bridge = (sharedGlobal[bridgeKey] ??= {
 export function installVitestAttemptCapture(
   aroundEach: typeof import("vitest").aroundEach,
 ): void {
-  if (bridge.setupInstalled) return;
   aroundEach(async (runTest, context) => {
+    const current = bridge.current.getStore();
+    if (
+      current !== undefined &&
+      current.taskId === context.task.id &&
+      current.active &&
+      !context.signal.aborted
+    ) {
+      await runTest();
+      return;
+    }
+
     const metadata = context.task.meta as TestMetadata;
     const previous = metadata.dockVitestAttemptCount;
     if (
@@ -71,6 +82,7 @@ export function installVitestAttemptCapture(
 
     const active: ActiveAttempt = {
       record,
+      taskId: context.task.id,
       signal: context.signal,
       active: !context.signal.aborted,
     };
