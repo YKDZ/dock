@@ -3,7 +3,7 @@ export type {
   BaselineUpdateIssue,
   BaselineUpdateOutcome,
   Baseline,
-  BindingAudit,
+  BindingCheckResult,
   BindingBaseline,
   BindingChange,
   BindingDefinition,
@@ -13,12 +13,13 @@ export type {
   CurrentBinding,
   CurrentReferenceFact,
   DeclarationCompleteness,
-  DocumentRange,
-  EvidenceError,
+  MemberDiscoveryCompleteness,
+  TextRange,
+  CheckError,
   JsonValue,
   ReferenceDefinition,
-  ReferenceFact,
-  ReferenceMemberFact,
+  ReferenceResult,
+  ReferenceMemberResult,
 } from "./contracts.ts";
 export { check } from "./check.ts";
 export { isJsonValue } from "./contracts.ts";

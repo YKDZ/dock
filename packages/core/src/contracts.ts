@@ -7,8 +7,8 @@ export type JsonValue =
   | JsonValue[]
   | { [key: string]: JsonValue };
 
-/** 当前文档位置用于解释结果，不参与事实比较。 */
-export type DocumentRange = { path: string; start: number; end: number };
+/** 当前文本位置用于解释结果，不参与事实比较。 */
+export type TextRange = { path: string; start: number; end: number };
 
 /** 定位目标及选择规则与当前取得的值分别比较。 */
 export type ReferenceDefinition = {
@@ -28,24 +28,27 @@ export type BindingDefinition = {
 /** 声明集合表示全部已登记关联，或仅表示本次提供的局部子集。 */
 export type DeclarationCompleteness = "complete" | "partial";
 
-export type ReferenceFact =
-  | { referenceId: string; value: JsonValue; range?: DocumentRange }
+/** 成员发现是否包含引用目标中的全部成员。 */
+export type MemberDiscoveryCompleteness = "complete" | "partial";
+
+export type ReferenceResult =
+  | { referenceId: string; value: JsonValue; range?: TextRange }
   | {
       referenceId: string;
       collection: {
-        completeness: DeclarationCompleteness;
-        members: ReferenceMemberFact[];
+        completeness: MemberDiscoveryCompleteness;
+        members: ReferenceMemberResult[];
       };
-      range?: DocumentRange;
+      range?: TextRange;
     }
   | {
       referenceId: string;
       error: { code: string; message: string };
-      range?: DocumentRange;
+      range?: TextRange;
     };
 
 /** 成员由适配器提供稳定身份；结果值保留其内部数组顺序。 */
-export type ReferenceMemberFact =
+export type ReferenceMemberResult =
   | { id: string; value: JsonValue }
   | { id: string; error: { code: string; message: string } };
 
@@ -65,7 +68,7 @@ export type Baseline = {
 };
 
 export type CurrentReferenceFact = BaselineReferenceFact & {
-  range?: DocumentRange;
+  range?: TextRange;
 };
 export type CurrentBinding = {
   definition: BindingDefinition;
@@ -112,26 +115,26 @@ export type BindingChange =
       afterKind?: "member-collection";
     };
 
-export type EvidenceError = {
+export type CheckError = {
   referenceId?: string;
   memberId?: string;
   code: string;
   message: string;
 };
-type BindingAuditBase = { bindingId: string; changes: BindingChange[] };
-export type BindingAudit =
-  | (BindingAuditBase & {
+type BindingCheckResultBase = { bindingId: string; changes: BindingChange[] };
+export type BindingCheckResult =
+  | (BindingCheckResultBase & {
       consistency: "consistent" | "inconsistent";
       current: CurrentBinding;
       errors?: never;
     })
-  | (BindingAuditBase & {
-      errors: EvidenceError[];
+  | (BindingCheckResultBase & {
+      errors: CheckError[];
       consistency?: never;
       current?: never;
       untracked?: never;
     })
-  | (BindingAuditBase & {
+  | (BindingCheckResultBase & {
       untracked: true;
       consistency: "inconsistent";
       changes: [{ kind: "binding-removed"; before: BindingDefinition }];
@@ -142,7 +145,7 @@ export type BindingAudit =
 export type CheckInput = {
   references: ReferenceDefinition[];
   bindings: BindingDefinition[];
-  facts: ReferenceFact[];
+  facts: ReferenceResult[];
   baseline?: Baseline;
   declarationCompleteness?: DeclarationCompleteness;
   scope?: readonly string[];
@@ -153,10 +156,10 @@ export type CheckReport = {
     bindingIds: string[];
   };
   scope: string[];
-  bindings: BindingAudit[];
+  bindings: BindingCheckResult[];
 };
 
-export type BaselineUpdateIssue = EvidenceError & { bindingId?: string };
+export type BaselineUpdateIssue = CheckError & { bindingId?: string };
 export type BaselineUpdateOutcome =
   | { status: "updated"; baseline: Baseline; report: CheckReport }
   | { status: "rejected"; errors: BaselineUpdateIssue[]; report: CheckReport };

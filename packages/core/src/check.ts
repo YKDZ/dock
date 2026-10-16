@@ -5,7 +5,7 @@ import {
   isJsonValue,
 } from "./contracts.ts";
 import type {
-  BindingAudit,
+  BindingCheckResult,
   BindingChange,
   BindingDefinition,
   BindingBaseline,
@@ -14,16 +14,16 @@ import type {
   CollectionMemberChange,
   CurrentBinding,
   CurrentReferenceFact,
-  EvidenceError,
+  CheckError,
   JsonValue,
   ReferenceDefinition,
-  ReferenceFact,
-  ReferenceMemberFact,
+  ReferenceResult,
+  ReferenceMemberResult,
 } from "./contracts.ts";
 
 type CollectionSnapshot = {
   definition: ReferenceDefinition;
-  members: ReferenceMemberFact[];
+  members: ReferenceMemberResult[];
   value?: JsonValue;
   valueKind: "member-collection";
   range?: NonNullable<CurrentReferenceFact["range"]>;
@@ -41,12 +41,12 @@ function ownEntry<T>(
 }
 
 function isValueMember(
-  member: ReferenceMemberFact,
-): member is Extract<ReferenceMemberFact, { value: JsonValue }> {
+  member: ReferenceMemberResult,
+): member is Extract<ReferenceMemberResult, { value: JsonValue }> {
   return "value" in member;
 }
 
-function memberValue(members: readonly ReferenceMemberFact[]): JsonValue {
+function memberValue(members: readonly ReferenceMemberResult[]): JsonValue {
   return [...members]
     .filter(isValueMember)
     .sort((left, right) => compareText(left.id, right.id))
@@ -89,16 +89,16 @@ function collectCurrent(
     string,
     Array<{ definition?: ReferenceDefinition; error?: string }>
   >,
-  facts: Map<string, ReferenceFact[]>,
+  facts: Map<string, ReferenceResult[]>,
 ): {
   current?: CurrentBinding;
-  errors: EvidenceError[];
+  errors: CheckError[];
   collections: Map<string, CollectionSnapshot>;
 } {
   const references: Record<string, CurrentReferenceFact> = Object.create(
     null,
   ) as Record<string, CurrentReferenceFact>;
-  const errors: EvidenceError[] = [];
+  const errors: CheckError[] = [];
   const collections = new Map<string, CollectionSnapshot>();
   const ids = [...binding.references].sort();
 
@@ -191,7 +191,7 @@ function collectCurrent(
       }
       if (invalidIdentity) continue;
 
-      const members: ReferenceMemberFact[] = fact.collection.members.map(
+      const members: ReferenceMemberResult[] = fact.collection.members.map(
         (member) =>
           !("error" in member) && !isJsonValue(member.value)
             ? {
@@ -316,7 +316,7 @@ function collectionChangesFor(
 
 function collectionMemberChangesFor(
   beforeMembers: readonly { id: string; value: JsonValue }[],
-  afterMembers: readonly ReferenceMemberFact[],
+  afterMembers: readonly ReferenceMemberResult[],
 ): CollectionMemberChange[] {
   const before = new Map(
     beforeMembers.map((member) => [member.id, member.value]),
@@ -512,7 +512,7 @@ export function check(input: CheckInput): CheckReport {
     seenScopeIds.add(bindingId);
   }
 
-  const facts = new Map<string, ReferenceFact[]>();
+  const facts = new Map<string, ReferenceResult[]>();
   for (const fact of input.facts) {
     if (typeof fact.referenceId !== "string" || fact.referenceId.length === 0) {
       throw new TypeError("事实引用 ID 必须是非空文本。");
@@ -522,7 +522,7 @@ export function check(input: CheckInput): CheckReport {
     facts.set(fact.referenceId, matches);
   }
 
-  const results: BindingAudit[] = scope.map((bindingId) => {
+  const results: BindingCheckResult[] = scope.map((bindingId) => {
     const binding = declaredBindings.get(bindingId);
     const previous = input.baseline
       ? ownEntry(input.baseline.bindings, bindingId)
