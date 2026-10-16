@@ -298,12 +298,13 @@ const vitestImplementation: VitestPlugin = definePlugin({
       );
     }
   },
-  fileInfo(reference: VitestStatusReference, context: PluginContext): string {
-    const run = normalizeRun(reference.target.run, context.root);
-    return resolveTargetFile(run.testRoot, reference.target.file);
+  fileInfo(reference: VitestReference, context: PluginContext): string {
+    const target = getVitestTarget(reference.target);
+    const run = normalizeRun(target.run, context.root);
+    return resolveTargetFile(run.testRoot, target.file);
   },
   validateReferences(
-    references: readonly VitestStatusReference[],
+    references: readonly VitestReference[],
     context: PluginContext,
   ): readonly PluginExecutionIdentity[] {
     const declarations = new Map<
@@ -314,7 +315,8 @@ const vitestImplementation: VitestPlugin = definePlugin({
       }
     >();
     for (const reference of references) {
-      const run = normalizeRun(reference.target.run, context.root);
+      const target = getVitestTarget(reference.target);
+      const run = normalizeRun(target.run, context.root);
       const encoded = JSON.stringify(run.configuration);
       const prior = declarations.get(run.identity);
       if (prior !== undefined && prior.encoded !== encoded) {
