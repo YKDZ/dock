@@ -100,6 +100,7 @@ async function verifyCrossFrameworkIdentityConflict(
         "vitest@4.1.11",
       ],
       consumer,
+      180_000,
     );
     assert.equal(
       installation.code,
@@ -157,11 +158,12 @@ async function verifyVersion(
         `vitest@${version}`,
       ],
       consumer,
+      180_000,
     );
     assert.equal(
       installation.code,
       0,
-      `Vitest ${version} 正式制品干净安装失败：\n${installation.stdout}\n${installation.stderr}`,
+      `Vitest ${version} 正式制品干净安装失败（signal=${installation.signal}, timedOut=${installation.timedOut}）：\n${installation.stdout}\n${installation.stderr}`,
     );
 
     const maintenanceRoot = join(consumer, "maintenance-root");
@@ -622,6 +624,7 @@ function run(
   command: string,
   arguments_: readonly string[],
   cwd: string,
+  timeoutMs = 60_000,
 ): Promise<ProcessResult> {
   return new Promise((resolveResult, rejectResult) => {
     let stdout = "";
@@ -645,7 +648,7 @@ function run(
       } else {
         child.kill("SIGKILL");
       }
-    }, 60_000);
+    }, timeoutMs);
     child.stdout?.setEncoding("utf8").on("data", (chunk: string) => {
       stdout += chunk;
     });
