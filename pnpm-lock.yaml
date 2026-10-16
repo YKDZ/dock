@@ -356,6 +356,16 @@ importers:
         version: typescript@7.0.2
 
   references/typescript:
+    dependencies:
+      '@dock/reference-file':
+        specifier: workspace:*
+        version: link:../file
+      '@dock/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
     devDependencies:
       '@dock/typescript-config':
         specifier: workspace:*
@@ -1045,6 +1055,11 @@ packages:
     resolution: {integrity: sha512-RhXHbqfvY6o3xt/zSHCwSNwLrZlXiqHzewi4eAj9PtZ1T1CqgMJ2yIDb7SKPTG9IikTm925mfzL6hldQVdyNWw==}
     hasBin: true
 
+  typescript@5.9.3:
+    resolution: {integrity: sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw==}
+    engines: {node: '>=14.17'}
+    hasBin: true
+
   typescript@7.0.2:
     resolution: {integrity: sha512-8FYau96o3NKOhbjKi/qNvG/W5jhzxkbdm5sj9AbZ/5T5sWqn3hJgLfGx27sRKZWTvyzCP8dLRBTf5tBTSRVUNA==}
     engines: {node: '>=16.20.0'}
@@ -1701,6 +1716,8 @@ snapshots:
       '@turbo/linux-arm64': 2.11.7
       '@turbo/windows-64': 2.11.7
       '@turbo/windows-arm64': 2.11.7
+
+  typescript@5.9.3: {}
 
   typescript@7.0.2:
     optionalDependencies:
