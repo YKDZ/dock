@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import {
   createReference,
   definePlugin,
+  type PluginContext,
   type PluginResult,
   type Reference,
   type ReferenceOptions,
@@ -17,18 +18,19 @@ export type FileReference = Reference<
   typeof filePluginId,
   string,
   string,
-  string
+  string,
+  never
 >;
 
 export type FileReferenceBuilder = {
   reference<Id extends string>(
     id: Id,
     options?: FileReferenceOptions,
-  ): Reference<typeof filePluginId, Id, string, string>;
+  ): Reference<typeof filePluginId, Id, string, string, never>;
 };
 
 export type FileReferenceOptions = Pick<
-  ReferenceOptions,
+  ReferenceOptions<never>,
   "note" | "declaredAt"
 >;
 
@@ -40,90 +42,91 @@ export type FilePlugin = ReferencePlugin<
   from(target: string | URL): FileReferenceBuilder;
 };
 
-const implementation = definePlugin<typeof filePluginId, FileReference, string>(
-  {
-    id: filePluginId,
-    validate(reference): void {
-      if (reference.selection !== undefined) {
-        throw new TypeError(
-          `文件引用 ${reference.id} 当前只支持全文，不能传入 selection。`,
-        );
-      }
-      try {
-        assertFileTarget(reference.target);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new TypeError(`文件引用 ${reference.id} 的目标无效：${message}`, {
-          cause: error,
-        });
-      }
-    },
-    async collect(reference, context): Promise<PluginResult<string>> {
-      if (reference.selection !== undefined) {
-        return {
-          kind: "error",
-          error: {
-            code: "unsupported-file-selection",
-            message: `文件引用 ${reference.id} 当前只支持全文。`,
-          },
-        };
-      }
-      const target = reference.target;
-      if (typeof target !== "string") {
-        return {
-          kind: "error",
-          error: {
-            code: "invalid-file-target",
-            message: `文件引用 ${reference.id} 的目标必须是路径文本或 file: URL。`,
-          },
-        };
-      }
-      let absolutePath: string;
-      try {
-        absolutePath = resolveTarget(target, context.root);
-      } catch (error) {
-        return {
-          kind: "error",
-          error: {
-            code: "invalid-file-target",
-            message: error instanceof Error ? error.message : String(error),
-          },
-        };
-      }
-
-      try {
-        const text = await readFile(absolutePath, "utf8");
-        const displayPath = relative(context.root, absolutePath);
-        return {
-          kind: "value",
-          value: text,
-          range: {
-            path: displayPath === "" ? "." : displayPath,
-            start: 0,
-            end: text.length,
-          },
-        };
-      } catch (error) {
-        const code = hasCode(error, "ENOENT")
-          ? "missing-file"
-          : "file-read-failed";
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          kind: "error",
-          error: {
-            code,
-            message: `无法读取文件 ${displayTarget(absolutePath, context.root)}：${message}`,
-          },
-          range: {
-            path: displayTarget(absolutePath, context.root),
-            start: 0,
-            end: 0,
-          },
-        };
-      }
-    },
+const implementation = definePlugin({
+  id: filePluginId,
+  validate(reference: FileReference): void {
+    if (reference.selection !== undefined) {
+      throw new TypeError(
+        `文件引用 ${reference.id} 当前只支持全文，不能传入 selection。`,
+      );
+    }
+    try {
+      assertFileTarget(reference.target);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new TypeError(`文件引用 ${reference.id} 的目标无效：${message}`, {
+        cause: error,
+      });
+    }
   },
-);
+  async collect(
+    reference: FileReference,
+    context: PluginContext,
+  ): Promise<PluginResult<string>> {
+    if (reference.selection !== undefined) {
+      return {
+        kind: "error",
+        error: {
+          code: "unsupported-file-selection",
+          message: `文件引用 ${reference.id} 当前只支持全文。`,
+        },
+      };
+    }
+    const target = reference.target;
+    if (typeof target !== "string") {
+      return {
+        kind: "error",
+        error: {
+          code: "invalid-file-target",
+          message: `文件引用 ${reference.id} 的目标必须是路径文本或 file: URL。`,
+        },
+      };
+    }
+    let absolutePath: string;
+    try {
+      absolutePath = resolveTarget(target, context.root);
+    } catch (error) {
+      return {
+        kind: "error",
+        error: {
+          code: "invalid-file-target",
+          message: error instanceof Error ? error.message : String(error),
+        },
+      };
+    }
+
+    try {
+      const text = await readFile(absolutePath, "utf8");
+      const displayPath = relative(context.root, absolutePath);
+      return {
+        kind: "value",
+        value: text,
+        range: {
+          path: displayPath === "" ? "." : displayPath,
+          start: 0,
+          end: text.length,
+        },
+      };
+    } catch (error) {
+      const code = hasCode(error, "ENOENT")
+        ? "missing-file"
+        : "file-read-failed";
+      const message = error instanceof Error ? error.message : String(error);
+      return {
+        kind: "error",
+        error: {
+          code,
+          message: `无法读取文件 ${displayTarget(absolutePath, context.root)}：${message}`,
+        },
+        range: {
+          path: displayTarget(absolutePath, context.root),
+          start: 0,
+          end: 0,
+        },
+      };
+    }
+  },
+});
 
 export const file: FilePlugin = {
   ...implementation,
@@ -134,13 +137,13 @@ export const file: FilePlugin = {
       reference<Id extends string>(
         id: Id,
         options: FileReferenceOptions = {},
-      ): Reference<typeof filePluginId, Id, string, string> {
+      ): Reference<typeof filePluginId, Id, string, string, never> {
         if (Object.hasOwn(options, "selection")) {
           throw new TypeError(
             "普通文件引用当前只支持全文，不能传入 selection。",
           );
         }
-        return createReference<typeof filePluginId, Id, string, string>(
+        return createReference<typeof filePluginId, Id, string, string, never>(
           filePluginId,
           id,
           normalizedTarget,

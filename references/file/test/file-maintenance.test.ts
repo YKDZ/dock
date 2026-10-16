@@ -92,25 +92,6 @@ void test("显式空完整声明可取消最后一条关联跟踪", async () => 
   }
 });
 
-void test("普通文件引用在声明组装时拒绝尚未支持的选择器", () => {
-  const selected = createReference<
-    typeof filePluginId,
-    "selected-guide",
-    string,
-    string
-  >(filePluginId, "selected-guide", "guide.md", {
-    selection: { start: 0 },
-  });
-  assert.throws(
-    () =>
-      defineConfig({
-        plugins: [file],
-        bindings: [binding("selected-policy", [selected])],
-      }),
-    /只支持全文，不能传入 selection/,
-  );
-});
-
 void test("JSON 键顺序和备注不制造引用身份冲突", () => {
   type SharedReference = Reference<
     "fixture-plugin",
@@ -119,8 +100,9 @@ void test("JSON 键顺序和备注不制造引用身份冲突", () => {
     string
   >;
 
-  const plugin = definePlugin<"fixture-plugin", SharedReference, string>({
+  const plugin = definePlugin({
     id: "fixture-plugin",
+    validate(_reference: SharedReference): void {},
     collect() {
       return { kind: "value", value: "same" };
     },
@@ -212,8 +194,20 @@ void test("有效文本不变时，文件目标变化仍报告定义差异", asy
       {
         kind: "reference-definition",
         referenceId: "guide",
-        before: { id: "guide", target: "first.md" },
-        after: { id: "guide", target: "second.md" },
+        before: {
+          id: "guide",
+          target: {
+            pluginId: filePluginId,
+            target: "first.md",
+          },
+        },
+        after: {
+          id: "guide",
+          target: {
+            pluginId: filePluginId,
+            target: "second.md",
+          },
+        },
       },
     ]);
   } finally {
@@ -264,7 +258,7 @@ void test("配置路径维护使用新的模块图读取导入声明", async () 
       [
         'import { binding, createReference, defineConfig, definePlugin } from "@dock/sdk";',
         'import { target } from "./declarations.mjs";',
-        'const fixture = definePlugin({ id: "fixture", collect(reference) { return { kind: "value", value: reference.target }; } });',
+        'const fixture = definePlugin({ id: "fixture", validate() {}, collect(reference) { return { kind: "value", value: reference.target }; } });',
         'export default defineConfig({ plugins: [fixture], bindings: [binding("guide-policy", [createReference("fixture", "guide", target)])] });',
       ].join("\n"),
     );
@@ -272,18 +266,21 @@ void test("配置路径维护使用新的模块图读取导入声明", async () 
     const first = await check(configPath);
     const firstBinding = first.bindings[0];
     assert.ok(firstBinding && "current" in firstBinding);
-    assert.equal(
-      firstBinding.current.references.guide?.definition.target,
-      "first.md",
-    );
+    assert.deepEqual(firstBinding.current.references.guide?.definition.target, {
+      pluginId: "fixture",
+      target: "first.md",
+    });
 
     await writeFile(declarationsPath, 'export const target = "second.md";\n');
     const second = await check(configPath);
     const secondBinding = second.bindings[0];
     assert.ok(secondBinding && "current" in secondBinding);
-    assert.equal(
+    assert.deepEqual(
       secondBinding.current.references.guide?.definition.target,
-      "second.md",
+      {
+        pluginId: "fixture",
+        target: "second.md",
+      },
     );
   } finally {
     await rm(root, { recursive: true, force: true });

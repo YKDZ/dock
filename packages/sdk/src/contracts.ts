@@ -37,7 +37,7 @@ export type PluginResult<Value extends JsonValue = JsonValue> =
       readonly kind: "collection";
       readonly collection: {
         readonly completeness: MemberDiscoveryCompleteness;
-        readonly members: readonly ReferenceMemberResult[];
+        readonly members: readonly PluginMemberResult<Value>[];
       };
       readonly range?: TextRange;
     }
@@ -46,6 +46,11 @@ export type PluginResult<Value extends JsonValue = JsonValue> =
       readonly error: { readonly code: string; readonly message: string };
       readonly range?: TextRange;
     };
+
+/** 插件成员结果沿用 core 的稳定身份与错误形状，并约束成功值类型。 */
+export type PluginMemberResult<Value extends JsonValue = JsonValue> =
+  | { readonly id: string; readonly value: Value }
+  | Extract<ReferenceMemberResult, { readonly error: unknown }>;
 
 export type PluginContext = { readonly root: string };
 
