@@ -178,7 +178,7 @@ async function verifyHappyRoundTrip(
     consumer,
   );
   assert.equal(textCheck.code, 1, textCheck.stderr);
-  assert.match(textCheck.stdout, /执行：2 个测试，1 次命令尝试/);
+  assert.match(textCheck.stdout, /执行：2 次测试尝试，1 次命令尝试/);
 
   const update = await runDock(
     bin,

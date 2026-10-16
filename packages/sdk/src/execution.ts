@@ -15,6 +15,7 @@ export type ExecutionTestRecord = {
   readonly id: string;
   readonly status: ExecutionTestStatus;
   readonly started: boolean;
+  readonly attemptCount: number;
   readonly message?: string;
 };
 
@@ -187,6 +188,8 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
       test.id.length === 0 ||
       !isTestStatus(test.status) ||
       typeof test.started !== "boolean" ||
+      !isCount(test.attemptCount) ||
+      test.started !== (test.attemptCount > 0) ||
       (test.message !== undefined && typeof test.message !== "string")
     ) {
       return invalidRecord();
@@ -195,6 +198,7 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
       id: test.id,
       status: test.status,
       started: test.started,
+      attemptCount: test.attemptCount,
       ...(test.message === undefined ? {} : { message: test.message }),
     });
   }
@@ -212,7 +216,10 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     errors.push({ code: error.code, message: error.message });
   }
 
-  if (value.testExecutions !== tests.filter((test) => test.started).length) {
+  if (
+    value.testExecutions !==
+    tests.reduce((total, test) => total + test.attemptCount, 0)
+  ) {
     return invalidRecord();
   }
 
