@@ -38,6 +38,10 @@ export type FileReferenceBuilder = FileTextReferenceBuilder<never> & {
   exists(): FileExistsReferenceBuilder;
 };
 
+export type FileReferenceLocation = {
+  from(target: string | URL): FileReferenceBuilder;
+};
+
 export type FileTextReferenceBuilder<
   Selection extends JsonValue = FileTextSelection,
 > = {
@@ -71,6 +75,7 @@ export type FilePlugin = ReadableReferencePlugin<
   JsonValue
 > & {
   from(target: string | URL): FileReferenceBuilder;
+  at(moduleUrl: string | URL): FileReferenceLocation;
 };
 
 const implementation = definePlugin({
@@ -133,7 +138,38 @@ export const file: FilePlugin = {
     const normalizedTarget = target instanceof URL ? target.href : target;
     return createFileBuilder(normalizedTarget);
   },
+  at(moduleUrl: string | URL): FileReferenceLocation {
+    const source = assertFileModuleUrl(moduleUrl);
+    return {
+      from(target: string | URL): FileReferenceBuilder {
+        assertFileTarget(target);
+        return createFileBuilder(bindFileTarget(target, source));
+      },
+    };
+  },
 };
+
+function bindFileTarget(target: string | URL, source: URL): string {
+  if (target instanceof URL) return target.href;
+  if (target.startsWith("file:")) return new URL(target).href;
+  return isAbsolute(target) ? target : new URL(target, source).href;
+}
+
+function assertFileModuleUrl(value: string | URL): URL {
+  let moduleUrl: URL;
+  try {
+    moduleUrl = value instanceof URL ? value : new URL(value);
+    if (moduleUrl.protocol !== "file:") {
+      throw new TypeError("文件模块 URL 必须使用 file: 协议。");
+    }
+    fileURLToPath(moduleUrl);
+  } catch (error) {
+    throw new TypeError("file.at() 需要有效的 file: 模块 URL。", {
+      cause: error,
+    });
+  }
+  return moduleUrl;
+}
 
 function createFileBuilder(target: string): FileReferenceBuilder {
   return {
