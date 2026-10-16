@@ -56,6 +56,12 @@ export type PluginMemberResult<Value extends JsonValue = JsonValue> =
 
 export type PluginContext = { readonly root: string };
 
+/** 插件在完整配置预检中声明的执行身份及其规范化配置。 */
+export type PluginExecutionIdentity = {
+  readonly identity: string;
+  readonly configuration: JsonValue;
+};
+
 /** 采集插件可使用的执行会话；读取插件只获得 root。 */
 export type PluginExecutionContext = PluginContext & {
   readonly execution: ExecutionRegistry;
@@ -84,6 +90,18 @@ export interface ReferencePlugin<
   readonly collect: BivariantHandler<
     [reference: Ref, context: PluginExecutionContext],
     PluginResult<Value> | Promise<PluginResult<Value>>
+  >;
+  /** 按插件公开语义提供引用的一个文件目标；不得读取文件内容。 */
+  readonly fileInfo?: BivariantHandler<
+    [reference: Ref, context: PluginContext],
+    string | URL
+  >;
+  /** 完整配置的纯预检；返回的身份会与其他插件统一核对，不能启动执行。 */
+  readonly validateReferences?: BivariantHandler<
+    [references: readonly Ref[], context: PluginContext],
+    | void
+    | readonly PluginExecutionIdentity[]
+    | Promise<void | readonly PluginExecutionIdentity[]>
   >;
   /** 在执行启动前一次准备该插件本次涉及的全部引用。 */
   readonly prepare?: BivariantHandler<

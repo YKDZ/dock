@@ -14,6 +14,7 @@ export type {
   ConfigInput,
   DeclarationSource,
   PluginContext,
+  PluginExecutionIdentity,
   PluginExecutionContext,
   PluginMemberResult,
   PluginReadResult,
@@ -35,6 +36,7 @@ export { check, MaintenanceError, updateBaseline } from "./maintenance.ts";
 export type {
   BaselineUpdateOutcome,
   CheckReport,
+  MaintenanceScope,
   MaintenanceConfig,
 } from "./maintenance.ts";
 export { createExecutionSession } from "./execution.ts";

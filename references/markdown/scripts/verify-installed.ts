@@ -436,6 +436,16 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assert.equal(update.code, 0, update.stderr);
   assert.equal(parseEnvelope(update.stdout).variant, "updated");
   const originalBaseline = await readFile(baselinePath);
+  const guideScope = await runDock(
+    bin,
+    ["check", "--config", config, "--file", "guide.md", "--json"],
+    consumer,
+  );
+  assert.equal(guideScope.code, 0, guideScope.stderr);
+  assert.deepEqual(readReport(guideScope.stdout).scope, [
+    "markdown-policy",
+    "ordinary-file-policy",
+  ]);
 
   const invalidConfig = await runDock(
     bin,
@@ -492,6 +502,26 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
     "markdown-policy",
     "stable-port",
     changedReads["stable-port"],
+  );
+  const localUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", config, "--file", "guide.md", "--json"],
+    consumer,
+  );
+  assert.equal(localUpdate.code, 0, localUpdate.stderr);
+  assert.deepEqual(readReport(localUpdate.stdout).scope, [
+    "markdown-policy",
+    "ordinary-file-policy",
+  ]);
+  const localBaseline = JSON.parse(
+    await readFile(baselinePath, "utf8"),
+  ) as RecordValue;
+  const originalBaselineValue = JSON.parse(
+    originalBaseline.toString("utf8"),
+  ) as RecordValue;
+  assert.deepEqual(
+    (localBaseline.bindings as RecordValue)["marker-document-policy"],
+    (originalBaselineValue.bindings as RecordValue)["marker-document-policy"],
   );
   const changedUpdate = await runDock(
     bin,

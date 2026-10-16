@@ -177,6 +177,16 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assert.equal(initialUpdate.code, 0, initialUpdate.stderr);
   assert.equal(parseEnvelope(initialUpdate.stdout).variant, "updated");
   const initialBaseline = await readFile(baselinePath);
+  const unmatchedFile = await runDock(
+    bin,
+    ["check", "--config", "dock.config.mjs", "--file", "missing.ts", "--json"],
+    consumer,
+  );
+  assert.equal(unmatchedFile.code, 1, unmatchedFile.stderr);
+  const unmatchedEnvelope = parseEnvelope(unmatchedFile.stderr);
+  assert.ok(isRecord(unmatchedEnvelope.data));
+  assert.equal(unmatchedEnvelope.data.code, "scope-selector-unmatched");
+  assert.deepEqual(await readFile(baselinePath), initialBaseline);
   const consistent = await runDock(
     bin,
     ["check", "--config", "dock.config.mjs", "--json"],
@@ -226,12 +236,22 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   await writeFile(join(consumer, "symbol-copy.ts"), movedSource, "utf8");
   const targetChange = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "dock.config.mjs",
+      "--file",
+      "symbol-source.ts",
+      "--json",
+    ],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts" },
   );
   assert.equal(targetChange.code, 1, targetChange.stderr);
   assert.equal(parseEnvelope(targetChange.stdout).variant, "changed");
+  assert.deepEqual(readReport(targetChange.stdout).scope, [
+    "typescript-policy",
+  ]);
   assert.equal(
     referenceChange(readReport(targetChange.stdout)),
     "reference-definition",

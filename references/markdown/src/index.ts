@@ -149,6 +149,9 @@ const implementation = definePlugin({
       );
     }
   },
+  fileInfo(reference: MarkdownReference, context: PluginContext): string {
+    return resolveTarget(reference.target, context.root);
+  },
   async collect(
     reference: MarkdownReference,
     context: PluginContext,

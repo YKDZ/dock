@@ -20,6 +20,8 @@
     "physical-multiversion.mts",
     "paths-positive.mts",
     "paths-negative.mts",
+    "scope-positive.mts",
+    "scope-negative.mts",
     "secondary/physical-author.mts"
   ]
 }
