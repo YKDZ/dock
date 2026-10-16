@@ -23,12 +23,16 @@ export type ExecutionTestRecord = {
 
 /** 由活动测试按稳定键记录的一条业务观察。 */
 export type ExecutionObservationRecord = {
+  /** 本次测试中实际写入该观察的 1 起始尝试序号。 */
+  readonly attempt: number;
   readonly key: string;
   readonly value: JsonValue;
 };
 
 /** 由活动测试取得的一条当前引用读取，仅用于采集事实与诊断。 */
 export type ExecutionReadRecord = {
+  /** 本次测试中实际读取该引用的 1 起始尝试序号。 */
+  readonly attempt: number;
   readonly referenceId: string;
   readonly value: JsonValue;
   readonly range?: TextRange;
@@ -230,14 +234,15 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
 
   const tests: ExecutionTestRecord[] = [];
   for (const test of value.tests) {
+    const attemptCount = isRecord(test) ? test.attemptCount : undefined;
     if (
       !isRecord(test) ||
       typeof test.id !== "string" ||
       test.id.length === 0 ||
       !isTestStatus(test.status) ||
       typeof test.started !== "boolean" ||
-      !isCount(test.attemptCount) ||
-      test.started !== test.attemptCount > 0 ||
+      !isCount(attemptCount) ||
+      test.started !== attemptCount > 0 ||
       (test.message !== undefined && typeof test.message !== "string") ||
       (test.observations !== undefined && !isDenseArray(test.observations)) ||
       (test.reads !== undefined && !isDenseArray(test.reads))
@@ -252,11 +257,17 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     ) {
       return invalidRecord();
     }
+    if (
+      observations.some((observation) => observation.attempt > attemptCount) ||
+      reads.some((read) => read.attempt > attemptCount)
+    ) {
+      return invalidRecord();
+    }
     tests.push({
       id: test.id,
       status: test.status,
       started: test.started,
-      attemptCount: test.attemptCount,
+      attemptCount,
       ...(test.message === undefined ? {} : { message: test.message }),
       ...(test.observations === undefined
         ? {}
@@ -346,10 +357,13 @@ function isObservationRecord(
   return (
     isRecord(value) &&
     isJsonConfiguration(value) &&
+    isPositiveCount(value.attempt) &&
     typeof value.key === "string" &&
     value.key.length > 0 &&
     Object.hasOwn(value, "value") &&
-    Object.keys(value).every((key) => key === "key" || key === "value") &&
+    Object.keys(value).every(
+      (key) => key === "attempt" || key === "key" || key === "value",
+    ) &&
     isJsonConfiguration(value.value)
   );
 }
@@ -358,11 +372,16 @@ function isReadRecord(value: unknown): value is ExecutionReadRecord {
   return (
     isRecord(value) &&
     isJsonConfiguration(value) &&
+    isPositiveCount(value.attempt) &&
     typeof value.referenceId === "string" &&
     value.referenceId.length > 0 &&
     Object.hasOwn(value, "value") &&
     Object.keys(value).every(
-      (key) => key === "referenceId" || key === "value" || key === "range",
+      (key) =>
+        key === "attempt" ||
+        key === "referenceId" ||
+        key === "value" ||
+        key === "range",
     ) &&
     isJsonConfiguration(value.value) &&
     (!Object.hasOwn(value, "range") || isTextRange(value.range))
@@ -404,15 +423,24 @@ function isDenseArray(value: unknown): value is unknown[] {
 function cloneObservationRecord(
   record: ExecutionObservationRecord,
 ): ExecutionObservationRecord {
-  return { key: record.key, value: cloneJsonValue(record.value) };
+  return {
+    attempt: record.attempt,
+    key: record.key,
+    value: cloneJsonValue(record.value),
+  };
 }
 
 function cloneReadRecord(record: ExecutionReadRecord): ExecutionReadRecord {
   return {
+    attempt: record.attempt,
     referenceId: record.referenceId,
     value: cloneJsonValue(record.value),
     ...(record.range === undefined ? {} : { range: { ...record.range } }),
   };
+}
+
+function isPositiveCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === "number" && value > 0;
 }
 
 function cloneJsonValue(value: JsonValue): JsonValue {
