@@ -14,6 +14,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { verifyInstalledTextRead } from "./verify-installed-text-read.ts";
+
 type ProcessResult = {
   readonly code: number;
   readonly stdout: string;
@@ -61,6 +63,7 @@ async function main(): Promise<void> {
   const consumer = await mkdtemp(join(tmpdir(), "dock-installed-consumer-"));
   try {
     await runInstalledCli(consumer, tarballs);
+    await verifyInstalledTextRead(consumer);
     process.stdout.write("干净消费者安装、公开声明与 dock CLI 验收通过。\n");
   } finally {
     await rm(consumer, { recursive: true, force: true });
