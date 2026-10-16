@@ -36,6 +36,13 @@ describe("本地静态部署", () => {
         ],
         { cwd: root, detached: true, stdio: ["ignore", "pipe", "pipe"] },
       );
+      if (process.env.DOCK_VITE_OMIT_BUILD === "1") {
+        await assert.rejects(
+          waitForPreview(preview),
+          /The directory "dist" does not exist/u,
+        );
+        expect.fail("遗漏构建步骤后预览必须失败");
+      }
       const origin = await waitForPreview(preview);
       const page = await fetch(origin, { signal: AbortSignal.timeout(5_000) });
       const html = await page.text();

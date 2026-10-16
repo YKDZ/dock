@@ -22,3 +22,16 @@
      "@e18e/eslint-plugin": "^0.8.1",
      "@eslint/js": "^9.39.5",
      "@type-challenges/utils": "^0.1.1",
+
+--- a/pnpm-workspace.yaml
++++ b/pnpm-workspace.yaml
+@@ -14,4 +14,9 @@
+ overrides:
+   vite: 'workspace:*'
+   debug: 'npm:obug@^1.0.2'
++  '@dock/core': 'file:.dock-tools/dock-core-0.0.0.tgz'
++  '@dock/sdk': 'file:.dock-tools/dock-sdk-0.0.0.tgz'
++  '@dock/reference-file': 'file:.dock-tools/dock-reference-file-0.0.0.tgz'
++  '@dock/reference-markdown': 'file:.dock-tools/dock-reference-markdown-0.0.0.tgz'
++  '@dock/reference-vitest': 'file:.dock-tools/dock-reference-vitest-0.0.0.tgz'
+ patchedDependencies:
