@@ -50,10 +50,15 @@ export type ExecutionRunRecord = {
     readonly code: string;
     readonly message: string;
   }[];
+  readonly commandResult?: {
+    readonly exitCode: number | null;
+    readonly signal: string | null;
+  };
 };
 
 export type ExecutionSummary = {
   readonly commandAttempts: number;
+  readonly failedCommands: number;
   readonly testExecutions: number;
   readonly reads?: readonly ExecutionReadDiagnostic[];
 };
@@ -136,10 +141,18 @@ export function createExecutionSession(): ExecutionSession {
     summary(): ExecutionSummary | undefined {
       if (phase !== "finished" || runs.size === 0) return undefined;
       let commandAttempts = 0;
+      let failedCommands = 0;
       let testExecutions = 0;
       const reads: ExecutionReadDiagnostic[] = [];
       for (const [runId, { record }] of runs) {
         commandAttempts += record.commandAttempts;
+        if (
+          record.commandResult !== undefined &&
+          (record.commandResult.exitCode !== 0 ||
+            record.commandResult.signal !== null)
+        ) {
+          failedCommands += 1;
+        }
         testExecutions += record.testExecutions;
         for (const test of record.tests) {
           for (const read of test.reads ?? []) {
@@ -149,6 +162,7 @@ export function createExecutionSession(): ExecutionSession {
       }
       return {
         commandAttempts,
+        failedCommands,
         testExecutions,
         ...(reads.length === 0 ? {} : { reads }),
       };
@@ -207,7 +221,9 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     !isCount(value.commandAttempts) ||
     !isCount(value.testExecutions) ||
     !Array.isArray(value.tests) ||
-    !Array.isArray(value.errors)
+    !Array.isArray(value.errors) ||
+    (value.commandResult !== undefined &&
+      (!isCommandResult(value.commandResult) || value.commandAttempts === 0))
   ) {
     return invalidRecord();
   }
@@ -277,6 +293,14 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     testExecutions: value.testExecutions,
     tests,
     errors,
+    ...(value.commandResult === undefined
+      ? {}
+      : {
+          commandResult: {
+            exitCode: value.commandResult.exitCode,
+            signal: value.commandResult.signal,
+          },
+        }),
   };
 }
 
@@ -310,6 +334,9 @@ function cloneRecord(record: ExecutionRunRecord): ExecutionRunRecord {
         : { reads: test.reads.map(cloneReadRecord) }),
     })),
     errors: record.errors.map((error) => ({ ...error })),
+    ...(record.commandResult === undefined
+      ? {}
+      : { commandResult: { ...record.commandResult } }),
   };
 }
 
@@ -393,6 +420,22 @@ function cloneJsonValue(value: JsonValue): JsonValue {
   if (Array.isArray(value)) return value.map(cloneJsonValue);
   return Object.fromEntries(
     Object.entries(value).map(([key, entry]) => [key, cloneJsonValue(entry)]),
+  );
+}
+
+function isCommandResult(
+  value: unknown,
+): value is NonNullable<ExecutionRunRecord["commandResult"]> {
+  return (
+    isRecord(value) &&
+    (value.exitCode === null ||
+      (typeof value.exitCode === "number" &&
+        Number.isSafeInteger(value.exitCode) &&
+        value.exitCode >= 0)) &&
+    (value.signal === null ||
+      (typeof value.signal === "string" && value.signal.length > 0)) &&
+    !(value.exitCode !== null && value.signal !== null) &&
+    (value.exitCode !== null || value.signal !== null)
   );
 }
 

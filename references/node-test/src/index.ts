@@ -445,6 +445,7 @@ function normalizeRun(run: NodeTestRun, root: string): NormalizedNodeRun {
   const testRoot = resolvePath(root, run.testRoot ?? ".");
   const files = run.files.map((file) => resolvePath(testRoot, file));
   const configuration: JsonValue = {
+    framework: nodeTestPluginId,
     root,
     testRoot,
     files,
