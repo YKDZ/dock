@@ -5,8 +5,10 @@ import type {
   Config,
   ConfigInput,
   DeclarationSource,
+  PluginIdentityMatches,
   Reference,
   ReferencePlugin,
+  ReferenceValue,
   RegisteredReference,
 } from "./contracts.ts";
 
@@ -46,8 +48,105 @@ export function createReference<
   return result;
 }
 
-export function definePlugin<Plugin extends ReferencePlugin>(
-  plugin: Plugin,
+type PluginReferenceArgument<
+  Plugin,
+  Method extends "validate" | "collect" | "read",
+> = Method extends keyof Plugin
+  ? Plugin[Method] extends (...arguments_: infer Arguments) => unknown
+    ? Arguments extends readonly [infer Ref, ...unknown[]]
+      ? Ref extends Reference
+        ? Ref
+        : never
+      : never
+    : never
+  : never;
+
+type PluginReferenceType<Plugin> = [
+  PluginReferenceArgument<Plugin, "validate">,
+] extends [never]
+  ? [PluginReferenceArgument<Plugin, "collect">] extends [never]
+    ? Reference
+    : PluginReferenceArgument<Plugin, "collect">
+  : PluginReferenceArgument<Plugin, "validate">;
+
+type PluginSuccessValue<Result> = Result extends {
+  readonly kind: "value";
+  readonly value: infer Value;
+}
+  ? Value
+  : Result extends {
+        readonly kind: "collection";
+        readonly collection: {
+          readonly members: readonly (infer Member)[];
+        };
+      }
+    ? Member extends { readonly value: infer Value }
+      ? Value
+      : never
+    : never;
+
+type PluginCollectedValue<Plugin> = Plugin extends {
+  readonly collect: (...arguments_: never[]) => infer Result;
+}
+  ? PluginSuccessValue<Awaited<Result>>
+  : never;
+
+type PluginReadValue<Plugin> = Plugin extends {
+  readonly read: (...arguments_: never[]) => infer Result;
+}
+  ? Awaited<Result> extends { readonly value: infer Value }
+    ? Value
+    : never
+  : never;
+
+type PluginIdType<Plugin> = Plugin extends {
+  readonly id: infer PluginId extends string;
+}
+  ? PluginId
+  : string;
+
+type AcceptsPluginReference<Ref extends Reference, Accepted> = [
+  Accepted,
+] extends [never]
+  ? true
+  : [Ref] extends [Accepted]
+    ? true
+    : false;
+
+type PluginValueContractForReference<Plugin, Ref extends Reference> = [
+  PluginCollectedValue<Plugin>,
+] extends [ReferenceValue<Ref>]
+  ? AcceptsPluginReference<
+      Ref,
+      PluginReferenceArgument<Plugin, "collect">
+    > extends true
+    ? Plugin extends { readonly read: (...arguments_: never[]) => unknown }
+      ? [PluginReadValue<Plugin>] extends [ReferenceValue<Ref>]
+        ? AcceptsPluginReference<
+            Ref,
+            PluginReferenceArgument<Plugin, "read">
+          > extends true
+          ? unknown
+          : never
+        : never
+      : unknown
+    : never
+  : never;
+
+type PluginValueContract<Plugin> =
+  PluginReferenceType<Plugin> extends infer Ref extends Reference
+    ? PluginIdentityMatches<PluginIdType<Plugin>, Ref> extends true
+      ? PluginValueContractForReference<Plugin, Ref>
+      : never
+    : never;
+
+type ValidatedPlugins<Plugins extends readonly ReferencePlugin[]> = {
+  readonly [Index in keyof Plugins]: Plugins[Index] &
+    PluginValueContract<NoInfer<Plugins[Index]>>;
+};
+
+export function definePlugin<const Plugin extends ReferencePlugin>(
+  plugin: Plugin & PluginValueContract<Plugin>,
 ): Plugin {
   assertPlugin(plugin);
   return plugin;
@@ -77,7 +176,11 @@ export function defineConfig<
   const Bindings extends readonly Binding<
     readonly RegisteredReference<Plugins>[]
   >[],
->(input: ConfigInput<Plugins, Bindings>): Config<Plugins, Bindings> {
+>(
+  input: ConfigInput<Plugins, Bindings> & {
+    readonly plugins: ValidatedPlugins<Plugins>;
+  },
+): Config<Plugins, Bindings> {
   validateConfig(input);
   return input;
 }

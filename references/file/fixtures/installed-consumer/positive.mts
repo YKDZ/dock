@@ -38,6 +38,33 @@ const fixturePlugin: ReferencePlugin<
   },
 });
 
+type DirectPluginReference = Reference<
+  "direct-plugin",
+  "direct-document",
+  string,
+  string
+>;
+const directPlugin = {
+  id: "direct-plugin",
+  validate(reference: DirectPluginReference): void {
+    void reference;
+  },
+  collect(reference: DirectPluginReference): PluginResult<string> {
+    return { kind: "value", value: reference.target };
+  },
+};
+const directDocument = createReference<
+  "direct-plugin",
+  "direct-document",
+  string,
+  string
+>("direct-plugin", "direct-document", "document fact");
+const directConfig = defineConfig({
+  plugins: [directPlugin],
+  bindings: [binding("direct-document", [directDocument])],
+});
+void directConfig;
+
 const changelog = createReference<
   "fixture-plugin",
   "changelog",

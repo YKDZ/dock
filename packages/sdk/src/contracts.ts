@@ -69,7 +69,7 @@ type BivariantHandler<Arguments extends unknown[], Result> = {
 export interface ReferencePlugin<
   PluginId extends string = string,
   Ref extends Reference<PluginId> = Reference<PluginId>,
-  Value extends JsonValue = JsonValue,
+  Value extends ReferenceValue<Ref> = ReferenceValue<Ref>,
 > {
   readonly id: PluginId;
   /** 在任何引用开始采集前验证插件专属声明形状；不得读取外部目标。 */
@@ -84,7 +84,7 @@ export interface ReferencePlugin<
 export interface ReadableReferencePlugin<
   PluginId extends string = string,
   Ref extends Reference<PluginId> = Reference<PluginId>,
-  Value extends JsonValue = JsonValue,
+  Value extends ReferenceValue<Ref> = ReferenceValue<Ref>,
 > extends ReferencePlugin<PluginId, Ref, Value> {
   readonly read: BivariantHandler<
     [reference: Ref, context: PluginContext],
@@ -120,15 +120,39 @@ export type ReferenceValue<Ref extends Reference = Reference> =
     ? Value
     : never;
 
+/** 静态身份都已收窄时要求插件 ID 与引用处理器 ID 精确一致。 */
+export type PluginIdentityMatches<
+  PluginId extends string,
+  Ref extends Reference,
+> = string extends PluginId
+  ? true
+  : string extends Ref["pluginId"]
+    ? true
+    : [PluginId] extends [Ref["pluginId"]]
+      ? [Ref["pluginId"]] extends [PluginId]
+        ? true
+        : false
+      : false;
+
 export type ReadableReferenceOf<Plugins extends readonly ReferencePlugin[]> =
   PluginReadableReference<Plugins[number]>;
 
 type PluginReference<Plugin> =
-  Plugin extends ReferencePlugin<string, infer Ref, JsonValue> ? Ref : never;
+  Plugin extends ReferencePlugin<string, infer Ref, infer _Value>
+    ? Plugin extends { readonly id: infer PluginId extends string }
+      ? PluginIdentityMatches<PluginId, Ref> extends true
+        ? Ref
+        : never
+      : Ref
+    : never;
 
 type PluginReadableReference<Plugin> =
-  Plugin extends ReadableReferencePlugin<string, infer Ref, JsonValue>
-    ? Ref
+  Plugin extends ReadableReferencePlugin<string, infer Ref, infer _Value>
+    ? Plugin extends { readonly id: infer PluginId extends string }
+      ? PluginIdentityMatches<PluginId, Ref> extends true
+        ? Ref
+        : never
+      : Ref
     : never;
 
 export type ConfigInput<
