@@ -4,6 +4,9 @@ import {
   createReference,
   defineConfig,
   definePlugin,
+  readReference,
+  type Config,
+  type PluginContext,
   type PluginReadResult,
   type PluginResult,
   type Reference,
@@ -64,7 +67,7 @@ type StringReaderReference = Reference<
 
 // @ts-expect-error 插件采集成功值必须符合引用声明的 string 类型。
 const inconsistentCollector = definePlugin({
-  id: "typed-collector",
+  id: "typed-reader",
   validate(_reference: StringReaderReference): void {},
   collect(_reference: StringReaderReference): PluginResult<number> {
     return { kind: "value", value: 42 };
@@ -86,7 +89,7 @@ const inconsistentReader = definePlugin({
 void inconsistentReader;
 
 const directConfigMismatch = {
-  id: "typed-direct-config",
+  id: "typed-reader",
   validate(_reference: StringReaderReference): void {},
   collect(_reference: StringReaderReference): PluginResult<number> {
     return { kind: "value", value: 42 };
@@ -97,6 +100,59 @@ const directConfigMismatch = {
 };
 // @ts-expect-error defineConfig 也必须拒绝未经过 definePlugin 的错配实现。
 defineConfig({ plugins: [directConfigMismatch], bindings: [] });
+
+type WantedReference = Reference<"wanted", "registration", string, string>;
+const wantedReference = createReference<
+  "wanted",
+  "registration",
+  string,
+  string
+>("wanted", "registration", "target");
+
+// @ts-expect-error definePlugin 应拒绝与静态引用身份不符的插件 ID。
+definePlugin({
+  id: "other",
+  validate(_reference: WantedReference): void {},
+  collect(_reference: WantedReference): PluginResult<string> {
+    return { kind: "value", value: "ok" };
+  },
+});
+
+defineConfig({
+  plugins: [
+    // @ts-expect-error 配置也应拒绝普通对象的静态身份错配。
+    {
+      id: "other",
+      validate(_reference: WantedReference): void {},
+      collect(_reference: WantedReference): PluginResult<string> {
+        return { kind: "value", value: "ok" };
+      },
+    },
+  ],
+  bindings: [
+    // @ts-expect-error 绑定也不能把 ID 错配插件的引用当作已登记。
+    binding("wanted", [wantedReference]),
+  ],
+});
+
+type MismatchedReadablePlugin = {
+  readonly id: "other";
+  validate(reference: WantedReference): void;
+  collect(
+    reference: WantedReference,
+    context: PluginContext,
+  ): PluginResult<string>;
+  read(
+    reference: WantedReference,
+    context: PluginContext,
+  ): PluginReadResult<string>;
+};
+declare const mismatchedConfig: Config<
+  readonly [MismatchedReadablePlugin],
+  readonly []
+>;
+// @ts-expect-error 读取类型推导不能把 ID 不符的处理器当成已注册。
+void readReference(mismatchedConfig, wantedReference);
 
 const invalidCollection: PluginResult<string> = {
   kind: "collection",
