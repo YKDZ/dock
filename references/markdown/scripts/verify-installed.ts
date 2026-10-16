@@ -38,7 +38,10 @@ type InstalledReads = {
   readonly "table-cell": InstalledSelection;
   readonly "empty-cell": InstalledSelection;
   readonly "runtime-port": InstalledSelection;
+  readonly "stable-port": InstalledSelection;
   readonly standalone: InstalledSelection;
+  readonly "standalone-marker": InstalledSelection;
+  readonly "marker-document": InstalledSelection;
   readonly "ordinary-file": InstalledSelection;
 };
 
@@ -68,6 +71,7 @@ async function main(): Promise<void> {
     await copyFixtures(consumer);
     await verifyInstalledTypes(consumer);
     await verifyInstalledReads(consumer);
+    await verifyInstalledInlineScript(consumer);
     await verifyInstalledEmptyCells(consumer);
     await verifyInstalledCli(consumer);
     process.stdout.write("Markdown 安装制品公开类型、读取与 CLI 验收通过。\n");
@@ -115,7 +119,12 @@ async function copyFixtures(consumer: string): Promise<void> {
     "dock.config.mjs",
     "empty-cells.mjs",
     "guide.md",
+    "inline-script-config.mjs",
+    "inline-script-guide.md",
+    "inline-script-runtime.mjs",
+    "invalid-marker-config.mjs",
     "invalid-config.mjs",
+    "markers-guide.md",
     "negative.mts",
     "positive.mts",
     "runtime.mjs",
@@ -147,6 +156,10 @@ async function verifyInstalledTypes(consumer: string): Promise<void> {
 async function verifyInstalledReads(consumer: string): Promise<void> {
   const initial = await installedRuntime(consumer);
   const source = await readFile(join(consumer, "guide.md"), "utf8");
+  const markerSource = await readFile(
+    join(consumer, "markers-guide.md"),
+    "utf8",
+  );
   assert.equal(initial.chapter.value, "安装片段：版本一。");
   assert.equal(initial.chapter.range.start, source.indexOf("安装片段"));
   assert.equal(initial.code.value, "```ts\nconst answer = 42;\n```");
@@ -169,10 +182,167 @@ async function verifyInstalledReads(consumer: string): Promise<void> {
     initial["empty-cell"].range.end,
   );
   assert.equal(initial["runtime-port"].value, "4173");
+  assert.equal(initial["stable-port"].value, "8080");
+  assert.equal(initial["standalone-marker"].value, "独立片段");
+  assert.equal(
+    initial["marker-document"].value,
+    [
+      "😀事实 8080。",
+      "<!-- 普通注释 -->",
+      "",
+      "```md",
+      "<!-- dock:start fake -->示例<!-- dock:end fake -->",
+      "```",
+      "",
+      "行内 `<!-- dock:start inline -->示例<!-- dock:end inline -->`。",
+      '<div title="<!-- dock:start attribute -->"></div>',
+      '<script>const text = "<!-- dock:start script -->";</script>',
+      "",
+    ].join("\n"),
+  );
+  assert.equal(initial["marker-document"].range.start, 0);
+  assert.equal(initial["marker-document"].range.end, markerSource.length);
   assert.equal(initial.standalone.value, initial.chapter.value);
   assert.equal(initial["ordinary-file"].value, source);
   assert.equal(initial["ordinary-file"].range.start, 0);
   assert.equal(initial["ordinary-file"].range.end, source.length);
+}
+
+async function verifyInstalledInlineScript(consumer: string): Promise<void> {
+  const guidePath = join(consumer, "inline-script-guide.md");
+  const config = "inline-script-config.mjs";
+  const baselinePath = join(consumer, "inline-script.baseline.json");
+  const bin = join(
+    consumer,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "dock.cmd" : "dock",
+  );
+  const sourceWithReal = await readFile(guidePath, "utf8");
+
+  const initial = await installedInlineRuntime(consumer);
+  assert.equal(initial.source, sourceWithReal);
+  assertInlineValue(initial, "real", sourceWithReal);
+  assert.equal(
+    initial.whole,
+    sourceWithReal.replace(
+      "<!-- dock:start sample -->real<!-- dock:end sample -->",
+      "real",
+    ),
+  );
+
+  const baselineUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", config, "--json"],
+    consumer,
+  );
+  assert.equal(baselineUpdate.code, 0, baselineUpdate.stderr);
+  assert.equal(parseEnvelope(baselineUpdate.stdout).variant, "updated");
+  const baseline = await readFile(baselinePath);
+
+  const fakeOnly = sourceWithReal.replace(
+    "<!-- dock:start sample -->real<!-- dock:end sample -->\n",
+    "",
+  );
+  await writeFile(guidePath, fakeOnly, "utf8");
+  const fakeRead = await installedInlineRuntime(consumer);
+  assert.equal(fakeRead.source, fakeOnly);
+  assertInlineError(fakeRead, "missing-selection");
+  assert.equal(fakeRead.whole, fakeOnly);
+
+  const check = await runDock(
+    bin,
+    ["check", "--config", config, "--json"],
+    consumer,
+  );
+  assert.equal(check.code, 1, check.stderr);
+  assert.equal(parseEnvelope(check.stdout).variant, "errors");
+  assertReferenceError(check.stdout, "missing-selection", "sample");
+  const rejectedUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", config, "--json"],
+    consumer,
+  );
+  assert.equal(rejectedUpdate.code, 1, rejectedUpdate.stderr);
+  assert.equal(parseEnvelope(rejectedUpdate.stdout).variant, "rejected");
+  assert.deepEqual(await readFile(baselinePath), baseline);
+
+  await writeFile(guidePath, sourceWithReal, "utf8");
+  const restored = await installedInlineRuntime(consumer);
+  assertInlineValue(restored, "real", sourceWithReal);
+  assert.equal(
+    restored.whole,
+    sourceWithReal.replace(
+      "<!-- dock:start sample -->real<!-- dock:end sample -->",
+      "real",
+    ),
+  );
+}
+
+type InstalledInlineRuntime = {
+  readonly source: string;
+  readonly selected: RecordValue;
+  readonly collected: RecordValue;
+  readonly whole: string;
+};
+
+async function installedInlineRuntime(
+  consumer: string,
+): Promise<InstalledInlineRuntime> {
+  const result = await run(
+    "node",
+    [join(consumer, "inline-script-runtime.mjs")],
+    consumer,
+  );
+  assert.equal(
+    result.code,
+    0,
+    `安装制品段内脚本定位场景失败：\n${result.stdout}\n${result.stderr}`,
+  );
+  const parsed: unknown = JSON.parse(result.stdout);
+  assert.ok(isRecord(parsed));
+  assert.ok(typeof parsed.source === "string");
+  assert.ok(isRecord(parsed.selected));
+  assert.ok(isRecord(parsed.collected));
+  assert.ok(typeof parsed.whole === "string");
+  return parsed as InstalledInlineRuntime;
+}
+
+function assertInlineValue(
+  runtime: InstalledInlineRuntime,
+  expected: string,
+  source: string,
+): void {
+  assert.equal(runtime.selected.kind, "value");
+  assert.equal(runtime.selected.value, expected);
+  assert.ok(isRecord(runtime.selected.range));
+  assert.equal(runtime.selected.range.path, "inline-script-guide.md");
+  assert.equal(runtime.selected.range.start, source.indexOf(expected));
+  assert.equal(
+    runtime.selected.range.end,
+    source.indexOf(expected) + expected.length,
+  );
+  assert.equal(
+    source.slice(
+      runtime.selected.range.start as number,
+      runtime.selected.range.end as number,
+    ),
+    expected,
+  );
+  assert.equal(runtime.collected.kind, "value");
+  assert.equal(runtime.collected.value, expected);
+  assert.deepEqual(runtime.collected.range, runtime.selected.range);
+}
+
+function assertInlineError(
+  runtime: InstalledInlineRuntime,
+  expected: string,
+): void {
+  assert.equal(runtime.selected.kind, "error");
+  assert.equal(runtime.selected.code, expected);
+  assert.equal(runtime.collected.kind, "error");
+  assert.ok(isRecord(runtime.collected.error));
+  assert.equal(runtime.collected.error.code, expected);
 }
 
 async function verifyInstalledEmptyCells(consumer: string): Promise<void> {
@@ -251,6 +421,12 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
     "chapter",
     initialReads.chapter,
   );
+  assertReportSelection(
+    initial.stdout,
+    "markdown-policy",
+    "stable-port",
+    initialReads["stable-port"],
+  );
 
   const update = await runDock(
     bin,
@@ -277,7 +453,12 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assert.deepEqual(await readFile(baselinePath), originalBaseline);
 
   const original = await readFile(join(consumer, "guide.md"), "utf8");
-  const changedSource = original.replace("版本一", "版本二");
+  const changedSource = original
+    .replace("版本一", "版本二")
+    .replace(
+      "<!-- dock:start stable-port -->8080<!-- dock:end stable-port -->",
+      "<!-- dock:start stable-port -->8081<!-- dock:end stable-port -->",
+    );
   await writeFile(join(consumer, "guide.md"), changedSource, "utf8");
   const changed = await runDock(
     bin,
@@ -290,12 +471,27 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
     referenceChange(readReport(changed.stdout), "markdown-policy", "chapter"),
     "fact",
   );
+  assert.equal(
+    referenceChange(
+      readReport(changed.stdout),
+      "markdown-policy",
+      "stable-port",
+    ),
+    "fact",
+  );
   const changedReads = await installedRuntime(consumer);
   assertReportSelection(
     changed.stdout,
     "markdown-policy",
     "chapter",
     changedReads.chapter,
+  );
+  assert.equal(changedReads["stable-port"].value, "8081");
+  assertReportSelection(
+    changed.stdout,
+    "markdown-policy",
+    "stable-port",
+    changedReads["stable-port"],
   );
   const changedUpdate = await runDock(
     bin,
@@ -334,9 +530,19 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
     "chapter",
     movedReads.chapter,
   );
+  assertReportSelection(
+    moved.stdout,
+    "markdown-policy",
+    "stable-port",
+    movedReads["stable-port"],
+  );
   assert.notEqual(
     movedReads.chapter.range.start,
     initialReads.chapter.range.start,
+  );
+  assert.notEqual(
+    movedReads["stable-port"].range.start,
+    initialReads["stable-port"].range.start,
   );
   assert.deepEqual(await readFile(baselinePath), updatedBaseline);
 
@@ -413,6 +619,93 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assert.equal(rejectedAmbiguous.code, 1, rejectedAmbiguous.stderr);
   assert.equal(parseEnvelope(rejectedAmbiguous.stdout).variant, "rejected");
   assert.deepEqual(await readFile(baselinePath), chosenBaseline);
+
+  const missingMarkerSource = ambiguousSource.replace(
+    "<!-- dock:end stable-port -->",
+    "",
+  );
+  await writeFile(join(consumer, "guide.md"), missingMarkerSource, "utf8");
+  const missingMarker = await runDock(
+    bin,
+    ["check", "--config", config, "--json"],
+    consumer,
+    { DOCK_MARKDOWN_SHORT_SECTION: "1" },
+  );
+  assert.equal(missingMarker.code, 1, missingMarker.stderr);
+  assert.equal(parseEnvelope(missingMarker.stdout).variant, "errors");
+  assertReferenceError(
+    missingMarker.stdout,
+    "missing-selection",
+    "stable-port",
+  );
+  const textMissingMarker = await runDock(
+    bin,
+    ["check", "--config", config],
+    consumer,
+    { DOCK_MARKDOWN_SHORT_SECTION: "1" },
+  );
+  assert.equal(textMissingMarker.code, 1, textMissingMarker.stderr);
+  const missingMarkerText = `${textMissingMarker.stdout}\n${textMissingMarker.stderr}`;
+  assert.ok(missingMarkerText.includes("stable-port"));
+  assert.ok(missingMarkerText.includes("missing-selection"));
+  assert.ok(
+    missingMarkerText.includes(
+      referenceErrorMessage(
+        missingMarker.stdout,
+        "stable-port",
+        "missing-selection",
+      ),
+    ),
+  );
+  const rejectedMissingMarker = await runDock(
+    bin,
+    ["baseline", "update", "--config", config, "--json"],
+    consumer,
+    { DOCK_MARKDOWN_SHORT_SECTION: "1" },
+  );
+  assert.equal(rejectedMissingMarker.code, 1, rejectedMissingMarker.stderr);
+  assert.equal(parseEnvelope(rejectedMissingMarker.stdout).variant, "rejected");
+  assert.deepEqual(await readFile(baselinePath), chosenBaseline);
+
+  const duplicateMarkerSource = `${ambiguousSource}\n<!-- dock:start stable-port -->8080<!-- dock:end stable-port -->`;
+  await writeFile(join(consumer, "guide.md"), duplicateMarkerSource, "utf8");
+  const duplicateMarker = await runDock(
+    bin,
+    ["check", "--config", config, "--json"],
+    consumer,
+    { DOCK_MARKDOWN_SHORT_SECTION: "1" },
+  );
+  assert.equal(duplicateMarker.code, 1, duplicateMarker.stderr);
+  assert.equal(parseEnvelope(duplicateMarker.stdout).variant, "errors");
+  assertReferenceError(
+    duplicateMarker.stdout,
+    "ambiguous-selection",
+    "stable-port",
+  );
+  const rejectedDuplicateMarker = await runDock(
+    bin,
+    ["baseline", "update", "--config", config, "--json"],
+    consumer,
+    { DOCK_MARKDOWN_SHORT_SECTION: "1" },
+  );
+  assert.equal(rejectedDuplicateMarker.code, 1, rejectedDuplicateMarker.stderr);
+  assert.equal(
+    parseEnvelope(rejectedDuplicateMarker.stdout).variant,
+    "rejected",
+  );
+  assert.deepEqual(await readFile(baselinePath), chosenBaseline);
+
+  const invalidMarkerConfig = await runDock(
+    bin,
+    ["check", "--config", "invalid-marker-config.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(invalidMarkerConfig.code, 1, invalidMarkerConfig.stderr);
+  assert.match(
+    `${invalidMarkerConfig.stdout}\n${invalidMarkerConfig.stderr}`,
+    /标记选择|标记 ID/u,
+  );
+  assert.deepEqual(await readFile(baselinePath), chosenBaseline);
   assert.notDeepEqual(chosenBaseline, originalBaseline);
 }
 
@@ -477,7 +770,11 @@ function referenceChange(
     : undefined;
 }
 
-function assertReferenceError(output: string, code: string): void {
+function assertReferenceError(
+  output: string,
+  code: string,
+  referenceId?: string,
+): void {
   const report = readReport(output);
   assert.ok(Array.isArray(report.bindings));
   assert.equal(
@@ -485,11 +782,39 @@ function assertReferenceError(output: string, code: string): void {
       (binding) =>
         isRecord(binding) &&
         Array.isArray(binding.errors) &&
-        binding.errors.some((error) => isRecord(error) && error.code === code),
+        binding.errors.some(
+          (error) =>
+            isRecord(error) &&
+            error.code === code &&
+            (referenceId === undefined || error.referenceId === referenceId),
+        ),
     ),
     true,
     `报告未包含引用错误 ${code}`,
   );
+}
+
+function referenceErrorMessage(
+  output: string,
+  referenceId: string,
+  code: string,
+): string {
+  const report = readReport(output);
+  assert.ok(Array.isArray(report.bindings));
+  for (const binding of report.bindings) {
+    if (!isRecord(binding) || !Array.isArray(binding.errors)) continue;
+    for (const error of binding.errors) {
+      if (
+        isRecord(error) &&
+        error.referenceId === referenceId &&
+        error.code === code &&
+        typeof error.message === "string"
+      ) {
+        return error.message;
+      }
+    }
+  }
+  assert.fail(`报告未包含引用 ${referenceId} 的错误 ${code}`);
 }
 
 function parseEnvelope(output: string): RecordValue {

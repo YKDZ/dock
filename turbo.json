@@ -56,7 +56,8 @@
         "@dock/reference-file#pack",
         "@dock/reference-markdown#pack",
         "@dock/reference-node-test#pack",
-        "@dock/reference-vitest#pack"
+        "@dock/reference-vitest#pack",
+        "@dock/reference-typescript#pack"
       ],
       "cache": false,
       "outputs": [],

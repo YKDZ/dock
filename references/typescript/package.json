@@ -15,11 +15,18 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json --pretty false",
+    "pack": "mkdir -p .artifacts && pnpm pack --pack-destination .artifacts",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix . --fix",
+    "test": "node --conditions=source --test --test-reporter=spec 'test/**/*.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@dock/reference-file": "workspace:*",
+    "@dock/sdk": "workspace:*",
+    "typescript": "5.9.3"
   },
   "devDependencies": {
     "@dock/typescript-config": "workspace:*",

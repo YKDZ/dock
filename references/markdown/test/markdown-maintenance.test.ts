@@ -214,3 +214,270 @@ test("同一 Markdown 文件显式选普通文件插件时保留原文", async (
     assert.equal(await readFile(join(root, "guide.md"), "utf8"), result.value);
   });
 });
+
+test("标记选择读取段内当前内容并返回原文 UTF-16 范围", async () => {
+  const source =
+    "😀前言\n\n说明 <!-- dock:start port -->4173<!-- dock:end port --> 结束。\n";
+  await withDocument(source, async (root, config) => {
+    const reference = markdown
+      .from("guide.md")
+      .marker("port")
+      .reference("port");
+
+    const read = await readReference(config, reference);
+    assert.equal(read.value, "4173");
+    assert.deepEqual(read.range, {
+      path: "guide.md",
+      start: source.indexOf("4173"),
+      end: source.indexOf("4173") + "4173".length,
+    });
+    assert.equal(source.slice(read.range!.start, read.range!.end), read.value);
+
+    assert.deepEqual(await markdown.collect(reference, { root }), {
+      kind: "value",
+      value: read.value,
+      range: read.range,
+    });
+  });
+});
+
+test("段内脚本字符串中的同形注释不参与标记选择或事实清理", async () => {
+  const script =
+    '前文 <script>const example = "<!-- dock:start sample -->fake<!-- dock:end sample -->";</script> 后文';
+  await withDocument(script, async (_root, config) => {
+    const selection = markdown.from("guide.md").marker("sample");
+    await assert.rejects(
+      readReference(config, selection.reference("sample")),
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "missing-selection",
+    );
+
+    const whole = await readReference(
+      config,
+      markdown.from("guide.md").reference("whole"),
+    );
+    assert.equal(whole.value, script);
+
+    const withReal = `${script}\n\n<!-- dock:start sample -->real<!-- dock:end sample -->`;
+    await writeFile(join(_root, "guide.md"), withReal, "utf8");
+    const selected = await readReference(config, selection.reference("sample"));
+    assert.equal(selected.value, "real");
+    assert.equal(
+      withReal.slice(selected.range!.start, selected.range!.end),
+      "real",
+    );
+    const fact = await readReference(
+      config,
+      markdown.from("guide.md").reference("whole"),
+    );
+    assert.equal(fact.value, `${script}\n\nreal`);
+  });
+});
+
+test("比较事实只移除真实定位注释并保留普通注释与示例文字", async () => {
+  const source = [
+    "😀事实 <!-- dock:start port -->4173<!-- dock:end port -->。",
+    "<!-- 普通注释 -->",
+    "",
+    "```md",
+    "<!-- dock:start code -->示例<!-- dock:end code -->",
+    "```",
+    "",
+    "行内 `<!-- dock:start inline -->示例<!-- dock:end inline -->`。",
+    '<div title="<!-- dock:start attribute -->"></div>',
+    '<script>const text = "<!-- dock:start script -->";</script>',
+    "",
+  ].join("\n");
+  await withDocument(source, async (root, config) => {
+    const reference = markdown.from("guide.md").reference("whole");
+    const read = await readReference(config, reference);
+    assert.equal(
+      read.value,
+      [
+        "😀事实 4173。",
+        "<!-- 普通注释 -->",
+        "",
+        "```md",
+        "<!-- dock:start code -->示例<!-- dock:end code -->",
+        "```",
+        "",
+        "行内 `<!-- dock:start inline -->示例<!-- dock:end inline -->`。",
+        '<div title="<!-- dock:start attribute -->"></div>',
+        '<script>const text = "<!-- dock:start script -->";</script>',
+        "",
+      ].join("\n"),
+    );
+    assert.deepEqual(read.range, {
+      path: "guide.md",
+      start: 0,
+      end: source.length,
+    });
+    assert.deepEqual(await markdown.collect(reference, { root }), {
+      kind: "value",
+      value: read.value,
+      range: read.range,
+    });
+  });
+});
+
+test("标记支持段落、表格单元格、跨块及有序连续收窄", async () => {
+  const paragraph =
+    "# 安装\n\n默认端口 <!-- dock:start port -->4173<!-- dock:end port -->。\n";
+  await withDocument(paragraph, async (_root, config) => {
+    const result = await readReference(
+      config,
+      markdown
+        .from("guide.md")
+        .section("安装")
+        .marker("port")
+        .reference("port"),
+    );
+    assert.equal(result.value, "4173");
+    assert.equal(
+      paragraph.slice(result.range!.start, result.range!.end),
+      "4173",
+    );
+  });
+
+  const table = [
+    "| 名称 | 说明 |",
+    "| --- | --- |",
+    "| api | 当前值 <!-- dock:start api -->4173<!-- dock:end api --> |",
+    "",
+  ].join("\n");
+  await withDocument(table, async (_root, config) => {
+    const result = await readReference(
+      config,
+      markdown.from("guide.md").marker("api").reference("api"),
+    );
+    assert.equal(result.value, "4173");
+    assert.equal(table.slice(result.range!.start, result.range!.end), "4173");
+  });
+
+  const blocks =
+    "<!-- dock:start scope -->\n\n第一段。\n\n- 第二块\n\n<!-- dock:end scope -->";
+  await withDocument(blocks, async (_root, config) => {
+    const reference = markdown.from("guide.md").marker("scope");
+    const full = await readReference(config, reference.reference("scope"));
+    assert.equal(full.value, "\n\n第一段。\n\n- 第二块\n\n");
+    assert.equal(blocks.slice(full.range!.start, full.range!.end), full.value);
+
+    const narrowed = await readReference(
+      config,
+      reference
+        .node({ type: "listItem", contains: "第二块" })
+        .reference("item"),
+    );
+    assert.equal(narrowed.value, "- 第二块");
+    assert.equal(
+      blocks.slice(narrowed.range!.start, narrowed.range!.end),
+      "- 第二块",
+    );
+  });
+});
+
+test("标记缺失、重复、倒序及越出当前结构范围时明确失败", async () => {
+  const cases: {
+    readonly source: string;
+    readonly id: string;
+    readonly selection?: (
+      builder: ReturnType<typeof markdown.from>,
+    ) => ReturnType<typeof markdown.from>;
+    readonly code: string;
+  }[] = [
+    {
+      source: "<!-- dock:end value -->正文",
+      id: "value",
+      code: "missing-selection",
+    },
+    {
+      source: "<!-- dock:start value -->正文",
+      id: "value",
+      code: "missing-selection",
+    },
+    {
+      source: "<!-- dock:start value extra -->正文<!-- dock:end value -->",
+      id: "value",
+      code: "missing-selection",
+    },
+    {
+      source: "<!-- dock:start first -->正文<!-- dock:end second -->",
+      id: "first",
+      code: "missing-selection",
+    },
+    {
+      source:
+        "<!-- dock:start value -->一<!-- dock:start value -->二<!-- dock:end value -->",
+      id: "value",
+      code: "ambiguous-selection",
+    },
+    {
+      source:
+        "<!-- dock:start value -->一<!-- dock:end value --><!-- dock:end value -->",
+      id: "value",
+      code: "ambiguous-selection",
+    },
+    {
+      source: "<!-- dock:end value -->正文<!-- dock:start value -->",
+      id: "value",
+      code: "invalid-selector",
+    },
+    {
+      source:
+        "# 第一节\n\n普通内容。\n\n# 第二节\n\n<!-- dock:start value -->4173<!-- dock:end value -->",
+      id: "value",
+      selection: (builder) => builder.section("第一节"),
+      code: "missing-selection",
+    },
+    {
+      source:
+        "# 第一节\n\n<!-- dock:start value -->一<!-- dock:end value -->\n\n# 第二节\n\n<!-- dock:start value -->二<!-- dock:end value -->",
+      id: "value",
+      selection: (builder) => builder.section("第一节"),
+      code: "ambiguous-selection",
+    },
+    {
+      source: [
+        "```md",
+        "<!-- dock:start value -->示例<!-- dock:end value -->",
+        "```",
+        "",
+        "`<!-- dock:start value -->行内示例<!-- dock:end value -->`",
+        '<div title="<!-- dock:start value -->"></div>',
+        '<script>const text = "<!-- dock:start value -->";</script>',
+      ].join("\n"),
+      id: "value",
+      code: "missing-selection",
+    },
+  ];
+
+  for (const example of cases) {
+    await withDocument(example.source, async (_root, config) => {
+      let builder = markdown.from("guide.md");
+      if (example.selection !== undefined) {
+        builder = example.selection(builder);
+      }
+      const reference = builder.marker(example.id).reference("value");
+      await assert.rejects(
+        readReference(config, reference),
+        (error: unknown) => {
+          return (
+            typeof error === "object" &&
+            error !== null &&
+            "code" in error &&
+            error.code === example.code
+          );
+        },
+        example.source,
+      );
+      const collected = await markdown.collect(reference, { root: _root });
+      assert.equal(collected.kind, "error", example.source);
+      if (collected.kind === "error") {
+        assert.equal(collected.error.code, example.code, example.source);
+      }
+    });
+  }
+});
