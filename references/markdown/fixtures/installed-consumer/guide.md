@@ -40,3 +40,9 @@ port=4173
 # 运维
 
 ## 收尾
+
+# 标记位置
+
+<!-- dock:start stable-port -->8080<!-- dock:end stable-port -->
+
+<!-- dock:start standalone -->独立片段<!-- dock:end standalone -->

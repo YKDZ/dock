@@ -18,6 +18,10 @@ const standalone: MarkdownReference<"standalone"> = markdown
   .from("guide.md")
   .node({ type: "paragraph", contains: "单独读取" })
   .reference("standalone");
+const standaloneMarker: MarkdownReference<"standalone-marker"> = markdown
+  .from("guide.md")
+  .marker("standalone")
+  .reference("standalone-marker");
 const table = markdown
   .from("guide.md")
   .node({ type: "table" })
@@ -39,6 +43,10 @@ const independentRead: Promise<PluginReadResult<string>> = readReference(
   config,
   standalone,
 );
+const independentMarkerRead: Promise<PluginReadResult<string>> = readReference(
+  config,
+  standaloneMarker,
+);
 const tableRead: Promise<PluginReadResult<string>> = readReference(
   config,
   table,
@@ -51,6 +59,7 @@ const selectedValue: ReferenceValue<typeof chapter> = "const answer = 42";
 
 void markdownValue;
 void independentRead;
+void independentMarkerRead;
 void tableRead;
 void fileValue;
 void selectedValue;
