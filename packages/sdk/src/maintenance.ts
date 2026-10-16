@@ -308,29 +308,50 @@ function runConfigWorker<T>(
       workerData: { operation, configPath },
       execArgv,
     });
-    let settled = false;
-    worker.once("message", (message: WorkerMessage) => {
-      settled = true;
-      if (message.ok) {
-        resolveResult(message.result as T);
-      } else {
-        rejectResult(new MaintenanceError(message.code, message.message));
+    let finishing = false;
+    const finishAfterTermination = async (
+      settle: () => void,
+    ): Promise<void> => {
+      try {
+        await worker.terminate();
+        settle();
+      } catch (error) {
+        rejectResult(
+          new MaintenanceError(
+            "config-worker-failed",
+            `配置维护 Worker 收尾失败：${errorMessage(error)}`,
+            { cause: error },
+          ),
+        );
       }
+    };
+    worker.once("message", (message: WorkerMessage) => {
+      if (finishing) return;
+      finishing = true;
+      void finishAfterTermination(() => {
+        if (message.ok) {
+          resolveResult(message.result as T);
+        } else {
+          rejectResult(new MaintenanceError(message.code, message.message));
+        }
+      });
     });
     worker.once("error", (error) => {
-      if (settled) return;
-      settled = true;
-      rejectResult(
-        new MaintenanceError(
-          "config-worker-failed",
-          `配置维护 Worker 失败：${error.message}`,
-          { cause: error },
+      if (finishing) return;
+      finishing = true;
+      void finishAfterTermination(() =>
+        rejectResult(
+          new MaintenanceError(
+            "config-worker-failed",
+            `配置维护 Worker 失败：${error.message}`,
+            { cause: error },
+          ),
         ),
       );
     });
     worker.once("exit", (code) => {
-      if (settled) return;
-      settled = true;
+      if (finishing) return;
+      finishing = true;
       rejectResult(
         new MaintenanceError(
           "config-worker-failed",
