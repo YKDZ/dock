@@ -5,6 +5,7 @@ import {
   copyFile,
   cp,
   mkdtemp,
+  realpath,
   readFile,
   rm,
   writeFile,
@@ -12,6 +13,8 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import { verifyInstalledScope } from "./verify-installed-scope.ts";
 
 type ProcessResult = {
   readonly code: number;
@@ -25,6 +28,7 @@ type CliEnvelope = {
   readonly kind: string;
   readonly variant?: string;
   readonly data?: {
+    readonly code?: string;
     readonly report?: unknown;
     readonly errors?: readonly {
       readonly bindingId?: string;
@@ -37,11 +41,29 @@ type CliEnvelope = {
 type MaintenanceReport = {
   readonly execution?: {
     readonly commandAttempts: number;
+    readonly failedCommands: number;
     readonly testExecutions: number;
+    readonly reads?: readonly {
+      readonly runId: string;
+      readonly testId: string;
+      readonly referenceId: string;
+      readonly value: unknown;
+      readonly range?: {
+        readonly path: string;
+        readonly start: number;
+        readonly end: number;
+      };
+    }[];
   };
   readonly bindings: readonly {
     readonly bindingId: string;
     readonly errors?: readonly { readonly code: string }[];
+    readonly changes?: readonly {
+      readonly kind: string;
+      readonly referenceId: string;
+      readonly before?: unknown;
+      readonly after?: unknown;
+    }[];
   }[];
 };
 
@@ -61,8 +83,8 @@ async function main(): Promise<void> {
   const artifacts = process.argv.slice(2);
   assert.equal(
     artifacts.length,
-    3,
-    "根 check:install 必须传入同批 core、SDK 与 Node test 制品。",
+    4,
+    "根 check:install 必须传入同批 core、SDK、file 与 Node test 制品。",
   );
   const tarballs = artifacts.map((artifact) =>
     resolve(process.cwd(), artifact),
@@ -71,6 +93,7 @@ async function main(): Promise<void> {
 
   const temporary = await mkdtemp(join(tmpdir(), "dock-node-installed-"));
   const consumer = join(temporary, "consumer");
+  const secondary = join(consumer, "secondary");
   try {
     await cp(fixtureDirectory, consumer, { recursive: true });
     const installation = await run(
@@ -94,8 +117,31 @@ async function main(): Promise<void> {
       `Node 正式制品干净安装失败：\n${installation.stdout}\n${installation.stderr}`,
     );
 
+    const secondaryInstallation = await run(
+      "npm",
+      [
+        "install",
+        "--prefix",
+        secondary,
+        "--no-save",
+        "--no-package-lock",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        ...tarballs,
+      ],
+      consumer,
+    );
+    assert.equal(
+      secondaryInstallation.code,
+      0,
+      `第二份 Node 正式制品干净安装失败：\n${secondaryInstallation.stdout}\n${secondaryInstallation.stderr}`,
+    );
+    await verifyPhysicalCopies(consumer, secondary);
+
     await verifyInstalledTypes(consumer);
     await verifyRuntimeInputDiagnostics(consumer);
+    await verifyRuntimeObservationDiagnostics(consumer);
     const bin = join(
       consumer,
       "node_modules",
@@ -103,6 +149,8 @@ async function main(): Promise<void> {
       process.platform === "win32" ? "dock.cmd" : "dock",
     );
     await verifyHappyRoundTrip(bin, consumer);
+    await verifyObservationAndReadScenarios(bin, consumer);
+    await verifyLoopObservedRegistrations(bin, consumer);
     await verifyEffectiveRoot(bin, consumer);
     await verifyOperationLocalExecution(consumer);
     await verifyFailureIsolation(bin, consumer);
@@ -113,11 +161,40 @@ async function main(): Promise<void> {
     await verifyConflictPreflight(bin, consumer);
     await verifyOrdinaryNodeTest(consumer);
     await verifyNoFrameworkDependency(consumer);
+    await verifyInstalledScope(consumer);
     process.stdout.write(
-      "Node 原生状态、安装类型、维护往返与故障隔离验收通过。\n",
+      "Node 观察值 17→19 漂移、alpha/beta 同源循环归属、双份安装与故障隔离验收通过。\n",
     );
   } finally {
     await rm(temporary, { recursive: true, force: true });
+  }
+}
+
+async function verifyPhysicalCopies(
+  consumer: string,
+  secondary: string,
+): Promise<void> {
+  for (const packageName of ["@dock/sdk", "@dock/reference-node-test"]) {
+    const first = join(consumer, "node_modules", packageName);
+    const second = join(secondary, "node_modules", packageName);
+    const [firstPath, secondPath] = await Promise.all([
+      realpath(first),
+      realpath(second),
+    ]);
+    assert.notEqual(
+      firstPath,
+      secondPath,
+      `${packageName} 必须来自两份物理安装`,
+    );
+    const [firstPackage, secondPackage] = await Promise.all([
+      readFile(join(firstPath, "package.json"), "utf8"),
+      readFile(join(secondPath, "package.json"), "utf8"),
+    ]);
+    assert.equal(
+      JSON.parse(firstPackage).version,
+      JSON.parse(secondPackage).version,
+      `${packageName} 两份安装必须同版本`,
+    );
   }
 }
 
@@ -153,6 +230,21 @@ async function verifyRuntimeInputDiagnostics(consumer: string): Promise<void> {
   );
 }
 
+async function verifyRuntimeObservationDiagnostics(
+  consumer: string,
+): Promise<void> {
+  const result = await run(
+    process.execPath,
+    [join(consumer, "runtime-observations.mjs")],
+    consumer,
+  );
+  assert.equal(
+    result.code,
+    0,
+    `动态观察值没有拒绝非法 JSON：\n${result.stdout}\n${result.stderr}`,
+  );
+}
+
 async function verifyHappyRoundTrip(
   bin: string,
   consumer: string,
@@ -178,14 +270,14 @@ async function verifyHappyRoundTrip(
     consumer,
   );
   assert.equal(textCheck.code, 1, textCheck.stderr);
-  assert.match(textCheck.stdout, /执行：2 个测试，1 次命令尝试/);
+  assert.match(textCheck.stdout, /执行：2 次测试尝试，1 次命令尝试/);
 
   const update = await runDock(
     bin,
     ["baseline", "update", "--config", "dock.config.mts", "--json"],
     consumer,
   );
-  assert.equal(update.code, 0, update.stderr);
+  assert.equal(update.code, 0, `${update.stderr}\n${update.stdout}`);
   const updated = parseEnvelope(update.stdout);
   assert.equal(updated.variant, "updated");
   assertExecutionSummary(requireReport(updated), 1, 2);
@@ -200,6 +292,275 @@ async function verifyHappyRoundTrip(
   const checked = parseEnvelope(current.stdout);
   assert.equal(checked.variant, "consistent");
   assertExecutionSummary(requireReport(checked), 1, 2);
+}
+
+async function verifyObservationAndReadScenarios(
+  bin: string,
+  consumer: string,
+): Promise<void> {
+  const businessText = "😀—Reading: 温度 🧭：24\nAmount: 17\n";
+  await writeFile(join(consumer, "read-business.txt"), businessText);
+  await writeFile(
+    join(consumer, "read-unassociated.txt"),
+    "Unassociated: 独立当前内容\n",
+  );
+
+  const update = await runDock(
+    bin,
+    ["baseline", "update", "--config", "observations.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(update.code, 0, `${update.stdout}\n${update.stderr}`);
+  const updated = parseEnvelope(update.stdout);
+  assert.equal(updated.variant, "updated");
+  const updatedReport = requireReport(updated);
+  assertExecutionSummary(updatedReport, 1, 1);
+  assertReadDiagnostic(
+    updatedReport,
+    "current-business-text",
+    "温度 🧭：24",
+    businessText.indexOf("温度 🧭：24"),
+  );
+  assertReadDiagnostic(
+    updatedReport,
+    "current-business-amount",
+    "17",
+    businessText.indexOf("17"),
+  );
+  assertReadDiagnostic(
+    updatedReport,
+    "unassociated-business-text",
+    "独立当前内容",
+  );
+
+  const check = await runDock(
+    bin,
+    ["check", "--config", "observations.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(check.code, 0, check.stderr);
+  const checked = parseEnvelope(check.stdout);
+  assert.equal(checked.variant, "consistent");
+  assertReadDiagnostic(
+    requireReport(checked),
+    "current-business-text",
+    "温度 🧭：24",
+    businessText.indexOf("温度 🧭：24"),
+  );
+
+  const textCheck = await runDock(
+    bin,
+    ["check", "--config", "observations.config.mts"],
+    consumer,
+  );
+  assert.equal(textCheck.code, 0, textCheck.stderr);
+  assert.match(textCheck.stdout, /测试内读取 current-business-text/);
+  assert.match(textCheck.stdout, /温度 🧭：24/);
+  assert.match(textCheck.stdout, /读取当前值并记录观察/);
+  assert.match(textCheck.stdout, /read-business\.txt/);
+
+  const changedBusinessText = businessText.replace("Amount: 17", "Amount: 19");
+  await writeFile(join(consumer, "read-business.txt"), changedBusinessText);
+  const changed = await runDock(
+    bin,
+    ["check", "--config", "observations.config.mts", "--json"],
+    consumer,
+  );
+  const changedEnvelope = parseEnvelope(changed.stdout);
+  assert.equal(changedEnvelope.variant, "changed", changed.stderr);
+  const changedReport = requireReport(changedEnvelope);
+  assertExecutionSummary(changedReport, 1, 1);
+  const numericChange = changedReport.bindings
+    .flatMap((item) => item.changes ?? [])
+    .find((item) => item.kind === "fact" && item.referenceId === "当前金额");
+  assert.deepEqual(numericChange, {
+    kind: "fact",
+    referenceId: "当前金额",
+    before: 17,
+    after: 19,
+  });
+
+  const driftUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", "observations.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(driftUpdate.code, 0, driftUpdate.stderr);
+  assert.equal(parseEnvelope(driftUpdate.stdout).variant, "updated");
+
+  const driftCheck = await runDock(
+    bin,
+    ["check", "--config", "observations.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(driftCheck.code, 0, driftCheck.stderr);
+  assert.equal(parseEnvelope(driftCheck.stdout).variant, "consistent");
+  assertExecutionSummary(requireReport(parseEnvelope(driftCheck.stdout)), 1, 1);
+
+  const diagnostics = await runDock(
+    bin,
+    ["check", "--config", "diagnostic-observations.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(diagnostics.code, 1, diagnostics.stderr);
+  const diagnosticReport = requireReport(parseEnvelope(diagnostics.stdout));
+  assertExecutionSummary(diagnosticReport, 1, 2);
+  assertBindingError(diagnosticReport, "观察缺失或重复", "observation-missing");
+  assertBindingError(
+    diagnosticReport,
+    "观察缺失或重复",
+    "observation-duplicate",
+  );
+
+  const diagnosticUpdate = await runDock(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "diagnostic-observations.config.mts",
+      "--json",
+    ],
+    consumer,
+  );
+  assert.equal(diagnosticUpdate.code, 1, diagnosticUpdate.stderr);
+  assert.equal(parseEnvelope(diagnosticUpdate.stdout).variant, "rejected");
+  await assert.rejects(
+    access(join(consumer, "diagnostic-observations.baseline.json")),
+    { code: "ENOENT" },
+  );
+
+  await verifyReadFailureDiagnostics(bin, consumer);
+}
+
+async function verifyLoopObservedRegistrations(
+  bin: string,
+  consumer: string,
+): Promise<void> {
+  const update = await runDock(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "loop-observations.config.mts",
+      "--json",
+    ],
+    consumer,
+  );
+  assert.equal(update.code, 0, `${update.stdout}\n${update.stderr}`);
+  const updated = parseEnvelope(update.stdout);
+  assert.equal(updated.variant, "updated");
+  assertExecutionSummary(requireReport(updated), 1, 2);
+
+  const baseline = JSON.parse(
+    await readFile(join(consumer, "loop-observations.baseline.json"), "utf8"),
+  ) as {
+    readonly bindings: Record<
+      string,
+      { readonly references: Record<string, { readonly value: unknown }> }
+    >;
+  };
+  assert.equal(baseline.bindings.alpha?.references["alpha 观察"]?.value, 1);
+  assert.equal(baseline.bindings.beta?.references["beta 观察"]?.value, 2);
+
+  const check = await runDock(
+    bin,
+    ["check", "--config", "loop-observations.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(check.code, 0, check.stderr);
+  assert.equal(parseEnvelope(check.stdout).variant, "consistent");
+  assertExecutionSummary(requireReport(parseEnvelope(check.stdout)), 1, 2);
+}
+
+async function verifyReadFailureDiagnostics(
+  bin: string,
+  consumer: string,
+): Promise<void> {
+  const configuration = "failed-read.config.mts";
+  const marker = join(consumer, "failed-read.marker");
+  const baselinePath = join(consumer, "failed-read.baseline.json");
+  const initialUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", configuration, "--json"],
+    consumer,
+  );
+  assert.equal(initialUpdate.code, 0, initialUpdate.stderr);
+  assert.equal(parseEnvelope(initialUpdate.stdout).variant, "updated");
+  const baselineBytes = await readFile(baselinePath);
+
+  await writeFile(marker, "fail after current read\n");
+  try {
+    const check = await runDock(
+      bin,
+      ["check", "--config", configuration, "--json"],
+      consumer,
+    );
+    assert.equal(check.code, 1, check.stderr);
+    const checkReport = requireReport(parseEnvelope(check.stdout));
+    assertBindingError(checkReport, "读取后的业务断言", "test-failed");
+    assertReadDiagnostic(
+      checkReport,
+      "current-business-text",
+      "温度 🧭：24",
+      undefined,
+      "读取后业务断言失败",
+    );
+
+    const textCheck = await runDock(
+      bin,
+      ["check", "--config", configuration],
+      consumer,
+    );
+    assert.equal(textCheck.code, 1, textCheck.stderr);
+    assert.match(textCheck.stdout, /测试内读取 current-business-text/);
+    assert.match(textCheck.stdout, /温度 🧭：24/);
+    assert.match(textCheck.stdout, /读取后业务断言失败/);
+    assert.match(textCheck.stdout, /read-business\.txt/);
+
+    const update = await runDock(
+      bin,
+      ["baseline", "update", "--config", configuration, "--json"],
+      consumer,
+    );
+    assert.equal(update.code, 1, update.stderr);
+    assert.equal(parseEnvelope(update.stdout).variant, "rejected");
+    assert.deepEqual(await readFile(baselinePath), baselineBytes);
+  } finally {
+    await rm(marker, { force: true });
+  }
+}
+
+function assertReadDiagnostic(
+  report: MaintenanceReport,
+  referenceId: string,
+  value: unknown,
+  start?: number,
+  testName = "读取当前值并记录观察",
+): void {
+  const read = report.execution?.reads?.find(
+    (candidate) => candidate.referenceId === referenceId,
+  );
+  assert.ok(
+    read,
+    `执行报告未包含读取 ${referenceId}：${JSON.stringify(report.execution)}`,
+  );
+  assert.equal(read.value, value);
+  assert.equal(typeof read.runId, "string");
+  assert.notEqual(read.runId, "");
+  const identity = JSON.parse(read.testId) as unknown;
+  assert.ok(
+    typeof identity === "object" &&
+      identity !== null &&
+      !Array.isArray(identity),
+  );
+  assert.equal((identity as { name?: unknown }).name, testName);
+  if (start !== undefined) {
+    assert.ok(read.range);
+    assert.equal(read.range.start, start);
+    assert.equal(read.range.end, start + String(value).length);
+  }
 }
 
 async function verifyEffectiveRoot(
@@ -242,7 +603,7 @@ async function verifyFailureIsolation(
   const envelope = parseEnvelope(check.stdout);
   assert.equal(envelope.variant, "errors");
   const report = requireReport(envelope);
-  assertExecutionSummary(report, 1, 2);
+  assertExecutionSummary(report, 1, 2, 1);
   assertBindingError(report, "失败业务", "test-failed");
   assertBindingHasNoErrors(report, "独立业务");
 
@@ -300,7 +661,7 @@ async function verifyRunLifecycle(
   const cancelledReport = requireReport(cancelledEnvelope);
   assertBindingError(cancelledReport, "已进入", "test-cancelled");
   assertBindingError(cancelledReport, "未进入", "test-not-executed");
-  assertExecutionSummary(cancelledReport, 1, 2);
+  assertExecutionSummary(cancelledReport, 1, 2, 1);
 
   const startupFailure = await runDock(
     bin,
@@ -338,6 +699,7 @@ async function verifyInterruptedProcess(
   const checkReport = requireReport(checkEnvelope);
   assertBindingError(checkReport, "中断状态", "run-lifecycle-failed");
   assert.equal(checkReport.execution?.commandAttempts, 1);
+  assert.equal(checkReport.execution?.failedCommands, 1);
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
 
   const update = await runDock(
@@ -353,6 +715,7 @@ async function verifyInterruptedProcess(
   const updateReport = requireReport(updateEnvelope);
   assertBindingError(updateReport, "中断状态", "run-lifecycle-failed");
   assert.equal(updateReport.execution?.commandAttempts, 1);
+  assert.equal(updateReport.execution?.failedCommands, 1);
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
 }
 
@@ -395,6 +758,7 @@ async function verifyAfterEndFailure(
       const checkReport = requireReport(checkEnvelope);
       assertBindingError(checkReport, "异步失败状态", "run-lifecycle-failed");
       assert.equal(checkReport.execution?.commandAttempts, 1);
+      assert.equal(checkReport.execution?.failedCommands, 1);
 
       assert.equal(
         update.code,
@@ -406,6 +770,7 @@ async function verifyAfterEndFailure(
       const updateReport = requireReport(updateEnvelope);
       assertBindingError(updateReport, "异步失败状态", "run-lifecycle-failed");
       assert.equal(updateReport.execution?.commandAttempts, 1);
+      assert.equal(updateReport.execution?.failedCommands, 1);
       assert.deepEqual(await readFile(baselinePath), baselineBytes);
     } finally {
       await rm(marker, { force: true });
@@ -460,10 +825,10 @@ async function verifyConflictPreflight(
     consumer,
   );
   assert.equal(check.code, 1, check.stderr);
-  const report = requireReport(parseEnvelope(check.stdout));
-  assertBindingError(report, "首项冲突", "run-lifecycle-failed");
-  assertBindingError(report, "次项冲突", "run-lifecycle-failed");
-  assertExecutionSummary(report, 0, 0);
+  assert.equal(
+    parseEnvelope(check.stderr).data?.code,
+    "plugin-reference-validation-failed",
+  );
   await assert.rejects(access(marker), { code: "ENOENT" });
 }
 
@@ -567,8 +932,11 @@ function assertExecutionSummary(
   report: MaintenanceReport,
   commandAttempts: number,
   testExecutions: number,
+  failedCommands = 0,
 ): void {
-  assert.deepEqual(report.execution, { commandAttempts, testExecutions });
+  assert.equal(report.execution?.commandAttempts, commandAttempts);
+  assert.equal(report.execution?.failedCommands, failedCommands);
+  assert.equal(report.execution?.testExecutions, testExecutions);
 }
 
 function assertBindingError(

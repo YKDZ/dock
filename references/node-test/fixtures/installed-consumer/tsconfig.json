@@ -7,5 +7,10 @@
     "moduleResolution": "NodeNext",
     "types": []
   },
-  "include": ["positive.mts", "negative.mts"]
+  "include": [
+    "positive.mts",
+    "negative.mts",
+    "secondary/positive.mts",
+    "secondary/negative.mts"
+  ]
 }

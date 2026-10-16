@@ -1,4 +1,4 @@
-import type { JsonValue } from "@dock/core";
+import type { JsonValue, TextRange } from "@dock/core";
 
 /** 框架中一条测试用例的终态。 */
 export type ExecutionTestStatus =
@@ -15,7 +15,29 @@ export type ExecutionTestRecord = {
   readonly id: string;
   readonly status: ExecutionTestStatus;
   readonly started: boolean;
+  readonly attemptCount: number;
   readonly message?: string;
+  readonly observations?: readonly ExecutionObservationRecord[];
+  readonly reads?: readonly ExecutionReadRecord[];
+};
+
+/** 由活动测试按稳定键记录的一条业务观察。 */
+export type ExecutionObservationRecord = {
+  readonly key: string;
+  readonly value: JsonValue;
+};
+
+/** 由活动测试取得的一条当前引用读取，仅用于采集事实与诊断。 */
+export type ExecutionReadRecord = {
+  readonly referenceId: string;
+  readonly value: JsonValue;
+  readonly range?: TextRange;
+};
+
+/** 面向维护报告的读取诊断，保留产生事实的执行与测试归属。 */
+export type ExecutionReadDiagnostic = ExecutionReadRecord & {
+  readonly runId: string;
+  readonly testId: string;
 };
 
 /** 一次框架运行的通用记录，不解释框架事件或测试选择语义。 */
@@ -28,11 +50,17 @@ export type ExecutionRunRecord = {
     readonly code: string;
     readonly message: string;
   }[];
+  readonly commandResult?: {
+    readonly exitCode: number | null;
+    readonly signal: string | null;
+  };
 };
 
 export type ExecutionSummary = {
   readonly commandAttempts: number;
+  readonly failedCommands: number;
   readonly testExecutions: number;
+  readonly reads?: readonly ExecutionReadDiagnostic[];
 };
 
 export type ExecutionCallback = () =>
@@ -113,12 +141,31 @@ export function createExecutionSession(): ExecutionSession {
     summary(): ExecutionSummary | undefined {
       if (phase !== "finished" || runs.size === 0) return undefined;
       let commandAttempts = 0;
+      let failedCommands = 0;
       let testExecutions = 0;
-      for (const { record } of runs.values()) {
+      const reads: ExecutionReadDiagnostic[] = [];
+      for (const [runId, { record }] of runs) {
         commandAttempts += record.commandAttempts;
+        if (
+          record.commandResult !== undefined &&
+          (record.commandResult.exitCode !== 0 ||
+            record.commandResult.signal !== null)
+        ) {
+          failedCommands += 1;
+        }
         testExecutions += record.testExecutions;
+        for (const test of record.tests) {
+          for (const read of test.reads ?? []) {
+            reads.push({ runId, testId: test.id, ...cloneReadRecord(read) });
+          }
+        }
       }
-      return { commandAttempts, testExecutions };
+      return {
+        commandAttempts,
+        failedCommands,
+        testExecutions,
+        ...(reads.length === 0 ? {} : { reads }),
+      };
     },
   };
 
@@ -174,7 +221,9 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     !isCount(value.commandAttempts) ||
     !isCount(value.testExecutions) ||
     !Array.isArray(value.tests) ||
-    !Array.isArray(value.errors)
+    !Array.isArray(value.errors) ||
+    (value.commandResult !== undefined &&
+      (!isCommandResult(value.commandResult) || value.commandAttempts === 0))
   ) {
     return invalidRecord();
   }
@@ -187,7 +236,19 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
       test.id.length === 0 ||
       !isTestStatus(test.status) ||
       typeof test.started !== "boolean" ||
-      (test.message !== undefined && typeof test.message !== "string")
+      !isCount(test.attemptCount) ||
+      test.started !== test.attemptCount > 0 ||
+      (test.message !== undefined && typeof test.message !== "string") ||
+      (test.observations !== undefined && !isDenseArray(test.observations)) ||
+      (test.reads !== undefined && !isDenseArray(test.reads))
+    ) {
+      return invalidRecord();
+    }
+    const observations = test.observations ?? [];
+    const reads = test.reads ?? [];
+    if (
+      !observations.every(isObservationRecord) ||
+      !reads.every(isReadRecord)
     ) {
       return invalidRecord();
     }
@@ -195,7 +256,14 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
       id: test.id,
       status: test.status,
       started: test.started,
+      attemptCount: test.attemptCount,
       ...(test.message === undefined ? {} : { message: test.message }),
+      ...(test.observations === undefined
+        ? {}
+        : { observations: observations.map(cloneObservationRecord) }),
+      ...(test.reads === undefined
+        ? {}
+        : { reads: reads.map(cloneReadRecord) }),
     });
   }
 
@@ -212,7 +280,10 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     errors.push({ code: error.code, message: error.message });
   }
 
-  if (value.testExecutions !== tests.filter((test) => test.started).length) {
+  if (
+    value.testExecutions !==
+    tests.reduce((total, test) => total + test.attemptCount, 0)
+  ) {
     return invalidRecord();
   }
 
@@ -222,6 +293,14 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     testExecutions: value.testExecutions,
     tests,
     errors,
+    ...(value.commandResult === undefined
+      ? {}
+      : {
+          commandResult: {
+            exitCode: value.commandResult.exitCode,
+            signal: value.commandResult.signal,
+          },
+        }),
   };
 }
 
@@ -245,9 +324,119 @@ function invalidRecord(): ExecutionRunRecord {
 function cloneRecord(record: ExecutionRunRecord): ExecutionRunRecord {
   return {
     ...record,
-    tests: record.tests.map((test) => ({ ...test })),
+    tests: record.tests.map((test) => ({
+      ...test,
+      ...(test.observations === undefined
+        ? {}
+        : { observations: test.observations.map(cloneObservationRecord) }),
+      ...(test.reads === undefined
+        ? {}
+        : { reads: test.reads.map(cloneReadRecord) }),
+    })),
     errors: record.errors.map((error) => ({ ...error })),
+    ...(record.commandResult === undefined
+      ? {}
+      : { commandResult: { ...record.commandResult } }),
   };
+}
+
+function isObservationRecord(
+  value: unknown,
+): value is ExecutionObservationRecord {
+  return (
+    isRecord(value) &&
+    isJsonConfiguration(value) &&
+    typeof value.key === "string" &&
+    value.key.length > 0 &&
+    Object.hasOwn(value, "value") &&
+    Object.keys(value).every((key) => key === "key" || key === "value") &&
+    isJsonConfiguration(value.value)
+  );
+}
+
+function isReadRecord(value: unknown): value is ExecutionReadRecord {
+  return (
+    isRecord(value) &&
+    isJsonConfiguration(value) &&
+    typeof value.referenceId === "string" &&
+    value.referenceId.length > 0 &&
+    Object.hasOwn(value, "value") &&
+    Object.keys(value).every(
+      (key) => key === "referenceId" || key === "value" || key === "range",
+    ) &&
+    isJsonConfiguration(value.value) &&
+    (!Object.hasOwn(value, "range") || isTextRange(value.range))
+  );
+}
+
+function isTextRange(value: unknown): value is TextRange {
+  return (
+    isRecord(value) &&
+    isJsonConfiguration(value) &&
+    typeof value.path === "string" &&
+    Number.isSafeInteger(value.start) &&
+    Number.isSafeInteger(value.end) &&
+    (value.start as number) >= 0 &&
+    (value.end as number) >= (value.start as number) &&
+    Object.keys(value).every((key) => ["path", "start", "end"].includes(key)) &&
+    Object.hasOwn(value, "path") &&
+    Object.hasOwn(value, "start") &&
+    Object.hasOwn(value, "end")
+  );
+}
+
+function isDenseArray(value: unknown): value is unknown[] {
+  if (
+    !Array.isArray(value) ||
+    Object.getOwnPropertySymbols(value).length !== 0 ||
+    Object.keys(value).length !== value.length ||
+    Object.getOwnPropertyNames(value).length !== value.length + 1
+  ) {
+    return false;
+  }
+  for (let index = 0; index < value.length; index++) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (descriptor === undefined || !("value" in descriptor)) return false;
+  }
+  return true;
+}
+
+function cloneObservationRecord(
+  record: ExecutionObservationRecord,
+): ExecutionObservationRecord {
+  return { key: record.key, value: cloneJsonValue(record.value) };
+}
+
+function cloneReadRecord(record: ExecutionReadRecord): ExecutionReadRecord {
+  return {
+    referenceId: record.referenceId,
+    value: cloneJsonValue(record.value),
+    ...(record.range === undefined ? {} : { range: { ...record.range } }),
+  };
+}
+
+function cloneJsonValue(value: JsonValue): JsonValue {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map(cloneJsonValue);
+  return Object.fromEntries(
+    Object.entries(value).map(([key, entry]) => [key, cloneJsonValue(entry)]),
+  );
+}
+
+function isCommandResult(
+  value: unknown,
+): value is NonNullable<ExecutionRunRecord["commandResult"]> {
+  return (
+    isRecord(value) &&
+    (value.exitCode === null ||
+      (typeof value.exitCode === "number" &&
+        Number.isSafeInteger(value.exitCode) &&
+        value.exitCode >= 0)) &&
+    (value.signal === null ||
+      (typeof value.signal === "string" && value.signal.length > 0)) &&
+    !(value.exitCode !== null && value.signal !== null) &&
+    (value.exitCode !== null || value.signal !== null)
+  );
 }
 
 function canonicalJson(value: JsonValue): string {

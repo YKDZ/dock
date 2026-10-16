@@ -42,6 +42,9 @@ export type {
 export { createExecutionSession } from "./execution.ts";
 export type {
   ExecutionCallback,
+  ExecutionObservationRecord,
+  ExecutionReadDiagnostic,
+  ExecutionReadRecord,
   ExecutionRegistry,
   ExecutionRunRecord,
   ExecutionSession,
