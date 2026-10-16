@@ -1,18 +1,27 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createReference, definePlugin } from "@dock/sdk";
+import { createReference, definePlugin, readReference } from "@dock/sdk";
 import type {
+  Config,
   JsonValue,
+  PluginReadResult,
   PluginExecutionContext,
   PluginResult,
+  ReadableReferenceOf,
   Reference,
   ReferenceOptions,
   ReferencePlugin,
+  ReferenceValue,
 } from "@dock/sdk";
 
 import { executeNodeTestRun } from "./native-runner.ts";
-import { beginExecution } from "./test-context.ts";
+import {
+  assertNodeTestActive,
+  beginExecution,
+  recordNodeObservation,
+  recordNodeRead,
+} from "./test-context.ts";
 import type {
   NodeEventTarget,
   NodeSelectedTest,
@@ -21,65 +30,173 @@ import type {
 
 export const nodeTestPluginId = "@dock/reference-node-test" as const;
 
-export type NodeTestRun = {
+export type NodeTestObservation<
+  Key extends string = string,
+  Value extends JsonValue = JsonValue,
+> = {
+  readonly key: Key;
+  record(value: Value): Value;
+};
+
+type AnyNodeTestObservation = NodeTestObservation<string, JsonValue>;
+type ObservationKeys<Observations extends readonly NodeTestObservation[]> = {
+  -readonly [
+    Index in keyof Observations
+  ]: Observations[Index] extends NodeTestObservation<infer Key, JsonValue>
+    ? Key
+    : never;
+};
+type WidenJson<Value> = Value extends string
+  ? string
+  : Value extends number
+    ? number
+    : Value extends boolean
+      ? boolean
+      : Value extends readonly (infer Item)[]
+        ? WidenJson<Item>[]
+        : Value extends object
+          ? { readonly [Key in keyof Value]: WidenJson<Value[Key]> }
+          : Value;
+type ObservationValue<Observation> =
+  Observation extends NodeTestObservation<string, infer Value> ? Value : never;
+
+const observationTypes: unique symbol = Symbol("NodeTestRun.observationTypes");
+
+export type NodeTestRun<
+  Observations extends readonly NodeTestObservation[] =
+    readonly NodeTestObservation[],
+> = {
   readonly identity: string;
   readonly files: [string, ...string[]];
   readonly testRoot?: string;
   readonly namePattern?: string;
+  readonly observationKeys: ObservationKeys<Observations>;
+  readonly [observationTypes]?: Observations;
 };
 
-export type NodeTestRunOptions = {
+export type NodeTestRunOptions<
+  Observations extends readonly NodeTestObservation[] =
+    readonly NodeTestObservation[],
+> = {
   readonly files: readonly [string, ...string[]];
   readonly testRoot?: string;
   readonly namePattern?: string;
+  readonly observations?: Observations;
 };
 
 export type NodeTestValue = { readonly status: "passed" };
 
-export type NodeTestTarget = {
+export type NodeTestStatusTarget<
+  Observations extends readonly NodeTestObservation[] =
+    readonly NodeTestObservation[],
+> = {
   readonly kind: "node-test-status";
-  readonly run: NodeTestRun;
+  readonly run: NodeTestRun<Observations>;
   readonly file: string;
   readonly name: string;
 };
 
-export type NodeTestReference<Id extends string = string> = Reference<
+export type NodeTestObservationTarget = {
+  readonly kind: "node-test-observation";
+  readonly run: NodeTestRun;
+  readonly file: string;
+  readonly name: string;
+  readonly key: string;
+};
+
+export type NodeTestTarget = NodeTestStatusTarget | NodeTestObservationTarget;
+
+export type NodeTestStatusReference<
+  Id extends string = string,
+  Observations extends readonly NodeTestObservation[] =
+    readonly NodeTestObservation[],
+> = Reference<
   typeof nodeTestPluginId,
   Id,
-  NodeTestTarget,
+  NodeTestStatusTarget<Observations>,
   NodeTestValue,
   never
 >;
 
-/** 类型化地声明一次 Node 原生运行，不在声明时启动测试进程。 */
-export function defineNodeTestRun(
-  identity: string,
-  options: NodeTestRunOptions,
-): NodeTestRun {
-  assertRun(identity, options);
+export type NodeTestObservationReference<
+  Id extends string = string,
+  Observation extends NodeTestObservation = NodeTestObservation,
+> = Reference<
+  typeof nodeTestPluginId,
+  Id,
+  NodeTestObservationTarget,
+  ObservationValue<Observation>,
+  never
+>;
+
+export type NodeTestReference<Id extends string = string> =
+  | NodeTestStatusReference<Id>
+  | NodeTestObservationReference<Id>;
+
+type RuntimeNodeTestReference = Reference<
+  typeof nodeTestPluginId,
+  string,
+  JsonValue,
+  JsonValue,
+  JsonValue
+>;
+
+/** 声明稳定观察键；sample 只用于推导类型，不作为默认事实。 */
+export function defineNodeTestObservation<
+  const Key extends string,
+  Sample extends JsonValue,
+>(key: Key, sample: Sample): NodeTestObservation<Key, WidenJson<Sample>> {
+  assertObservationKey(key);
+  void sample;
   return {
+    key,
+    record(value): WidenJson<Sample> {
+      recordNodeObservation(key, value);
+      return value;
+    },
+  };
+}
+
+/** 类型化地声明一次 Node 原生运行，不在声明时启动测试进程。 */
+export function defineNodeTestRun<
+  const Observations extends readonly NodeTestObservation[] = readonly [],
+>(
+  identity: string,
+  options: NodeTestRunOptions<Observations>,
+): NodeTestRun<Observations> {
+  const observationKeys = (options.observations ?? []).map((observation) => {
+    assertObservationDefinition(observation);
+    return observation.key;
+  }) as ObservationKeys<Observations>;
+  const run = {
     identity,
     files: [...options.files],
     ...(options.testRoot === undefined ? {} : { testRoot: options.testRoot }),
     ...(options.namePattern === undefined
       ? {}
       : { namePattern: options.namePattern }),
-  };
+    observationKeys,
+  } as NodeTestRun<Observations>;
+  assertRun(identity, run);
+  return run;
 }
 
 /** 声明一条依赖原生测试成功终态的引用。 */
-export function nodeTestStatus<Id extends string>(
+export function nodeTestStatus<
+  const Id extends string,
+  const Observations extends readonly NodeTestObservation[],
+>(
   id: Id,
-  run: NodeTestRun,
+  run: NodeTestRun<Observations>,
   target: { readonly file: string; readonly name: string },
   options: Pick<ReferenceOptions, "declaredAt" | "note"> = {},
-): NodeTestReference<Id> {
+): NodeTestStatusReference<Id, Observations> {
   assertRun(run.identity, run);
   assertTestSelection(target);
   return createReference<
     typeof nodeTestPluginId,
     Id,
-    NodeTestTarget,
+    NodeTestStatusTarget<Observations>,
     NodeTestValue,
     never
   >(
@@ -100,23 +217,80 @@ export function nodeTestStatus<Id extends string>(
   );
 }
 
-type NodeTestPlugin = ReferencePlugin<
-  typeof nodeTestPluginId,
-  NodeTestReference,
-  NodeTestValue
->;
+/** 将同一观察声明绑定到选定 Node 测试，并保留其值类型。 */
+export function nodeTestObservation<
+  const Id extends string,
+  const Observations extends readonly NodeTestObservation[],
+  const Observation extends Observations[number],
+>(
+  id: Id,
+  run: NodeTestRun<Observations>,
+  target: { readonly file: string; readonly name: string },
+  observation: Observation,
+  options: Pick<ReferenceOptions, "declaredAt" | "note"> = {},
+): NodeTestObservationReference<Id, Observation> {
+  assertRun(run.identity, run);
+  assertTestSelection(target);
+  assertObservationDefinition(observation);
+  if (!run.observationKeys.includes(observation.key)) {
+    throw new TypeError(
+      `Node 测试运行 ${run.identity} 未声明观察键 ${observation.key}。`,
+    );
+  }
+  return createReference<
+    typeof nodeTestPluginId,
+    Id,
+    NodeTestObservationTarget,
+    ObservationValue<Observation>,
+    never
+  >(
+    nodeTestPluginId,
+    id,
+    {
+      kind: "node-test-observation",
+      run,
+      file: target.file,
+      name: target.name,
+      key: observation.key,
+    },
+    {
+      ...(options.declaredAt === undefined
+        ? {}
+        : { declaredAt: options.declaredAt }),
+      ...(options.note === undefined ? {} : { note: options.note }),
+    },
+  );
+}
 
-const nodeTestImplementation: NodeTestPlugin = definePlugin({
+/** 活动 Node 测试内经 SDK 读取当前引用并记录可解释的读取结果。 */
+export async function readReferenceInTest<
+  const Plugins extends readonly ReferencePlugin[],
+  const Ref extends ReadableReferenceOf<Plugins>,
+>(
+  config: Config<Plugins>,
+  reference: Ref,
+): Promise<PluginReadResult<ReferenceValue<Ref>>> {
+  assertNodeTestActive("测试内读取引用");
+  const result = await readReference(config, reference);
+  assertNodeTestActive("测试内读取引用");
+  recordNodeRead({
+    referenceId: reference.id,
+    value: result.value,
+    ...(result.range === undefined ? {} : { range: result.range }),
+  });
+  return result;
+}
+
+const nodeTestImplementation = definePlugin({
   id: nodeTestPluginId,
-  validate(reference: NodeTestReference): void {
+  validate(reference: RuntimeNodeTestReference): void {
     if (reference.selection !== undefined) {
       throw new TypeError("Node 测试状态引用不支持 selection。");
     }
-    assertRun(reference.target.run.identity, reference.target.run);
     assertTestTarget(reference.target);
   },
   prepare(
-    references: readonly NodeTestReference[],
+    references: readonly RuntimeNodeTestReference[],
     context: PluginExecutionContext,
   ): void {
     const groups = new Map<
@@ -124,7 +298,7 @@ const nodeTestImplementation: NodeTestPlugin = definePlugin({
       { readonly run: NormalizedNodeRun; readonly targets: NodeSelectedTest[] }
     >();
     for (const reference of references) {
-      const target = reference.target;
+      const target = getNodeTestTarget(reference.target);
       const run = normalizeRun(target.run, context.root);
       const groupKey = `${run.identity}\0${JSON.stringify(run.configuration)}`;
       const group = groups.get(groupKey) ?? { run, targets: [] };
@@ -144,25 +318,27 @@ const nodeTestImplementation: NodeTestPlugin = definePlugin({
     }
   },
   collect(
-    reference: NodeTestReference,
+    reference: RuntimeNodeTestReference,
     context: PluginExecutionContext,
-  ): PluginResult<NodeTestValue> {
-    const run = context.execution.get(reference.target.run.identity);
+  ): PluginResult<JsonValue> {
+    const target = getNodeTestTarget(reference.target);
+    const run = context.execution.get(target.run.identity);
     if (run === undefined) {
       return {
         kind: "error",
         error: {
           code: "execution-record-missing",
-          message: `Node 执行 ${reference.target.run.identity} 没有完成当前维护会话。`,
+          message: `Node 执行 ${target.run.identity} 没有完成当前维护会话。`,
         },
       };
     }
     return factFromNodeRun(
       reference,
       run,
-      normalizeRun(reference.target.run, context.root),
+      normalizeRun(target.run, context.root),
     );
   },
+  readReferenceInTest,
 });
 
 export const nodeTest = nodeTestImplementation;
@@ -171,10 +347,10 @@ export const nodeTest = nodeTestImplementation;
 export { beginExecution };
 
 function factFromNodeRun(
-  reference: NodeTestReference,
+  reference: RuntimeNodeTestReference,
   run: Awaited<ReturnType<typeof executeNodeTestRun>>,
   normalized: NormalizedNodeRun,
-): PluginResult<NodeTestValue> {
+): PluginResult<JsonValue> {
   if (run.lifecycle !== "complete" || run.errors.length > 0) {
     const detail = run.errors.map((error) => error.message).join("；");
     return {
@@ -186,49 +362,65 @@ function factFromNodeRun(
     };
   }
 
-  const targetFile = resolveTargetFile(
-    normalized.testRoot,
-    reference.target.file,
-  );
+  const target = getNodeTestTarget(reference.target);
+  const targetFile = resolveTargetFile(normalized.testRoot, target.file);
   const targetIdentity = JSON.stringify({
     file: relative(normalized.testRoot, targetFile).split("\\").join("/"),
-    name: reference.target.name,
+    name: target.name,
   });
   const matches = run.tests.filter((test) => test.id === targetIdentity);
   if (matches.length === 0) {
     if (!normalized.files.includes(targetFile)) {
       return nodeError(
         "test-not-executed",
-        `运行 ${normalized.identity} 未包含目标文件 ${reference.target.file}。`,
+        `运行 ${normalized.identity} 未包含目标文件 ${target.file}。`,
       );
     }
     if (
       normalized.namePattern !== undefined &&
-      !new RegExp(normalized.namePattern).test(reference.target.name)
+      !new RegExp(normalized.namePattern).test(target.name)
     ) {
       return nodeError(
         "test-filtered",
-        `测试 ${reference.target.name} 被 Node 原生名称筛选排除。`,
+        `测试 ${target.name} 被 Node 原生名称筛选排除。`,
       );
     }
     return nodeError(
       "test-not-executed",
-      `没有执行声明的测试：${reference.target.file} / ${reference.target.name}。`,
+      `没有执行声明的测试：${target.file} / ${target.name}。`,
     );
   }
   if (matches.length > 1 || matches[0]?.status === "duplicate") {
     return nodeError(
       "duplicate-test-identity",
-      `同一文件中有多个测试匹配身份 ${reference.target.name}。`,
+      `同一文件中有多个测试匹配身份 ${target.name}。`,
     );
   }
 
   const [test] = matches;
-  if (test?.status === "passed") {
-    return { kind: "value", value: { status: "passed" } };
-  }
   if (test === undefined) {
     return nodeError("test-not-executed", "没有找到声明的 Node 测试。");
+  }
+  if (test.status === "passed") {
+    if (target.kind === "node-test-status") {
+      return { kind: "value", value: { status: "passed" } };
+    }
+    const observations = (test.observations ?? []).filter(
+      (observation) => observation.key === target.key,
+    );
+    if (observations.length === 0) {
+      return nodeError(
+        "observation-missing",
+        `测试 ${target.name} 未记录观察键 ${target.key}。`,
+      );
+    }
+    if (observations.length > 1) {
+      return nodeError(
+        "observation-duplicate",
+        `测试 ${target.name} 重复记录观察键 ${target.key}。`,
+      );
+    }
+    return { kind: "value", value: observations[0]!.value };
   }
   const code =
     test.status === "cancelled"
@@ -256,6 +448,7 @@ function normalizeRun(run: NodeTestRun, root: string): NormalizedNodeRun {
     root,
     testRoot,
     files,
+    observationKeys: [...run.observationKeys],
     ...(run.namePattern === undefined ? {} : { namePattern: run.namePattern }),
   };
   return {
@@ -263,6 +456,7 @@ function normalizeRun(run: NodeTestRun, root: string): NormalizedNodeRun {
     root,
     testRoot,
     files,
+    observationKeys: run.observationKeys,
     ...(run.namePattern === undefined ? {} : { namePattern: run.namePattern }),
     configuration,
   };
@@ -303,6 +497,9 @@ function assertRun(
     !Array.isArray(value.files) ||
     value.files.length === 0 ||
     !value.files.every(isNonEmptyString) ||
+    !Array.isArray(value.observationKeys) ||
+    !value.observationKeys.every(isNonEmptyString) ||
+    new Set(value.observationKeys).size !== value.observationKeys.length ||
     (value.testRoot !== undefined && !isNonEmptyString(value.testRoot)) ||
     (value.namePattern !== undefined && typeof value.namePattern !== "string")
   ) {
@@ -325,17 +522,51 @@ function assertRun(
 function assertTestTarget(value: unknown): asserts value is NodeEventTarget {
   if (
     !isRecord(value) ||
-    value.kind !== "node-test-status" ||
+    (value.kind !== "node-test-status" &&
+      value.kind !== "node-test-observation") ||
     !isRecord(value.run) ||
     typeof value.file !== "string" ||
     value.file.length === 0 ||
     typeof value.name !== "string" ||
     value.name.length === 0
   ) {
-    throw new TypeError("Node 测试状态引用必须提供有效文件和测试名称。");
+    throw new TypeError("Node 测试引用必须提供有效文件和测试名称。");
   }
-  assertRun(value.run.identity, value.run);
+  const run = value.run;
+  assertRun(run.identity, run);
+  if (
+    value.kind === "node-test-observation" &&
+    (typeof value.key !== "string" ||
+      value.key.length === 0 ||
+      !run.observationKeys.includes(value.key))
+  ) {
+    throw new TypeError("Node 测试观察引用必须指向已声明的观察键。");
+  }
   assertTestSelection(value);
+}
+
+function getNodeTestTarget(value: JsonValue): NodeEventTarget {
+  assertTestTarget(value);
+  return value;
+}
+
+function assertObservationKey(value: unknown): asserts value is string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError("观察键必须是非空文本。");
+  }
+}
+
+function assertObservationDefinition(
+  value: unknown,
+): asserts value is AnyNodeTestObservation {
+  if (
+    !isRecord(value) ||
+    typeof value.key !== "string" ||
+    value.key.length === 0 ||
+    typeof value.record !== "function"
+  ) {
+    throw new TypeError("Node 测试观察必须由公开声明函数创建。");
+  }
 }
 
 function assertTestSelection(value: unknown): asserts value is {

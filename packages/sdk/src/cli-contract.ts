@@ -214,6 +214,15 @@ function formatReport(report: CheckReport): [string, ...string[]] {
     lines.push(
       `执行：${report.execution.testExecutions} 次测试尝试，${report.execution.commandAttempts} 次命令尝试`,
     );
+    for (const read of report.execution.reads ?? []) {
+      const range =
+        read.range === undefined
+          ? ""
+          : `，范围 ${read.range.path}:${read.range.start}-${read.range.end}`;
+      lines.push(
+        `测试内读取 ${read.referenceId}（运行 ${read.runId} / 测试 ${read.testId}）：${JSON.stringify(read.value)}${range}`,
+      );
+    }
   }
   for (const binding of report.bindings) {
     lines.push(...formatBinding(binding));

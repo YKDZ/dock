@@ -1,4 +1,5 @@
 import {
+  defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestStatus,
@@ -18,6 +19,10 @@ const status = nodeTestStatus("状态", run, {
   file: "test/happy.test.mts",
   name: "主要业务状态符合约定",
 });
+
+const amount = defineNodeTestObservation("business.amount", 0);
+// @ts-expect-error sample=0 只推导 number，不允许记录文本。
+amount.record("17");
 // @ts-expect-error 状态引用只表示成功终态。
 const failed: ReferenceValue<typeof status> = { status: "failed" };
 void failed;

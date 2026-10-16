@@ -109,3 +109,136 @@ test("原生中断事件或进程信号都使运行记录失效", () => {
     );
   }
 });
+
+test("活动测试的观察和读取按原生测试身份保留真实值与位置", () => {
+  const file = "/consumer/test/observations.test.mts";
+  const record = collectNodeRun(
+    [
+      {
+        type: "test:enqueue",
+        data: {
+          entryFile: file,
+          file,
+          testId: 4,
+          parentId: 0,
+          name: "读取并观察当前值",
+          type: "test",
+          line: 28,
+          column: 1,
+        },
+      },
+      {
+        type: "test:diagnostic",
+        data: {
+          entryFile: file,
+          file,
+          line: 28,
+          column: 1,
+          message: 'dock:observation:{"key":"total","value":17}',
+        },
+      },
+      {
+        type: "test:diagnostic",
+        data: {
+          entryFile: file,
+          file,
+          line: 28,
+          column: 1,
+          message:
+            'dock:read:{"referenceId":"business-copy","value":"🧭 active text","range":{"path":"guide.md","start":8,"end":22}}',
+        },
+      },
+      {
+        type: "test:pass",
+        data: {
+          entryFile: file,
+          file,
+          testId: 4,
+          name: "读取并观察当前值",
+        },
+      },
+      {
+        type: "test:summary",
+        data: {
+          success: true,
+          counts: { failed: 0, cancelled: 0 },
+        },
+      },
+    ],
+    {
+      testRoot: "/consumer",
+      files: [file],
+      selectedTests: [],
+      exitCode: 0,
+      signal: null,
+    },
+  );
+
+  assert.equal(record.lifecycle, "complete");
+  assert.deepEqual(record.tests[0]?.observations, [
+    { key: "total", value: 17 },
+  ]);
+  assert.deepEqual(record.tests[0]?.reads, [
+    {
+      referenceId: "business-copy",
+      value: "🧭 active text",
+      range: { path: "guide.md", start: 8, end: 22 },
+    },
+  ]);
+});
+
+test("同一测试的重复观察保持可见而不被映射层去重", () => {
+  const file = "/consumer/test/observations.test.mts";
+  const record = collectNodeRun(
+    [
+      {
+        type: "test:enqueue",
+        data: {
+          entryFile: file,
+          file,
+          testId: 5,
+          parentId: 0,
+          name: "重复观察",
+          type: "test",
+        },
+      },
+      ...[1, 1].map((value) => ({
+        type: "test:diagnostic",
+        data: {
+          entryFile: file,
+          file,
+          testId: 5,
+          message: `dock:observation:{"key":"same","value":${value}}`,
+        },
+      })),
+      {
+        type: "test:pass",
+        data: {
+          entryFile: file,
+          file,
+          testId: 5,
+          name: "重复观察",
+        },
+      },
+      {
+        type: "test:summary",
+        data: {
+          success: true,
+          counts: { failed: 0, cancelled: 0 },
+        },
+      },
+    ],
+    {
+      testRoot: "/consumer",
+      files: [file],
+      selectedTests: [],
+      exitCode: 0,
+      signal: null,
+    },
+  );
+
+  assert.deepEqual(record.tests[0]?.observations, [
+    { key: "same", value: 1 },
+    { key: "same", value: 1 },
+  ]);
+});
