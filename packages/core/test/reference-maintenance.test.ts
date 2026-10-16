@@ -6,7 +6,7 @@ import type {
   BindingDefinition,
   CheckInput,
   ReferenceDefinition,
-  ReferenceFact,
+  ReferenceResult,
 } from "@dock/core";
 
 const references: ReferenceDefinition[] = [
@@ -59,7 +59,7 @@ const binding: BindingDefinition = {
   note: "initial binding note",
 };
 
-const facts: ReferenceFact[] = [
+const facts: ReferenceResult[] = [
   {
     referenceId: "doc-paragraph",
     value: "Existing env vars have the highest priority.",

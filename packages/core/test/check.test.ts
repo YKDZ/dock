@@ -3,10 +3,16 @@ import { test } from "node:test";
 
 import { check, updateBaseline } from "@dock/core";
 import type {
+  BindingCheckResult,
   BindingDefinition,
+  CheckError,
   CheckInput,
+  DeclarationCompleteness,
+  MemberDiscoveryCompleteness,
   ReferenceDefinition,
-  ReferenceFact,
+  ReferenceMemberResult,
+  ReferenceResult,
+  TextRange,
 } from "@dock/core";
 
 const references: ReferenceDefinition[] = [
@@ -17,7 +23,7 @@ const references: ReferenceDefinition[] = [
   },
   {
     id: "preview-port-file",
-    target: { path: "config/preview.txt" },
+    target: { path: "config/preview.txt", processor: "file" },
     selection: { kind: "line", value: "port=4173" },
   },
   {
@@ -38,11 +44,16 @@ const bindings: BindingDefinition[] = [
   },
 ];
 
-const facts: ReferenceFact[] = [
+const previewRange: TextRange = {
+  path: "docs/config/preview-options.md",
+  start: 441,
+  end: 462,
+};
+const facts: ReferenceResult[] = [
   {
     referenceId: "preview-port-doc",
     value: "- **Default:** `4173`",
-    range: { path: "docs/config/preview-options.md", start: 441, end: 462 },
+    range: previewRange,
   },
   { referenceId: "preview-port-file", value: "port=4173" },
   { referenceId: "preview-port-exists", value: true },
@@ -90,6 +101,20 @@ void test("空集合、重复身份及未声明的必需引用不能取得关联
     assert.equal(result.consistency, undefined);
     assert.equal(result.errors?.[0]?.code, code);
     assert.equal(updateBaseline(input).status, "rejected");
+  }
+
+  const repeatedBinding: BindingDefinition = {
+    id: "repeated-binding",
+    references: ["preview-port-file"],
+  };
+  for (const repeatedBindings of [
+    [repeatedBinding, repeatedBinding],
+    [{ ...repeatedBinding }, { ...repeatedBinding }],
+  ]) {
+    assert.throws(
+      () => check({ references, bindings: repeatedBindings, facts }),
+      /关联 ID 重复：repeated-binding/u,
+    );
   }
 });
 
@@ -198,7 +223,7 @@ void test("完整成员清单按稳定 ID 比较，更新基线增删后可再�
       references: ["preview-doc", "preview-group"],
     },
   ];
-  const initialFacts: ReferenceFact[] = [
+  const initialFacts: ReferenceResult[] = [
     { referenceId: "preview-doc", value: "Preview policy" },
     {
       referenceId: "preview-group",
@@ -250,7 +275,7 @@ void test("完整成员清单按稳定 ID 比较，更新基线增删后可再�
   });
   assert.equal(reordered.bindings[0]?.consistency, "consistent");
 
-  const changedFacts: ReferenceFact[] = [
+  const changedFacts: ReferenceResult[] = [
     initialFacts[0]!,
     {
       referenceId: "preview-group",
@@ -312,7 +337,7 @@ void test("完整成员清单按稳定 ID 比较，更新基线增删后可再�
   });
   assert.equal(afterUpdate.bindings[0]?.consistency, "consistent");
 
-  const removedFacts: ReferenceFact[] = [
+  const removedFacts: ReferenceResult[] = [
     initialFacts[0]!,
     {
       referenceId: "preview-group",
@@ -376,7 +401,7 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
       references: ["preview-doc", "preview-group"],
     },
   ];
-  const initial: ReferenceFact[] = [
+  const initial: ReferenceResult[] = [
     { referenceId: "preview-doc", value: "Preview policy" },
     {
       referenceId: "preview-group",
@@ -401,6 +426,11 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
   assert.equal(created.status, "updated");
   if (created.status !== "updated") return;
 
+  const partialMembers: ReferenceMemberResult[] = [
+    { id: "test/keeps-query", value: ["query"] },
+  ];
+  const partialDiscovery: MemberDiscoveryCompleteness = "partial";
+  const partialDeclaration: DeclarationCompleteness = "partial";
   const partialInput: CheckInput = {
     references: groupReferences,
     bindings: groupBindings,
@@ -409,15 +439,16 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
       {
         referenceId: "preview-group",
         collection: {
-          completeness: "partial",
-          members: [{ id: "test/keeps-query", value: ["query"] }],
+          completeness: partialDiscovery,
+          members: partialMembers,
         },
       },
     ],
     baseline: created.baseline,
+    declarationCompleteness: partialDeclaration,
   };
   const partial = check(partialInput);
-  const partialResult = partial.bindings[0]!;
+  const partialResult: BindingCheckResult = partial.bindings[0]!;
   assert.ok("errors" in partialResult);
   if ("errors" in partialResult) {
     assert.deepEqual(partialResult.changes, []);
@@ -479,7 +510,7 @@ void test("partial 成员发现不推断增删，完整发现的失败成员仍�
               error: {
                 code: "required-output-missing",
                 message: "未取得必要观察。",
-              },
+              } satisfies CheckError,
             },
             {
               id: "test/rejects-empty-result",
@@ -582,7 +613,7 @@ void test("成员内部数组顺序和 scalar 到成员集合的类型变化都�
       references: ["preview-doc", "preview-group"],
     },
   ];
-  const scalarFacts: ReferenceFact[] = [
+  const scalarFacts: ReferenceResult[] = [
     { referenceId: "preview-doc", value: "Preview policy" },
     {
       referenceId: "preview-group",
@@ -759,7 +790,10 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
   const changedDefinition = check({
     references: references.map((reference) =>
       reference.id === "preview-port-file"
-        ? { ...reference, target: { path: "config/copied-preview.txt" } }
+        ? {
+            ...reference,
+            target: { path: "config/copied-preview.txt", processor: "file" },
+          }
         : reference,
     ),
     bindings,
@@ -769,6 +803,27 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
   assert.equal(changedDefinition.bindings[0]?.consistency, "inconsistent");
   assert.ok(
     changedDefinition.bindings[0]?.changes.some(
+      (change) =>
+        change.kind === "reference-definition" &&
+        change.referenceId === "preview-port-file",
+    ),
+  );
+
+  const changedProcessor = check({
+    references: references.map((reference) =>
+      reference.id === "preview-port-file"
+        ? {
+            ...reference,
+            target: { path: "config/preview.txt", processor: "markdown" },
+          }
+        : reference,
+    ),
+    bindings,
+    facts,
+    baseline: updated.baseline,
+  });
+  assert.ok(
+    changedProcessor.bindings[0]?.changes.some(
       (change) =>
         change.kind === "reference-definition" &&
         change.referenceId === "preview-port-file",
@@ -831,7 +886,7 @@ void test("局部错误只阻止依赖它的关联，批次更新基线全拒绝
       references: ["beta-doc", "shared-setting", "beta-target"],
     },
   ];
-  const originalFacts: ReferenceFact[] = [
+  const originalFacts: ReferenceResult[] = [
     { referenceId: "alpha-doc", value: "alpha claim" },
     { referenceId: "beta-doc", value: "beta claim" },
     { referenceId: "shared-setting", value: "v1" },
@@ -852,7 +907,7 @@ void test("局部错误只阻止依赖它的关联，批次更新基线全拒绝
   assert.equal(firstUpdate.status, "updated");
   if (firstUpdate.status !== "updated") return;
 
-  const changedFacts: ReferenceFact[] = [
+  const changedFacts: ReferenceResult[] = [
     {
       referenceId: "alpha-doc",
       error: { code: "missing-file", message: "alpha 文档暂时无法读取。" },
@@ -1110,7 +1165,7 @@ void test("合法关联和引用 ID 不会被 JSON 基线的继承属性遮蔽",
     id,
     references: ["guide", id],
   }));
-  const facts: ReferenceFact[] = [
+  const facts: ReferenceResult[] = [
     { referenceId: "guide", value: "guide" },
     ...ids.map((referenceId) => ({ referenceId, value: referenceId })),
   ];
@@ -1158,7 +1213,7 @@ void test("合法关联和引用 ID 不会被 JSON 基线的继承属性遮蔽",
     id: "existing",
     references: ["guide", "base"],
   };
-  const existingFacts: ReferenceFact[] = [
+  const existingFacts: ReferenceResult[] = [
     { referenceId: "guide", value: "guide" },
     { referenceId: "base", value: "base" },
   ];
