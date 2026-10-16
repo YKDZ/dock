@@ -116,14 +116,16 @@ function selectRegion(
   let occurrences = 0;
   let offset = 0;
 
-  for (const line of current.match(/.*(?:\n|$)/gu) ?? []) {
-    const content = line.replace(/\r?\n$/u, "");
-    const marker = /^[ \t]*#[ \t]*(region|endregion)[ \t]+(.+?)[ \t]*$/u.exec(
-      content,
-    );
+  for (const line of current.match(/.*(?:\r\n|[\r\n]|$)/gu) ?? []) {
+    const content = line.replace(/(?:\r\n|[\r\n])$/u, "");
+    const marker =
+      /^[ \t]*#[ \t]*(region|endregion)(?:[ \t]+(.*?))?[ \t]*$/u.exec(content);
 
     if (marker !== null) {
-      const markerName = marker[2]!;
+      const markerName = marker[2]?.trim();
+      if (markerName === undefined || markerName.length === 0) {
+        return fail("malformed-region", "region 标记必须提供名称。");
+      }
       if (marker[1] === "region") {
         if (markerName === name && ++occurrences > 1) {
           return fail("ambiguous-region", `region ${name} 重复。`);

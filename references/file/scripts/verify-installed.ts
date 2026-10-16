@@ -382,9 +382,7 @@ async function runInstalledCli(
     join(consumer, "unsupported-selection.mjs"),
     [
       'import { file } from "@dock/reference-file";',
-      'import { binding, defineConfig } from "@dock/sdk";',
-      'const selected = file.from("guide.md").reference("selected", { selection: { start: 0 } });',
-      'export default defineConfig({ plugins: [file], bindings: [binding("selected-policy", [selected])] });',
+      'export default { plugins: [file], bindings: [{ id: "selected-policy", references: [{ id: "selected", pluginId: "@dock/reference-file", target: "guide.md", selection: { start: 0 } }] }] };',
     ].join("\n"),
   );
   const unsupportedSelection = await runDock(
@@ -393,7 +391,10 @@ async function runInstalledCli(
     consumer,
   );
   assert.equal(unsupportedSelection.code, 1, unsupportedSelection.stderr);
-  assert.match(unsupportedSelection.stderr, /全文，不能传入 selection/);
+  assert.match(
+    unsupportedSelection.stderr,
+    /文件引用 selected 的 selection 无效/,
+  );
 
   await writeFile(
     join(consumer, "invalid-builder-target.mjs"),

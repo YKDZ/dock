@@ -39,6 +39,7 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
       join(fixtureDirectory, "text-read-runtime.mjs"),
       join(directory, "text-read-runtime.mjs"),
     );
+    await verifyInstalledTextReadTypes(directory);
     const initialSource =
       "😀说明\n<!-- 原文注释保留 -->\n#region runtime\nport=4173\n#endregion runtime\n";
     await writeFile(join(directory, "guide.md"), initialSource, "utf8");
@@ -59,19 +60,10 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
       "runtime-port",
     );
 
-    const directRead = await run(
-      "node",
-      [
-        join(directory, "text-read-runtime.mjs"),
-        "4173",
-        String(initialSource.indexOf("4173")),
-      ],
+    await assertInstalledDirectRead(
       directory,
-    );
-    assert.equal(
-      directRead.code,
-      0,
-      `安装制品 readReference 场景失败：\n${directRead.stdout}\n${directRead.stderr}`,
+      "4173",
+      initialSource.indexOf("4173"),
     );
 
     const update = await runDock(
@@ -97,6 +89,11 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
       movedSource.indexOf("4173"),
       "runtime-policy",
       "runtime-port",
+    );
+    await assertInstalledDirectRead(
+      directory,
+      "4173",
+      movedSource.indexOf("4173"),
     );
     const movedText = await runDock(
       bin,
@@ -127,6 +124,11 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
       changedSource.indexOf("5173"),
       "runtime-policy",
       "runtime-port",
+    );
+    await assertInstalledDirectRead(
+      directory,
+      "5173",
+      changedSource.indexOf("5173"),
     );
 
     const baselinePath = join(directory, "dock.baseline.json");
@@ -164,6 +166,49 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+}
+
+async function assertInstalledDirectRead(
+  directory: string,
+  value: string,
+  start: number,
+): Promise<void> {
+  const result = await run(
+    "node",
+    [join(directory, "text-read-runtime.mjs"), value, String(start)],
+    directory,
+  );
+  assert.equal(
+    result.code,
+    0,
+    `安装制品 readReference 场景失败：\n${result.stdout}\n${result.stderr}`,
+  );
+}
+
+async function verifyInstalledTextReadTypes(directory: string): Promise<void> {
+  for (const name of [
+    "text-read-positive.mts",
+    "text-read-negative.mts",
+    "text-read-tsconfig.json",
+  ]) {
+    await copyFile(join(fixtureDirectory, name), join(directory, name));
+  }
+  const compiler = join(
+    packageDirectory,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "tsc.cmd" : "tsc",
+  );
+  const result = await run(
+    compiler,
+    ["-p", join(directory, "text-read-tsconfig.json"), "--pretty", "false"],
+    directory,
+  );
+  assert.equal(
+    result.code,
+    0,
+    `安装制品 readReference 类型正负例未通过：\n${result.stdout}\n${result.stderr}`,
+  );
 }
 
 async function verifyInstalledExistence(

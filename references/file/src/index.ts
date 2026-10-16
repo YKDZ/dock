@@ -283,7 +283,9 @@ async function readFileReference(
       await access(absolutePath);
       return { value: true };
     } catch (error) {
-      const code = hasCode(error, "ENOENT") ? "missing-file" : "file-read-failed";
+      const code = hasCode(error, "ENOENT")
+        ? "missing-file"
+        : "file-read-failed";
       throw new FileReferenceError(
         code,
         `无法读取文件 ${path}：${error instanceof Error ? error.message : String(error)}`,

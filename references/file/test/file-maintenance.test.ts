@@ -386,6 +386,16 @@ void test("文本定位的重复、缺失和非法边界均拒绝基线更新", 
       code: "malformed-region",
     },
     {
+      id: "unnamed-region",
+      path: "unnamed-region.txt",
+      source: "#region\nbody\n",
+      reference: file
+        .from("unnamed-region.txt")
+        .region("named")
+        .reference("unnamed-region"),
+      code: "malformed-region",
+    },
+    {
       id: "empty-region",
       path: "empty-region.txt",
       source: "#region empty\n \t\n#endregion empty\n",
@@ -468,20 +478,24 @@ void test("显式空完整声明可取消最后一条关联跟踪", async () => 
 });
 
 void test("普通文件引用在声明组装时拒绝无效的选择器", () => {
-  const selected = createReference<
-    typeof filePluginId,
-    "selected-guide",
-    string,
-    string
-  >(filePluginId, "selected-guide", "guide.md", {
-    selection: { start: 0 },
-  });
+  const invalidConfig = {
+    plugins: [file],
+    bindings: [
+      {
+        id: "selected-policy",
+        references: [
+          {
+            id: "selected-guide",
+            pluginId: filePluginId,
+            target: "guide.md",
+            selection: { start: 0 },
+          },
+        ],
+      },
+    ],
+  };
   assert.throws(
-    () =>
-      defineConfig({
-        plugins: [file],
-        bindings: [binding("selected-policy", [selected])],
-      }),
+    () => Reflect.apply(defineConfig, undefined, [invalidConfig]),
     /selection 无效/,
   );
 });
@@ -641,7 +655,7 @@ void test("配置路径维护使用新的模块图读取导入声明", async () 
       [
         'import { binding, createReference, defineConfig, definePlugin } from "@dock/sdk";',
         'import { target } from "./declarations.mjs";',
-        'const fixture = definePlugin({ id: "fixture", collect(reference) { return { kind: "value", value: reference.target }; } });',
+        'const fixture = definePlugin({ id: "fixture", validate() {}, collect(reference) { return { kind: "value", value: reference.target }; } });',
         'export default defineConfig({ plugins: [fixture], bindings: [binding("guide-policy", [createReference("fixture", "guide", target)])] });',
       ].join("\n"),
     );
