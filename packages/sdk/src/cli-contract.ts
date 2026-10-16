@@ -217,6 +217,15 @@ function formatReport(report: CheckReport): [string, ...string[]] {
     if (report.execution.failedCommands > 0) {
       lines.push(`原生命令失败：${report.execution.failedCommands} 次`);
     }
+    for (const read of report.execution.reads ?? []) {
+      const range =
+        read.range === undefined
+          ? ""
+          : `，范围 ${read.range.path}:${read.range.start}-${read.range.end}`;
+      lines.push(
+        `测试内读取 ${read.referenceId}（运行 ${read.runId} / 测试 ${read.testId}）：${JSON.stringify(read.value)}${range}`,
+      );
+    }
   }
   for (const binding of report.bindings) {
     lines.push(...formatBinding(binding));

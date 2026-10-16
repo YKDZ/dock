@@ -1,11 +1,18 @@
 import { relative, resolve } from "node:path";
 
 import type {
+  ExecutionObservationRecord,
+  ExecutionReadRecord,
   ExecutionRunRecord,
   ExecutionTestRecord,
   ExecutionTestStatus,
+  JsonValue,
 } from "@dock/sdk";
 
+import {
+  nodeObservationMessagePrefix,
+  nodeReadMessagePrefix,
+} from "./test-context.ts";
 import type { NodeEvent, NodeSelectedTest } from "./types.ts";
 
 type NodeTestNode = {
@@ -16,8 +23,12 @@ type NodeTestNode = {
   readonly parentId?: string | number;
   readonly name: string;
   readonly type: string;
+  readonly line?: number;
+  readonly column?: number;
   runnerStarted: boolean;
   started: boolean;
+  readonly observations: ExecutionObservationRecord[];
+  readonly reads: ExecutionReadRecord[];
   terminal?: {
     readonly status: ExecutionTestStatus;
     readonly message?: string;
@@ -44,6 +55,7 @@ export function collectNodeRun(
   const errors: { code: string; message: string }[] = [];
   const finalSummaries: Record<string, unknown>[] = [];
   let interrupted = false;
+  let invalidActivity = false;
 
   for (const event of events) {
     const data = event.data ?? {};
@@ -64,8 +76,19 @@ export function collectNodeRun(
       continue;
     }
 
-    const node = nodeForEvent(nodes, data);
+    const activity =
+      event.type === "test:diagnostic"
+        ? parseActivityMessage(data.message)
+        : undefined;
+    const node = nodeForEvent(nodes, data, activity?.testFullName);
     if (node === undefined) {
+      if (activity !== undefined) {
+        invalidActivity = true;
+        errors.push({
+          code: "node-test-activity-unattributed",
+          message: "Node 测试活动记录没有对应的原生测试身份。",
+        });
+      }
       if (event.type === "test:fail") {
         errors.push({
           code: "node-test-unattributed-failure",
@@ -76,8 +99,21 @@ export function collectNodeRun(
     }
 
     if (event.type === "test:start") node.runnerStarted = true;
-    if (event.type === "test:log" && data.message === "dock:started") {
+    if (event.type === "test:diagnostic" && data.message === "dock:started") {
       node.started = true;
+    }
+    if (activity?.kind === "invalid") {
+      invalidActivity = true;
+      errors.push({
+        code: "node-test-activity-record-invalid",
+        message: `测试 ${node.name} 的 Dock 活动记录无效：${activity.message}`,
+      });
+    } else if (activity?.kind === "observation") {
+      node.started = true;
+      node.observations.push(activity.record);
+    } else if (activity?.kind === "read") {
+      node.started = true;
+      node.reads.push(activity.record);
     }
     if (event.type === "test:pass" || event.type === "test:fail") {
       const status = terminalStatus(event.type, data);
@@ -117,6 +153,8 @@ export function collectNodeRun(
         status,
         started: node.started,
         attemptCount: node.started ? 1 : 0,
+        observations: node.observations,
+        reads: node.reads,
         ...(node.terminal?.message === undefined
           ? {}
           : { message: node.terminal.message }),
@@ -129,6 +167,7 @@ export function collectNodeRun(
     finalSummaries.length === 1 ? finalSummaries[0] : undefined;
   let lifecycle: ExecutionRunRecord["lifecycle"] = "complete";
   if (interrupted) lifecycle = "incomplete";
+  if (invalidActivity) lifecycle = "incomplete";
   if (completion.processError !== undefined) {
     lifecycle = "incomplete";
     errors.push({
@@ -244,22 +283,168 @@ function nodeFromEvent(
       : {}),
     name: data.name,
     type: data.type,
+    ...(Number.isSafeInteger(data.line) ? { line: data.line as number } : {}),
+    ...(Number.isSafeInteger(data.column)
+      ? { column: data.column as number }
+      : {}),
     runnerStarted: false,
     started: false,
+    observations: [],
+    reads: [],
   };
+}
+
+type ParsedActivityMessage =
+  | {
+      readonly kind: "observation";
+      readonly testFullName: string;
+      readonly record: ExecutionObservationRecord;
+    }
+  | {
+      readonly kind: "read";
+      readonly testFullName: string;
+      readonly record: ExecutionReadRecord;
+    }
+  | {
+      readonly kind: "invalid";
+      readonly message: string;
+      readonly testFullName?: string;
+    };
+
+function parseActivityMessage(
+  value: unknown,
+): ParsedActivityMessage | undefined {
+  if (typeof value !== "string") return undefined;
+  const kind = value.startsWith(nodeObservationMessagePrefix)
+    ? "observation"
+    : value.startsWith(nodeReadMessagePrefix)
+      ? "read"
+      : undefined;
+  if (kind === undefined) return undefined;
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(
+      value.slice(
+        kind === "observation"
+          ? nodeObservationMessagePrefix.length
+          : nodeReadMessagePrefix.length,
+      ),
+    ) as unknown;
+  } catch (error) {
+    return {
+      kind: "invalid",
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const testFullName =
+    isRecord(payload) && typeof payload.testFullName === "string"
+      ? payload.testFullName
+      : undefined;
+  const invalid = (message: string): ParsedActivityMessage => ({
+    kind: "invalid",
+    message,
+    ...(testFullName === undefined ? {} : { testFullName }),
+  });
+  if (testFullName === undefined) {
+    return invalid("活动记录缺少原生测试名称。");
+  }
+
+  if (kind === "observation") {
+    if (
+      !isRecord(payload) ||
+      typeof payload.key !== "string" ||
+      payload.key.length === 0 ||
+      !Object.hasOwn(payload, "value") ||
+      Object.keys(payload).some(
+        (key) => key !== "key" && key !== "value" && key !== "testFullName",
+      )
+    ) {
+      return invalid("观察记录必须包含键和值。");
+    }
+    return {
+      kind,
+      testFullName,
+      record: { key: payload.key, value: payload.value as JsonValue },
+    };
+  }
+
+  if (
+    !isRecord(payload) ||
+    typeof payload.referenceId !== "string" ||
+    payload.referenceId.length === 0 ||
+    !Object.hasOwn(payload, "value") ||
+    Object.keys(payload).some(
+      (key) =>
+        key !== "referenceId" &&
+        key !== "value" &&
+        key !== "range" &&
+        key !== "testFullName",
+    ) ||
+    (payload.range !== undefined && !isTextRange(payload.range))
+  ) {
+    return invalid("读取记录必须包含有效引用和值。");
+  }
+  return {
+    kind,
+    testFullName,
+    record: {
+      referenceId: payload.referenceId,
+      value: payload.value as JsonValue,
+      ...(payload.range === undefined ? {} : { range: payload.range }),
+    },
+  };
+}
+
+function isTextRange(value: unknown): value is ExecutionReadRecord["range"] {
+  return (
+    isRecord(value) &&
+    typeof value.path === "string" &&
+    Number.isSafeInteger(value.start) &&
+    Number.isSafeInteger(value.end) &&
+    (value.start as number) >= 0 &&
+    (value.end as number) >= (value.start as number) &&
+    Object.keys(value).length === 3 &&
+    Object.hasOwn(value, "path") &&
+    Object.hasOwn(value, "start") &&
+    Object.hasOwn(value, "end")
+  );
 }
 
 function nodeForEvent(
   nodes: Map<string, NodeTestNode>,
   data: Record<string, unknown>,
+  testFullName?: string,
 ): NodeTestNode | undefined {
   if (
-    (typeof data.testId !== "number" && typeof data.testId !== "string") ||
-    typeof data.entryFile !== "string"
+    (typeof data.testId === "number" || typeof data.testId === "string") &&
+    typeof data.entryFile === "string"
+  ) {
+    return nodes.get(nodeKey(data.entryFile, data.testId));
+  }
+
+  if (
+    typeof data.entryFile !== "string" ||
+    typeof data.file !== "string" ||
+    !Number.isSafeInteger(data.line) ||
+    !Number.isSafeInteger(data.column)
   ) {
     return undefined;
   }
-  return nodes.get(nodeKey(data.entryFile, data.testId));
+  const matches = [...nodes.values()].filter(
+    (node) =>
+      node.type === "test" &&
+      node.entryFile === data.entryFile &&
+      node.file === resolve(data.file as string) &&
+      node.line === data.line &&
+      node.column === data.column,
+  );
+  const candidates =
+    testFullName === undefined
+      ? matches
+      : matches.filter((node) => fullName(node, nodes) === testFullName);
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function nodeKey(file: string, testId: string | number): string {
