@@ -49,6 +49,16 @@
     "//#check:full": {
       "tags": ["quality:entry"]
     },
+    "//#check:install": {
+      "dependsOn": [
+        "@dock/core#pack",
+        "@dock/sdk#pack",
+        "@dock/reference-file#pack"
+      ],
+      "cache": false,
+      "outputs": [],
+      "tags": ["quality:heavy"]
+    },
     "//#boundaries": {
       "tags": ["quality:light"]
     },

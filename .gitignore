@@ -3,6 +3,7 @@ node_modules/
 dist/
 target/
 .turbo/
+**/.artifacts/
 coverage/
 .vitest/
 .env

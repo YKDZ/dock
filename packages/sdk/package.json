@@ -2,6 +2,9 @@
   "name": "@dock/sdk",
   "version": "0.0.0",
   "private": true,
+  "bin": {
+    "dock": "./dist/cli.js"
+  },
   "files": [
     "dist"
   ],
@@ -15,11 +18,17 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json --pretty false",
+    "pack": "mkdir -p .artifacts && pnpm pack --pack-destination .artifacts",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix . --fix",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@dock/core": "workspace:*",
+    "@ykdz/cli-contract": "0.3.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@dock/typescript-config": "workspace:*",

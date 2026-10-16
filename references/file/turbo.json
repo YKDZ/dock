@@ -7,6 +7,11 @@
       "outputs": ["dist/**"],
       "tags": ["quality:light"]
     },
+    "pack": {
+      "dependsOn": ["build"],
+      "outputs": [".artifacts/*.tgz"],
+      "tags": ["work:preparation"]
+    },
     "format:check": {
       "outputs": [],
       "tags": ["quality:light"]
@@ -16,6 +21,11 @@
       "outputs": [],
       "cache": false,
       "tags": ["work:repair"]
+    },
+    "test": {
+      "dependsOn": [],
+      "outputs": [],
+      "tags": ["quality:light"]
     },
     "lint": {
       "outputs": [],
