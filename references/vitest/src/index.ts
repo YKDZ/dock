@@ -6,7 +6,9 @@ import { createReference, definePlugin } from "@dock/sdk";
 import type {
   ExecutionRunRecord,
   JsonValue,
+  PluginContext,
   PluginExecutionContext,
+  PluginExecutionIdentity,
   PluginResult,
   Reference,
   ReferenceOptions,
@@ -295,6 +297,44 @@ const vitestImplementation: VitestPlugin = definePlugin({
         `Vitest 运行 ${target.run.identity} 未声明观察键 ${target.key}。`,
       );
     }
+  },
+  fileInfo(reference: VitestReference, context: PluginContext): string {
+    const target = getVitestTarget(reference.target);
+    const run = normalizeRun(target.run, context.root);
+    return resolveTargetFile(run.testRoot, target.file);
+  },
+  validateReferences(
+    references: readonly VitestReference[],
+    context: PluginContext,
+  ): readonly PluginExecutionIdentity[] {
+    const declarations = new Map<
+      string,
+      {
+        readonly declaration: PluginExecutionIdentity;
+        readonly encoded: string;
+      }
+    >();
+    for (const reference of references) {
+      const target = getVitestTarget(reference.target);
+      const run = normalizeRun(target.run, context.root);
+      const encoded = JSON.stringify(run.configuration);
+      const prior = declarations.get(run.identity);
+      if (prior !== undefined && prior.encoded !== encoded) {
+        throw new TypeError(
+          `Vitest 运行身份 ${run.identity} 在完整配置中对应不同设置。`,
+        );
+      }
+      if (prior === undefined) {
+        declarations.set(run.identity, {
+          declaration: {
+            identity: run.identity,
+            configuration: run.configuration,
+          },
+          encoded,
+        });
+      }
+    }
+    return [...declarations.values()].map(({ declaration }) => declaration);
   },
   async prepare(
     references: readonly VitestReference[],
