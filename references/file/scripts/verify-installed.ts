@@ -466,6 +466,22 @@ async function runInstalledCli(
   assert.doesNotMatch(duplicateBinding.stderr, /不得采集/);
 
   await writeFile(
+    join(consumer, "duplicate-plugin.mjs"),
+    [
+      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
+      'export default { plugins: [unused, unused], bindings: [{ id: "duplicate-plugin-policy", references: [{ id: "guide", pluginId: "unused", target: "guide.md" }] }] };',
+    ].join("\n"),
+  );
+  const duplicatePlugin = await runDock(
+    bin,
+    ["check", "--config", "duplicate-plugin.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(duplicatePlugin.code, 1, duplicatePlugin.stderr);
+  assert.match(duplicatePlugin.stderr, /引用插件身份重复：unused/);
+  assert.doesNotMatch(duplicatePlugin.stderr, /不得采集/);
+
+  await writeFile(
     join(consumer, "conflicting-reference.mjs"),
     [
       'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
