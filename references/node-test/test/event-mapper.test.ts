@@ -49,6 +49,7 @@ test("原生摘要与进程退出码冲突时不形成完整执行记录", () =>
     record.errors.some((error) => error.code === "node-test-exit-mismatch"),
     true,
   );
+  assert.deepEqual(record.commandResult, { exitCode: 1, signal: null });
   assert.equal(record.tests[0]?.attemptCount, 1);
   assert.equal(record.testExecutions, 1);
 });
@@ -67,6 +68,7 @@ test("缺少原生最终摘要时不把零退出码当成成功回执", () => {
     record.errors.some((error) => error.code === "node-test-summary-missing"),
     true,
   );
+  assert.deepEqual(record.commandResult, { exitCode: 0, signal: null });
 });
 
 test("尚未开始的选中测试不计入实际尝试数", () => {
@@ -108,4 +110,8 @@ test("原生中断事件或进程信号都使运行记录失效", () => {
       true,
     );
   }
+  assert.deepEqual(interruptedProcess.commandResult, {
+    exitCode: null,
+    signal: "SIGTERM",
+  });
 });

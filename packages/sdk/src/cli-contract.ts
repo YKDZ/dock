@@ -214,6 +214,9 @@ function formatReport(report: CheckReport): [string, ...string[]] {
     lines.push(
       `执行：${report.execution.testExecutions} 次测试尝试，${report.execution.commandAttempts} 次命令尝试`,
     );
+    if (report.execution.failedCommands > 0) {
+      lines.push(`原生命令失败：${report.execution.failedCommands} 次`);
+    }
   }
   for (const binding of report.bindings) {
     lines.push(...formatBinding(binding));

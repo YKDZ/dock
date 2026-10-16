@@ -204,12 +204,17 @@ export function collectNodeRun(
   return {
     lifecycle,
     commandAttempts: 1,
-    testExecutions: tests.reduce(
-      (total, test) => total + test.attemptCount,
-      0,
-    ),
+    testExecutions: tests.reduce((total, test) => total + test.attemptCount, 0),
     tests,
     errors: uniqueErrors(errors),
+    ...(completion.exitCode === null && completion.signal === null
+      ? {}
+      : {
+          commandResult: {
+            exitCode: completion.exitCode,
+            signal: completion.signal,
+          },
+        }),
   };
 }
 

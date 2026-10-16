@@ -29,10 +29,15 @@ export type ExecutionRunRecord = {
     readonly code: string;
     readonly message: string;
   }[];
+  readonly commandResult?: {
+    readonly exitCode: number | null;
+    readonly signal: string | null;
+  };
 };
 
 export type ExecutionSummary = {
   readonly commandAttempts: number;
+  readonly failedCommands: number;
   readonly testExecutions: number;
 };
 
@@ -114,12 +119,20 @@ export function createExecutionSession(): ExecutionSession {
     summary(): ExecutionSummary | undefined {
       if (phase !== "finished" || runs.size === 0) return undefined;
       let commandAttempts = 0;
+      let failedCommands = 0;
       let testExecutions = 0;
       for (const { record } of runs.values()) {
         commandAttempts += record.commandAttempts;
+        if (
+          record.commandResult !== undefined &&
+          (record.commandResult.exitCode !== 0 ||
+            record.commandResult.signal !== null)
+        ) {
+          failedCommands += 1;
+        }
         testExecutions += record.testExecutions;
       }
-      return { commandAttempts, testExecutions };
+      return { commandAttempts, failedCommands, testExecutions };
     },
   };
 
@@ -175,7 +188,9 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     !isCount(value.commandAttempts) ||
     !isCount(value.testExecutions) ||
     !Array.isArray(value.tests) ||
-    !Array.isArray(value.errors)
+    !Array.isArray(value.errors) ||
+    (value.commandResult !== undefined &&
+      (!isCommandResult(value.commandResult) || value.commandAttempts === 0))
   ) {
     return invalidRecord();
   }
@@ -189,7 +204,7 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
       !isTestStatus(test.status) ||
       typeof test.started !== "boolean" ||
       !isCount(test.attemptCount) ||
-      test.started !== (test.attemptCount > 0) ||
+      test.started !== test.attemptCount > 0 ||
       (test.message !== undefined && typeof test.message !== "string")
     ) {
       return invalidRecord();
@@ -229,6 +244,14 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     testExecutions: value.testExecutions,
     tests,
     errors,
+    ...(value.commandResult === undefined
+      ? {}
+      : {
+          commandResult: {
+            exitCode: value.commandResult.exitCode,
+            signal: value.commandResult.signal,
+          },
+        }),
   };
 }
 
@@ -254,7 +277,26 @@ function cloneRecord(record: ExecutionRunRecord): ExecutionRunRecord {
     ...record,
     tests: record.tests.map((test) => ({ ...test })),
     errors: record.errors.map((error) => ({ ...error })),
+    ...(record.commandResult === undefined
+      ? {}
+      : { commandResult: { ...record.commandResult } }),
   };
+}
+
+function isCommandResult(
+  value: unknown,
+): value is NonNullable<ExecutionRunRecord["commandResult"]> {
+  return (
+    isRecord(value) &&
+    (value.exitCode === null ||
+      (typeof value.exitCode === "number" &&
+        Number.isSafeInteger(value.exitCode) &&
+        value.exitCode >= 0)) &&
+    (value.signal === null ||
+      (typeof value.signal === "string" && value.signal.length > 0)) &&
+    !(value.exitCode !== null && value.signal !== null) &&
+    (value.exitCode !== null || value.signal !== null)
+  );
 }
 
 function canonicalJson(value: JsonValue): string {

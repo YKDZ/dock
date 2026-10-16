@@ -23,15 +23,24 @@ const config = defineConfig({
 });
 
 const first = await check(config);
-assert.deepEqual(first.execution, { commandAttempts: 1, testExecutions: 1 });
+assert.deepEqual(first.execution, {
+  commandAttempts: 1,
+  failedCommands: 0,
+  testExecutions: 1,
+});
 const updated = await updateBaseline(config);
 assert.equal(updated.status, "updated");
 assert.deepEqual(updated.report.execution, {
   commandAttempts: 1,
+  failedCommands: 0,
   testExecutions: 1,
 });
 const third = await check(config);
-assert.deepEqual(third.execution, { commandAttempts: 1, testExecutions: 1 });
+assert.deepEqual(third.execution, {
+  commandAttempts: 1,
+  failedCommands: 0,
+  testExecutions: 1,
+});
 assert.equal(
   readFileSync(resolve(process.cwd(), "operation-count.txt"), "utf8"),
   "xxx",

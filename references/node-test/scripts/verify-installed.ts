@@ -37,6 +37,7 @@ type CliEnvelope = {
 type MaintenanceReport = {
   readonly execution?: {
     readonly commandAttempts: number;
+    readonly failedCommands: number;
     readonly testExecutions: number;
   };
   readonly bindings: readonly {
@@ -242,7 +243,7 @@ async function verifyFailureIsolation(
   const envelope = parseEnvelope(check.stdout);
   assert.equal(envelope.variant, "errors");
   const report = requireReport(envelope);
-  assertExecutionSummary(report, 1, 2);
+  assertExecutionSummary(report, 1, 2, 1);
   assertBindingError(report, "失败业务", "test-failed");
   assertBindingHasNoErrors(report, "独立业务");
 
@@ -300,7 +301,7 @@ async function verifyRunLifecycle(
   const cancelledReport = requireReport(cancelledEnvelope);
   assertBindingError(cancelledReport, "已进入", "test-cancelled");
   assertBindingError(cancelledReport, "未进入", "test-not-executed");
-  assertExecutionSummary(cancelledReport, 1, 2);
+  assertExecutionSummary(cancelledReport, 1, 2, 1);
 
   const startupFailure = await runDock(
     bin,
@@ -338,6 +339,7 @@ async function verifyInterruptedProcess(
   const checkReport = requireReport(checkEnvelope);
   assertBindingError(checkReport, "中断状态", "run-lifecycle-failed");
   assert.equal(checkReport.execution?.commandAttempts, 1);
+  assert.equal(checkReport.execution?.failedCommands, 1);
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
 
   const update = await runDock(
@@ -353,6 +355,7 @@ async function verifyInterruptedProcess(
   const updateReport = requireReport(updateEnvelope);
   assertBindingError(updateReport, "中断状态", "run-lifecycle-failed");
   assert.equal(updateReport.execution?.commandAttempts, 1);
+  assert.equal(updateReport.execution?.failedCommands, 1);
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
 }
 
@@ -395,6 +398,7 @@ async function verifyAfterEndFailure(
       const checkReport = requireReport(checkEnvelope);
       assertBindingError(checkReport, "异步失败状态", "run-lifecycle-failed");
       assert.equal(checkReport.execution?.commandAttempts, 1);
+      assert.equal(checkReport.execution?.failedCommands, 1);
 
       assert.equal(
         update.code,
@@ -406,6 +410,7 @@ async function verifyAfterEndFailure(
       const updateReport = requireReport(updateEnvelope);
       assertBindingError(updateReport, "异步失败状态", "run-lifecycle-failed");
       assert.equal(updateReport.execution?.commandAttempts, 1);
+      assert.equal(updateReport.execution?.failedCommands, 1);
       assert.deepEqual(await readFile(baselinePath), baselineBytes);
     } finally {
       await rm(marker, { force: true });
@@ -567,8 +572,13 @@ function assertExecutionSummary(
   report: MaintenanceReport,
   commandAttempts: number,
   testExecutions: number,
+  failedCommands = 0,
 ): void {
-  assert.deepEqual(report.execution, { commandAttempts, testExecutions });
+  assert.deepEqual(report.execution, {
+    commandAttempts,
+    failedCommands,
+    testExecutions,
+  });
 }
 
 function assertBindingError(
