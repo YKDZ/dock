@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access, cp, mkdtemp, rm } from "node:fs/promises";
+import { access, copyFile, cp, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,9 +95,11 @@ async function main(): Promise<void> {
       process.platform === "win32" ? "dock.cmd" : "dock",
     );
     await verifyHappyRoundTrip(bin, consumer);
+    await verifyEffectiveRoot(bin, consumer);
     await verifyOperationLocalExecution(consumer);
     await verifyFailureIsolation(bin, consumer);
     await verifyRunLifecycle(bin, consumer);
+    await verifyInterruptedProcess(bin, consumer);
     await verifyStatusesAndIdentity(bin, consumer);
     await verifyConflictPreflight(bin, consumer);
     await verifyOrdinaryNodeTest(consumer);
@@ -191,6 +193,33 @@ async function verifyHappyRoundTrip(
   assertExecutionSummary(requireReport(checked), 1, 2);
 }
 
+async function verifyEffectiveRoot(
+  bin: string,
+  consumer: string,
+): Promise<void> {
+  const arguments_ = ["--config", "configurations/rooted.config.mts", "--json"];
+  const update = await runDock(
+    bin,
+    ["baseline", "update", ...arguments_],
+    consumer,
+  );
+  assert.equal(update.code, 0, update.stderr);
+  const updated = parseEnvelope(update.stdout);
+  assert.equal(updated.variant, "updated");
+  const updateReport = requireReport(updated);
+  assertBindingHasNoErrors(updateReport, "有效 root 维护");
+  assertExecutionSummary(updateReport, 1, 1);
+  await access(join(consumer, "effective-root", "rooted.baseline.json"));
+
+  const check = await runDock(bin, ["check", ...arguments_], consumer);
+  assert.equal(check.code, 0, check.stderr);
+  const checked = parseEnvelope(check.stdout);
+  assert.equal(checked.variant, "consistent");
+  const checkReport = requireReport(checked);
+  assertBindingHasNoErrors(checkReport, "有效 root 维护");
+  assertExecutionSummary(checkReport, 1, 1);
+}
+
 async function verifyFailureIsolation(
   bin: string,
   consumer: string,
@@ -277,6 +306,45 @@ async function verifyRunLifecycle(
     "启动失败",
     "run-lifecycle-failed",
   );
+}
+
+async function verifyInterruptedProcess(
+  bin: string,
+  consumer: string,
+): Promise<void> {
+  const baselinePath = join(consumer, "interrupted.baseline.json");
+  await copyFile(join(consumer, "dock.baseline.json"), baselinePath);
+  const baselineBytes = await readFile(baselinePath);
+
+  const check = await runDock(
+    bin,
+    ["check", "--config", "interrupted.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(check.code, 1, check.stderr);
+  assert.equal(check.signal, null);
+  assert.equal(check.timedOut, false);
+  const checkEnvelope = parseEnvelope(check.stdout);
+  assert.equal(checkEnvelope.variant, "errors");
+  const checkReport = requireReport(checkEnvelope);
+  assertBindingError(checkReport, "中断状态", "run-lifecycle-failed");
+  assert.equal(checkReport.execution?.commandAttempts, 1);
+  assert.deepEqual(await readFile(baselinePath), baselineBytes);
+
+  const update = await runDock(
+    bin,
+    ["baseline", "update", "--config", "interrupted.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(update.code, 1, update.stderr);
+  assert.equal(update.signal, null);
+  assert.equal(update.timedOut, false);
+  const updateEnvelope = parseEnvelope(update.stdout);
+  assert.equal(updateEnvelope.variant, "rejected");
+  const updateReport = requireReport(updateEnvelope);
+  assertBindingError(updateReport, "中断状态", "run-lifecycle-failed");
+  assert.equal(updateReport.execution?.commandAttempts, 1);
+  assert.deepEqual(await readFile(baselinePath), baselineBytes);
 }
 
 async function verifyStatusesAndIdentity(
