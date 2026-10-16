@@ -12,6 +12,7 @@ import {
   type BaselineUpdateIssue,
   type BindingDefinition,
   type CheckReport as CoreCheckReport,
+  type JsonValue,
   type ReferenceDefinition,
   type ReferenceResult,
 } from "@dock/core";
@@ -20,6 +21,7 @@ import { normalizeConfig, type NormalizedReference } from "./authoring.ts";
 import type {
   Config,
   PluginExecutionContext,
+  PluginExecutionIdentity,
   PluginResult,
 } from "./contracts.ts";
 import {
@@ -27,9 +29,16 @@ import {
   type ExecutionSession,
   type ExecutionSummary,
 } from "./execution.ts";
+import {
+  normalizeFilePath,
+  resolveScope,
+  ScopeResolutionError,
+  type MaintenanceScope,
+} from "./scope.ts";
 
 export type MaintenanceConfig = Config | string | URL;
 export type Operation = "check" | "updateBaseline";
+export type { MaintenanceScope } from "./scope.ts";
 export type CheckReport = CoreCheckReport & {
   readonly execution?: ExecutionSummary;
 };
@@ -63,36 +72,51 @@ type PreparedConfig = {
   readonly bindings: BindingDefinition[];
 };
 
-export async function check(config: MaintenanceConfig): Promise<CheckReport> {
+export async function check(
+  config: MaintenanceConfig,
+  scope?: MaintenanceScope,
+): Promise<CheckReport> {
   if (typeof config === "string" || config instanceof URL) {
-    return await runConfigWorker("check", resolveConfigPath(config));
+    return await runConfigWorker("check", resolveConfigPath(config), scope);
   }
-  return await checkConfig(config, process.cwd());
+  return await checkConfig(config, process.cwd(), scope);
 }
 
 export async function updateBaseline(
   config: MaintenanceConfig,
+  scope?: MaintenanceScope,
 ): Promise<BaselineUpdateOutcome> {
   if (typeof config === "string" || config instanceof URL) {
-    return await runConfigWorker("updateBaseline", resolveConfigPath(config));
+    return await runConfigWorker(
+      "updateBaseline",
+      resolveConfigPath(config),
+      scope,
+    );
   }
-  return await updateConfig(config, process.cwd());
+  return await updateConfig(config, process.cwd(), scope);
 }
 
 export async function checkConfig(
   value: unknown,
   defaultRoot: string,
+  scope?: MaintenanceScope,
 ): Promise<CheckReport> {
   const config = prepareConfig(value, defaultRoot);
+  await validatePluginReferences(config, scope);
+  const fileInfo = currentFileInfo(config);
   const baseline = await readBaseline(config.baselinePath);
-  const session = await prepareExecution(config);
-  const facts = await collect(config, session);
+  const selection = resolveMaintenanceScope(scope, config, baseline, fileInfo);
+  const session = await prepareExecution(config, selection.references);
+  const facts = await collect(config, selection.references, session);
   const report = checkCore({
-    references: referenceDefinitions(config.references),
+    references: referenceDefinitions(config.references, fileInfo),
     bindings: config.bindings,
     facts,
     ...(baseline === undefined ? {} : { baseline }),
     declarationCompleteness: "complete",
+    ...(selection.bindingIds === undefined
+      ? {}
+      : { scope: [...selection.bindingIds] }),
   });
   return withExecutionSummary(report, session);
 }
@@ -100,17 +124,24 @@ export async function checkConfig(
 export async function updateConfig(
   value: unknown,
   defaultRoot: string,
+  scope?: MaintenanceScope,
 ): Promise<BaselineUpdateOutcome> {
   const config = prepareConfig(value, defaultRoot);
+  await validatePluginReferences(config, scope);
+  const fileInfo = currentFileInfo(config);
   const baseline = await readBaseline(config.baselinePath);
-  const session = await prepareExecution(config);
-  const facts = await collect(config, session);
+  const selection = resolveMaintenanceScope(scope, config, baseline, fileInfo);
+  const session = await prepareExecution(config, selection.references);
+  const facts = await collect(config, selection.references, session);
   const outcome = updateBaselineCore({
-    references: referenceDefinitions(config.references),
+    references: referenceDefinitions(config.references, fileInfo),
     bindings: config.bindings,
     facts,
     ...(baseline === undefined ? {} : { baseline }),
     declarationCompleteness: "complete",
+    ...(selection.bindingIds === undefined
+      ? {}
+      : { scope: [...selection.bindingIds] }),
   });
   if (outcome.status === "updated") {
     await writeBaseline(config.baselinePath, outcome.baseline);
@@ -151,6 +182,7 @@ export function prepareConfig(
 
 async function prepareExecution(
   config: PreparedConfig,
+  references: readonly NormalizedReference[],
 ): Promise<ExecutionSession> {
   const session = createExecutionSession();
   const context: PluginExecutionContext = {
@@ -159,12 +191,12 @@ async function prepareExecution(
   };
   for (const plugin of config.plugins.values()) {
     if (plugin.prepare === undefined) continue;
-    const references = config.references.filter(
+    const pluginReferences = references.filter(
       (reference) => reference.pluginId === plugin.id,
     );
-    if (references.length === 0) continue;
+    if (pluginReferences.length === 0) continue;
     try {
-      await plugin.prepare(references, context);
+      await plugin.prepare(pluginReferences, context);
     } catch (error) {
       throw new MaintenanceError(
         "plugin-prepare-failed",
@@ -179,6 +211,7 @@ async function prepareExecution(
 
 async function collect(
   config: PreparedConfig,
+  references: readonly NormalizedReference[],
   session: ExecutionSession,
 ): Promise<ReferenceResult[]> {
   const context: PluginExecutionContext = {
@@ -186,7 +219,7 @@ async function collect(
     execution: session,
   };
   return await Promise.all(
-    config.references.map(async (reference) => {
+    references.map(async (reference) => {
       const plugin = config.plugins.get(reference.pluginId);
       if (plugin === undefined) {
         return {
@@ -267,18 +300,164 @@ function invalidPluginResult(id: string): ReferenceResult {
 
 function referenceDefinitions(
   references: readonly NormalizedReference[],
+  fileInfo: ReadonlyMap<string, string | null>,
 ): ReferenceDefinition[] {
   return references.map((reference) => ({
     id: reference.id,
     target: {
       pluginId: reference.pluginId,
       target: reference.target,
+      fileInfo: fileInfo.get(reference.id) ?? null,
     },
     ...(reference.selection === undefined
       ? {}
       : { selection: reference.selection }),
     ...(reference.note === undefined ? {} : { note: reference.note }),
   }));
+}
+
+async function validatePluginReferences(
+  config: PreparedConfig,
+  scope: MaintenanceScope | undefined,
+): Promise<void> {
+  const filtering = requestsFiltering(scope);
+  const identities = new Map<
+    string,
+    { readonly configuration: string; readonly pluginId: string }
+  >();
+  const context = { root: config.root };
+
+  for (const plugin of config.plugins.values()) {
+    const references = config.references.filter(
+      (reference) => reference.pluginId === plugin.id,
+    );
+    if (references.length === 0) continue;
+    if (plugin.validateReferences === undefined) {
+      if (filtering && plugin.prepare !== undefined) {
+        throw new MaintenanceError(
+          "plugin-preflight-missing",
+          `插件 ${plugin.id} 会登记执行，但没有完整配置身份预检，不能安全缩小范围。`,
+        );
+      }
+      continue;
+    }
+    let declarations: void | readonly PluginExecutionIdentity[];
+    try {
+      declarations = await plugin.validateReferences(references, context);
+    } catch (error) {
+      throw new MaintenanceError(
+        "plugin-reference-validation-failed",
+        `插件 ${plugin.id} 完整配置预检失败：${errorMessage(error)}`,
+        { cause: error },
+      );
+    }
+    if (declarations === undefined) continue;
+    if (!Array.isArray(declarations)) {
+      throw new MaintenanceError(
+        "plugin-reference-validation-failed",
+        `插件 ${plugin.id} 完整配置预检必须返回执行身份列表。`,
+      );
+    }
+    for (const declaration of declarations) {
+      if (
+        typeof declaration !== "object" ||
+        declaration === null ||
+        Array.isArray(declaration) ||
+        typeof declaration.identity !== "string" ||
+        declaration.identity.length === 0 ||
+        !isJsonValue(declaration.configuration)
+      ) {
+        throw new MaintenanceError(
+          "plugin-reference-validation-failed",
+          `插件 ${plugin.id} 完整配置预检返回了无效执行身份。`,
+        );
+      }
+      const encoded = canonicalJson(declaration.configuration);
+      const prior = identities.get(declaration.identity);
+      if (prior !== undefined && prior.configuration !== encoded) {
+        throw new MaintenanceError(
+          "execution-identity-conflict",
+          `执行身份 ${declaration.identity} 在插件 ${prior.pluginId} 与 ${plugin.id} 中对应不同配置。`,
+        );
+      }
+      identities.set(declaration.identity, {
+        configuration: encoded,
+        pluginId: plugin.id,
+      });
+    }
+  }
+}
+
+function currentFileInfo(config: PreparedConfig): Map<string, string | null> {
+  const locations = new Map<string, string | null>();
+  for (const reference of config.references) {
+    const plugin = config.plugins.get(reference.pluginId);
+    if (plugin === undefined) {
+      throw new MaintenanceError(
+        "plugin-not-registered",
+        `引用 ${reference.id} 的插件未登记：${reference.pluginId}`,
+      );
+    }
+    if (plugin.fileInfo === undefined) {
+      locations.set(reference.id, null);
+      continue;
+    }
+    try {
+      locations.set(
+        reference.id,
+        normalizeFilePath(
+          plugin.fileInfo(reference, { root: config.root }),
+          config.root,
+        ),
+      );
+    } catch (error) {
+      throw new MaintenanceError(
+        "plugin-file-info-failed",
+        `插件 ${plugin.id} 无法说明引用 ${reference.id} 的文件目标：${errorMessage(error)}`,
+        { cause: error },
+      );
+    }
+  }
+  return locations;
+}
+
+function resolveMaintenanceScope(
+  scope: MaintenanceScope | undefined,
+  config: PreparedConfig,
+  baseline: Baseline | undefined,
+  fileInfo: ReadonlyMap<string, string | null>,
+): ReturnType<typeof resolveScope> {
+  try {
+    return resolveScope(scope, {
+      root: config.root,
+      references: config.references,
+      bindings: config.bindings,
+      baseline,
+      fileInfo,
+    });
+  } catch (error) {
+    if (error instanceof ScopeResolutionError) {
+      throw new MaintenanceError(error.code, error.message, { cause: error });
+    }
+    throw error;
+  }
+}
+
+function requestsFiltering(scope: MaintenanceScope | undefined): boolean {
+  if (scope === undefined) return false;
+  if (typeof scope !== "object" || scope === null) return true;
+  return Object.values(scope).some(
+    (value) => !Array.isArray(value) || value.length > 0,
+  );
+}
+
+function canonicalJson(value: JsonValue): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  return `{${Object.entries(value)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
+    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
+    .join(",")}}`;
 }
 
 async function readBaseline(path: string): Promise<Baseline | undefined> {
@@ -361,6 +540,7 @@ function resolveConfigPath(input: string | URL): string {
 function runConfigWorker<T>(
   operation: Operation,
   configPath: string,
+  scope?: MaintenanceScope,
 ): Promise<T> {
   const workerUrl = new URL(
     import.meta.url.endsWith(".ts")
@@ -376,7 +556,11 @@ function runConfigWorker<T>(
   );
   return new Promise<T>((resolveResult, rejectResult) => {
     const worker = new Worker(workerUrl, {
-      workerData: { operation, configPath },
+      workerData: {
+        operation,
+        configPath,
+        ...(scope === undefined ? {} : { scope }),
+      },
       execArgv,
     });
     let finishing = false;

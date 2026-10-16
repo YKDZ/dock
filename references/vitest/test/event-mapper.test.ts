@@ -14,7 +14,13 @@ test("retry 次数使用 setup 实际开始数并与最终原生摘要核对", (
             {
               fullName: "重试通过",
               result: () => ({ state: "passed", errors: [] }),
-              meta: () => ({ dockVitestAttemptCount: 2 }),
+              meta: () => ({
+                dockVitestAttemptCount: 2,
+                dockVitestAttempts: [
+                  { attempt: 1, observations: [], reads: [] },
+                  { attempt: 2, observations: [], reads: [] },
+                ],
+              }),
               diagnostic: () => ({ retryCount: 1 }),
               options: { mode: "run" },
             },
@@ -35,6 +41,74 @@ test("retry 次数使用 setup 实际开始数并与最终原生摘要核对", (
   assert.equal(candidate.tests[0]?.attemptCount, 2);
 });
 
+test("观察与读取保留原生尝试序号且不合并历史记录", () => {
+  const candidate = captureVitestCandidate(
+    [
+      {
+        moduleId: "/consumer/test/retry.test.mts",
+        errors: () => [],
+        children: {
+          allTests: () => [
+            {
+              fullName: "最终尝试缺少观察",
+              result: () => ({ state: "passed", errors: [] }),
+              meta: () => ({
+                dockVitestAttemptCount: 2,
+                dockVitestAttempts: [
+                  {
+                    attempt: 1,
+                    observations: [
+                      { attempt: 1, key: "result", value: "早期值" },
+                    ],
+                    reads: [
+                      {
+                        attempt: 1,
+                        referenceId: "guide",
+                        value: "早期读取",
+                        range: { path: "guide.md", start: 0, end: 4 },
+                      },
+                    ],
+                  },
+                  { attempt: 2, observations: [], reads: [] },
+                ],
+              }),
+              diagnostic: () => ({ retryCount: 1 }),
+              options: { mode: "run" },
+            },
+          ],
+          allSuites: () => [],
+        },
+      },
+    ],
+    [],
+    "passed",
+    "5.0.3",
+    "/consumer",
+  );
+  const record = mapVitestRun(
+    {
+      version: "5.0.3",
+      closed: true,
+      closeErrors: [],
+      candidate,
+    },
+    { code: 0, signal: null },
+  );
+
+  assert.equal(record.testExecutions, 2);
+  assert.deepEqual(record.tests[0]?.observations, [
+    { attempt: 1, key: "result", value: "早期值" },
+  ]);
+  assert.deepEqual(record.tests[0]?.reads, [
+    {
+      attempt: 1,
+      referenceId: "guide",
+      value: "早期读取",
+      range: { path: "guide.md", start: 0, end: 4 },
+    },
+  ]);
+});
+
 test("共同收尾错误使运行无效，无关断言失败仍只作为测试状态", () => {
   const candidate = captureVitestCandidate(
     [
@@ -53,7 +127,12 @@ test("共同收尾错误使运行无效，无关断言失败仍只作为测试�
             {
               fullName: "共同收尾 > 选定通过",
               result: () => ({ state: "passed", errors: undefined }),
-              meta: () => ({ dockVitestAttemptCount: 1 }),
+              meta: () => ({
+                dockVitestAttemptCount: 1,
+                dockVitestAttempts: [
+                  { attempt: 1, observations: [], reads: [] },
+                ],
+              }),
               diagnostic: () => ({ retryCount: 0 }),
               options: { mode: "run" },
             },
@@ -63,7 +142,12 @@ test("共同收尾错误使运行无效，无关断言失败仍只作为测试�
                 state: "failed",
                 errors: [{ message: "无关纯断言失败" }],
               }),
-              meta: () => ({ dockVitestAttemptCount: 1 }),
+              meta: () => ({
+                dockVitestAttemptCount: 1,
+                dockVitestAttempts: [
+                  { attempt: 1, observations: [], reads: [] },
+                ],
+              }),
               diagnostic: () => ({ retryCount: 0 }),
               options: { mode: "run" },
             },

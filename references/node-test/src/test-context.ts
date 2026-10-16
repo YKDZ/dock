@@ -26,7 +26,9 @@ export function recordNodeObservation(key: string, value: unknown): void {
 }
 
 export function recordNodeRead(
-  record: Omit<ExecutionReadRecord, "value"> & { readonly value: unknown },
+  record: Omit<ExecutionReadRecord, "attempt" | "value"> & {
+    readonly value: unknown;
+  },
 ): void {
   if (record.referenceId.length === 0) {
     throw new TypeError("读取记录必须包含引用身份。");

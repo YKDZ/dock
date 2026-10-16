@@ -366,7 +366,11 @@ function parseActivityMessage(
     return {
       kind,
       testFullName,
-      record: { key: payload.key, value: payload.value as JsonValue },
+      record: {
+        attempt: 1,
+        key: payload.key,
+        value: payload.value as JsonValue,
+      },
     };
   }
 
@@ -390,6 +394,7 @@ function parseActivityMessage(
     kind,
     testFullName,
     record: {
+      attempt: 1,
       referenceId: payload.referenceId,
       value: payload.value as JsonValue,
       ...(payload.range === undefined ? {} : { range: payload.range }),

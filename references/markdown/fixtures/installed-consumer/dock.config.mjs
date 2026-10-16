@@ -2,11 +2,12 @@ import { file } from "@dock/reference-file";
 import { markdown } from "@dock/reference-markdown";
 import { binding, defineConfig } from "@dock/sdk";
 
+const guideTarget = process.env.DOCK_MARKDOWN_TARGET ?? "guide.md";
 const sectionHeading =
   process.env.DOCK_MARKDOWN_SHORT_SECTION === "1" ? "安装" : ["指南", "安装"];
 
 export const chapter = markdown
-  .from("guide.md")
+  .from(guideTarget)
   .section(sectionHeading)
   .node({ type: "paragraph", contains: "安装片段" })
   .reference("chapter");

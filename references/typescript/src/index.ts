@@ -113,6 +113,9 @@ const implementation = definePlugin({
       );
     }
   },
+  fileInfo(reference: TypeScriptReference, context: PluginContext): string {
+    return resolveTarget(reference.target, context.root);
+  },
   async collect(
     reference: TypeScriptReference,
     context: PluginContext,

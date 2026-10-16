@@ -50,7 +50,7 @@ export function createReference<
 
 type PluginReferenceArgument<
   Plugin,
-  Method extends "validate" | "collect" | "read",
+  Method extends "validate" | "collect" | "read" | "fileInfo",
 > = Method extends keyof Plugin
   ? Plugin[Method] extends (...arguments_: infer Arguments) => unknown
     ? Arguments extends readonly [infer Ref, ...unknown[]]
@@ -60,6 +60,21 @@ type PluginReferenceArgument<
       : never
     : never
   : never;
+
+type PluginReferenceListArgument<Plugin> =
+  "validateReferences" extends keyof Plugin
+    ? Plugin["validateReferences"] extends (
+        ...arguments_: infer Arguments
+      ) => unknown
+      ? Arguments extends readonly [infer References, ...unknown[]]
+        ? References extends readonly (infer Ref)[]
+          ? Ref extends Reference
+            ? Ref
+            : never
+          : never
+        : never
+      : never
+    : never;
 
 type PluginReferenceType<Plugin> = [
   PluginReferenceArgument<Plugin, "validate">,
@@ -113,25 +128,41 @@ type AcceptsPluginReference<Ref extends Reference, Accepted> = [
     ? true
     : false;
 
+type PluginHookReferenceContract<Plugin, Ref extends Reference> =
+  AcceptsPluginReference<
+    Ref,
+    PluginReferenceArgument<Plugin, "fileInfo">
+  > extends true
+    ? AcceptsPluginReference<
+        Ref,
+        PluginReferenceListArgument<Plugin>
+      > extends true
+      ? unknown
+      : never
+    : never;
+
+/** 新增的纯预检和文件定位钩子必须接受声明的同一引用类型。 */
 type PluginValueContractForReference<Plugin, Ref extends Reference> = [
-  PluginCollectedValue<Plugin>,
-] extends [ReferenceValue<Ref>]
-  ? AcceptsPluginReference<
-      Ref,
-      PluginReferenceArgument<Plugin, "collect">
-    > extends true
-    ? Plugin extends { readonly read: (...arguments_: never[]) => unknown }
-      ? [PluginReadValue<Plugin>] extends [ReferenceValue<Ref>]
-        ? AcceptsPluginReference<
-            Ref,
-            PluginReferenceArgument<Plugin, "read">
-          > extends true
-          ? unknown
+  PluginHookReferenceContract<Plugin, Ref>,
+] extends [never]
+  ? never
+  : [PluginCollectedValue<Plugin>] extends [ReferenceValue<Ref>]
+    ? AcceptsPluginReference<
+        Ref,
+        PluginReferenceArgument<Plugin, "collect">
+      > extends true
+      ? Plugin extends { readonly read: (...arguments_: never[]) => unknown }
+        ? [PluginReadValue<Plugin>] extends [ReferenceValue<Ref>]
+          ? AcceptsPluginReference<
+              Ref,
+              PluginReferenceArgument<Plugin, "read">
+            > extends true
+            ? unknown
+            : never
           : never
-        : never
-      : unknown
-    : never
-  : never;
+        : unknown
+      : never
+    : never;
 
 type PluginValueContract<Plugin> =
   PluginReferenceType<Plugin> extends infer Ref extends Reference
@@ -146,7 +177,7 @@ type ValidatedPlugins<Plugins extends readonly ReferencePlugin[]> = {
 };
 
 export function definePlugin<const Plugin extends ReferencePlugin>(
-  plugin: Plugin & PluginValueContract<Plugin>,
+  plugin: Plugin & PluginValueContract<NoInfer<Plugin>>,
 ): Plugin {
   assertPlugin(plugin);
   return plugin;
@@ -315,6 +346,14 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     typeof value === "object" && value !== null
       ? (value as { readonly prepare?: unknown }).prepare
       : undefined;
+  const fileInfo =
+    typeof value === "object" && value !== null
+      ? (value as { readonly fileInfo?: unknown }).fileInfo
+      : undefined;
+  const validateReferences =
+    typeof value === "object" && value !== null
+      ? (value as { readonly validateReferences?: unknown }).validateReferences
+      : undefined;
   if (
     typeof value !== "object" ||
     value === null ||
@@ -323,10 +362,13 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     (value as { id: string }).id.length === 0 ||
     typeof (value as { collect?: unknown }).collect !== "function" ||
     typeof (value as { validate?: unknown }).validate !== "function" ||
-    (prepare !== undefined && typeof prepare !== "function")
+    (prepare !== undefined && typeof prepare !== "function") ||
+    (fileInfo !== undefined && typeof fileInfo !== "function") ||
+    (validateReferences !== undefined &&
+      typeof validateReferences !== "function")
   ) {
     throw new TypeError(
-      "引用插件必须提供非空 id、validate 和 collect 函数；prepare（若提供）必须是函数。",
+      "引用插件必须提供非空 id、validate 和 collect 函数；fileInfo、validateReferences 与 prepare（若提供）必须是函数。",
     );
   }
 }

@@ -14,6 +14,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { verifyInstalledScope } from "./verify-installed-scope.ts";
+
 type ProcessResult = {
   readonly code: number;
   readonly signal: NodeJS.Signals | null;
@@ -26,6 +28,7 @@ type CliEnvelope = {
   readonly kind: string;
   readonly variant?: string;
   readonly data?: {
+    readonly code?: string;
     readonly report?: unknown;
     readonly errors?: readonly {
       readonly bindingId?: string;
@@ -158,6 +161,7 @@ async function main(): Promise<void> {
     await verifyConflictPreflight(bin, consumer);
     await verifyOrdinaryNodeTest(consumer);
     await verifyNoFrameworkDependency(consumer);
+    await verifyInstalledScope(consumer);
     process.stdout.write(
       "Node 观察值 17→19 漂移、alpha/beta 同源循环归属、双份安装与故障隔离验收通过。\n",
     );
@@ -821,10 +825,10 @@ async function verifyConflictPreflight(
     consumer,
   );
   assert.equal(check.code, 1, check.stderr);
-  const report = requireReport(parseEnvelope(check.stdout));
-  assertBindingError(report, "首项冲突", "run-lifecycle-failed");
-  assertBindingError(report, "次项冲突", "run-lifecycle-failed");
-  assertExecutionSummary(report, 0, 0);
+  assert.equal(
+    parseEnvelope(check.stderr).data?.code,
+    "plugin-reference-validation-failed",
+  );
   await assert.rejects(access(marker), { code: "ENOENT" });
 }
 

@@ -183,10 +183,11 @@ test("活动测试的观察和读取按原生测试身份保留真实值与位�
 
   assert.equal(record.lifecycle, "complete");
   assert.deepEqual(record.tests[0]?.observations, [
-    { key: "total", value: 17 },
+    { attempt: 1, key: "total", value: 17 },
   ]);
   assert.deepEqual(record.tests[0]?.reads, [
     {
+      attempt: 1,
       referenceId: "business-copy",
       value: "🧭 active text",
       range: { path: "guide.md", start: 8, end: 22 },
@@ -245,8 +246,8 @@ test("同一测试的重复观察保持可见而不被映射层去重", () => {
   );
 
   assert.deepEqual(record.tests[0]?.observations, [
-    { key: "same", value: 1 },
-    { key: "same", value: 1 },
+    { attempt: 1, key: "same", value: 1 },
+    { attempt: 1, key: "same", value: 1 },
   ]);
 });
 
@@ -309,6 +310,9 @@ test("同一源码位置的活动按原生测试全名归属", () => {
   assert.equal(record.lifecycle, "complete");
   assert.deepEqual(
     record.tests.map((test) => test.observations),
-    [[{ key: "amount", value: 1 }], [{ key: "amount", value: 2 }]],
+    [
+      [{ attempt: 1, key: "amount", value: 1 }],
+      [{ attempt: 1, key: "amount", value: 2 }],
+    ],
   );
 });
