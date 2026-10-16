@@ -1,0 +1,11 @@
+{
+  "extends": "@dock/typescript-config/base.json",
+  "compilerOptions": {
+    "declaration": false,
+    "noEmit": true,
+    "customConditions": ["source"],
+    "allowImportingTsExtensions": true,
+    "types": ["node"]
+  },
+  "include": ["scripts/**/*.ts", "templates/**/*.ts"]
+}
