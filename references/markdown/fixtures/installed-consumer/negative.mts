@@ -15,6 +15,10 @@ builder.node({ type: "heading" });
 builder.reference("invalid", { selection: { kind: "markdown", steps: [] } });
 // @ts-expect-error 表格行键必须明确提供列和值。
 builder.tableCell({ column: "值", row: { column: "名称" } });
+// @ts-expect-error 标记选择必须提供字符串 ID。
+builder.marker(42);
+// @ts-expect-error 标记选择必须提供 ID。
+builder.marker();
 
 const fileReference = file.from("guide.md").reference("file-only");
 // @ts-expect-error 当前配置未登记普通文件插件。
