@@ -33,16 +33,45 @@ export type VitestObservation<
   Value extends JsonValue = JsonValue,
 > = {
   readonly key: Key;
-  record(value: Value): Value;
+  readonly record: (value: Value) => Value;
 };
 
-type ObservationKeys<Observations extends readonly VitestObservation[]> = {
-  -readonly [
-    Index in keyof Observations
-  ]: Observations[Index] extends VitestObservation<infer Key, JsonValue>
+type AnyVitestObservation = {
+  readonly key: string;
+  readonly record: (value: never) => JsonValue;
+};
+
+type ObservationKeys<
+  Observations extends readonly AnyVitestObservation[],
+  Values extends Record<string, JsonValue>,
+> = {
+  -readonly [Index in keyof Observations]: Observations[Index] extends {
+    readonly key: infer Key extends string;
+  }
     ? Key
     : never;
+} & {
+  readonly __dockTypeWitness?: {
+    readonly framework: "vitest";
+    readonly values: Values;
+  };
 };
+
+type ObservationValues<Observations extends readonly AnyVitestObservation[]> = {
+  readonly [
+    Observation in Observations[number] as Observation["key"]
+  ]: ObservationValue<Observation>;
+};
+
+type ValuesFromVitestRun<Run> = Run extends {
+  readonly observationKeys: {
+    readonly __dockTypeWitness?: { readonly values: infer Values };
+  };
+}
+  ? Values extends Record<string, JsonValue>
+    ? Values
+    : never
+  : never;
 
 type WidenJson<Value> = Value extends string
   ? string
@@ -56,14 +85,16 @@ type WidenJson<Value> = Value extends string
           ? { readonly [Key in keyof Value]: WidenJson<Value[Key]> }
           : Value;
 
-type ObservationValue<Observation> =
-  Observation extends VitestObservation<string, infer Value> ? Value : never;
-
-const observationTypes: unique symbol = Symbol("VitestRun.observationTypes");
+type ObservationValue<Observation> = Observation extends {
+  readonly record: (value: never) => infer Value;
+}
+  ? Value
+  : never;
 
 export type VitestRun<
-  Observations extends readonly VitestObservation[] =
-    readonly VitestObservation[],
+  Observations extends readonly AnyVitestObservation[] =
+    readonly AnyVitestObservation[],
+  Values extends Record<string, JsonValue> = ObservationValues<Observations>,
 > = {
   readonly identity: string;
   readonly files: [string, ...string[]];
@@ -71,13 +102,12 @@ export type VitestRun<
   readonly additionalTests?: VitestTestSelection[];
   readonly testRoot?: string;
   readonly configFile?: string;
-  readonly observationKeys: ObservationKeys<Observations>;
-  readonly [observationTypes]?: Observations;
+  readonly observationKeys: ObservationKeys<Observations, Values>;
 };
 
 export type VitestRunOptions<
-  Observations extends readonly VitestObservation[] =
-    readonly VitestObservation[],
+  Observations extends readonly AnyVitestObservation[] =
+    readonly AnyVitestObservation[],
 > = {
   readonly files: readonly [string, ...string[]];
   /** 只选择 run.files 中的附加测试，不要求它们成功。 */
@@ -98,11 +128,12 @@ export type VitestTestSelection = {
 export type VitestStatusValue = { readonly status: "passed" };
 
 export type VitestStatusTarget<
-  Observations extends readonly VitestObservation[] =
-    readonly VitestObservation[],
+  Observations extends readonly AnyVitestObservation[] =
+    readonly AnyVitestObservation[],
+  Values extends Record<string, JsonValue> = ObservationValues<Observations>,
 > = {
   readonly kind: "vitest-test-status";
-  readonly run: VitestRun<Observations>;
+  readonly run: VitestRun<Observations, Values>;
   readonly file: string;
   readonly name: string;
 };
@@ -116,25 +147,27 @@ export type VitestObservationTarget = {
 };
 
 export type VitestTestTarget<
-  Observations extends readonly VitestObservation[] =
-    readonly VitestObservation[],
-> = VitestStatusTarget<Observations> | VitestObservationTarget;
+  Observations extends readonly AnyVitestObservation[] =
+    readonly AnyVitestObservation[],
+  Values extends Record<string, JsonValue> = ObservationValues<Observations>,
+> = VitestStatusTarget<Observations, Values> | VitestObservationTarget;
 
 export type VitestStatusReference<
   Id extends string = string,
-  Observations extends readonly VitestObservation[] =
-    readonly VitestObservation[],
+  Observations extends readonly AnyVitestObservation[] =
+    readonly AnyVitestObservation[],
+  Values extends Record<string, JsonValue> = ObservationValues<Observations>,
 > = Reference<
   typeof vitestPluginId,
   Id,
-  VitestStatusTarget<Observations>,
+  VitestStatusTarget<Observations, Values>,
   VitestStatusValue,
   never
 >;
 
 export type VitestObservationReference<
   Id extends string = string,
-  Observation extends VitestObservation = VitestObservation,
+  Observation extends AnyVitestObservation = AnyVitestObservation,
 > = Reference<
   typeof vitestPluginId,
   Id,
@@ -147,8 +180,6 @@ export type VitestReference<Id extends string = string> =
   | VitestStatusReference<Id>
   | VitestObservationReference<Id>;
 
-type AnyVitestObservation = VitestObservation<string, JsonValue>;
-
 /** 声明稳定观察键；sample 只用于推导类型，不会作为默认观察值。 */
 export function defineVitestObservation<
   const Key extends string,
@@ -158,7 +189,7 @@ export function defineVitestObservation<
   void sample;
   return {
     key,
-    record(value): WidenJson<Sample> {
+    record: (value: WidenJson<Sample>): WidenJson<Sample> => {
       recordVitestObservation(key, value);
       return value;
     },
@@ -167,17 +198,17 @@ export function defineVitestObservation<
 
 /** 类型化地声明一次 Vitest 原生运行；声明阶段不启动测试。 */
 export function defineVitestRun<
-  const Observations extends readonly VitestObservation[] = readonly [],
+  const Observations extends readonly AnyVitestObservation[] = readonly [],
 >(
   identity: string,
   options: VitestRunOptions<Observations>,
-): VitestRun<Observations> {
+): VitestRun<Observations, ObservationValues<Observations>> {
   const observations = options.observations;
   assertRun(identity, options);
   const observationKeys = (observations ?? []).map((observation) => {
     assertObservationDefinition(observation);
     return observation.key;
-  }) as ObservationKeys<Observations>;
+  }) as ObservationKeys<Observations, ObservationValues<Observations>>;
   return {
     identity,
     files: [...options.files],
@@ -200,19 +231,20 @@ export function defineVitestRun<
 /** 声明一条依赖 Vitest 最终成功状态的引用。 */
 export function vitestStatus<
   const Id extends string,
-  const Observations extends readonly VitestObservation[],
+  const Observations extends readonly AnyVitestObservation[],
+  Values extends Record<string, JsonValue>,
 >(
   id: Id,
-  run: VitestRun<Observations>,
+  run: VitestRun<Observations, Values>,
   target: { readonly file: string; readonly name: string },
   options: Pick<ReferenceOptions, "declaredAt" | "note"> = {},
-): VitestStatusReference<Id, Observations> {
+): VitestStatusReference<Id, Observations, Values> {
   assertRun(run.identity, run);
   assertTestSelection(target);
   return createReference<
     typeof vitestPluginId,
     Id,
-    VitestStatusTarget<Observations>,
+    VitestStatusTarget<Observations, Values>,
     VitestStatusValue,
     never
   >(
@@ -236,15 +268,18 @@ export function vitestStatus<
 /** 将一条观察声明绑定到测试，并保留记录键和值类型。 */
 export function vitestObservation<
   const Id extends string,
-  const Observations extends readonly VitestObservation[],
-  const Observation extends Observations[number],
+  const Run extends VitestRun,
+  const Key extends keyof ValuesFromVitestRun<Run> & string,
 >(
   id: Id,
-  run: VitestRun<Observations>,
+  run: Run,
   target: { readonly file: string; readonly name: string },
-  observation: Observation,
+  observation: VitestObservation<Key, NoInfer<ValuesFromVitestRun<Run>[Key]>>,
   options: Pick<ReferenceOptions, "declaredAt" | "note"> = {},
-): VitestObservationReference<Id, Observation> {
+): VitestObservationReference<
+  Id,
+  VitestObservation<Key, ValuesFromVitestRun<Run>[Key]>
+> {
   assertRun(run.identity, run);
   assertTestSelection(target);
   assertObservationDefinition(observation);
@@ -257,7 +292,7 @@ export function vitestObservation<
     typeof vitestPluginId,
     Id,
     VitestObservationTarget,
-    ObservationValue<Observation>,
+    ValuesFromVitestRun<Run>[Key],
     never
   >(
     vitestPluginId,

@@ -53,6 +53,59 @@ const observedTitle = vitestObservation(
 const wrongObservation: ReferenceValue<typeof observedTitle> = 42;
 void wrongObservation;
 
+const declaredShape = defineVitestObservation("declared.shape", { count: 0 });
+const shapeRun = defineVitestRun("观察值声明", {
+  files: ["test/stable.test.mts"],
+  observations: [declaredShape],
+});
+const incompatibleShape = defineVitestObservation("declared.shape", {
+  count: 0,
+  label: "",
+});
+const shapeReference = vitestObservation(
+  "观察值引用",
+  shapeRun,
+  { file: "test/stable.test.mts", name: "普通通过" },
+  // @ts-expect-error 同键 helper 也必须与运行声明的完整值类型相符。
+  incompatibleShape,
+);
+const shapeValue: ReferenceValue<typeof shapeReference> = declaredShape.record({
+  count: 1,
+});
+// @ts-expect-error 运行声明没有保证 label，引用类型不能承诺该字段。
+const unpromisedLabel: string = shapeValue.label;
+void unpromisedLabel;
+const wrongShapeValue: ReferenceValue<typeof shapeReference> = {
+  // @ts-expect-error count 必须是 number。
+  count: "1",
+};
+void wrongShapeValue;
+const undeclaredShape = defineVitestObservation("undeclared.shape", 0);
+vitestObservation(
+  "未声明键",
+  shapeRun,
+  { file: "test/stable.test.mts", name: "普通通过" },
+  // @ts-expect-error helper 键必须属于该运行。
+  undeclaredShape,
+);
+
+const richerShape = defineVitestObservation("reverse.shape", {
+  count: 0,
+  label: "",
+});
+const richerRun = defineVitestRun("反向观察类型检查", {
+  files: ["test/stable.test.mts"],
+  observations: [richerShape],
+});
+const narrowerShape = defineVitestObservation("reverse.shape", { count: 0 });
+vitestObservation(
+  "反向不兼容观察值引用",
+  richerRun,
+  { file: "test/stable.test.mts", name: "普通通过" },
+  // @ts-expect-error 运行声明额外保证 label，不能用较窄 helper 隐去它。
+  narrowerShape,
+);
+
 // @ts-expect-error 状态引用必须由对应的 Vitest 插件处理。
 defineConfig({ plugins: [], bindings: [binding("缺失插件", [status])] });
 

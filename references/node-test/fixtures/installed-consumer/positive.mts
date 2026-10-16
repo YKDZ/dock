@@ -37,6 +37,28 @@ const objectValue = details.record({ amount: actualAmount });
 const actualObjectAmount: number = objectValue.amount;
 void actualObjectAmount;
 
+const sharedShape = defineNodeTestObservation("node.shared.shape", {
+  count: 0,
+});
+const sharedRun = defineNodeTestRun("Node 共享观察类型", {
+  files: ["test/happy.test.mts"],
+  observations: [sharedShape],
+});
+const sharedReference = nodeTestObservation(
+  "Node 共享结构引用",
+  sharedRun,
+  { file: "test/happy.test.mts", name: "主要业务状态符合约定" },
+  sharedShape,
+);
+const sharedValue: ReferenceValue<typeof sharedReference> = sharedShape.record({
+  count: 1,
+});
+const sharedCount: number = sharedValue.count;
+// @ts-expect-error 运行声明只保证 count。
+const sharedLabel: string = sharedValue.label;
+void sharedCount;
+void sharedLabel;
+
 const currentText = file
   .from("read-business.txt")
   .match("Reading: (.*)", 1)
@@ -53,3 +75,5 @@ export default defineConfig({
   plugins: [nodeTest],
   bindings: [binding("业务状态", [status])],
 });
+
+export { sharedRun, sharedShape };

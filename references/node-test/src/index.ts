@@ -37,17 +37,43 @@ export type NodeTestObservation<
   Value extends JsonValue = JsonValue,
 > = {
   readonly key: Key;
-  record(value: Value): Value;
+  readonly record: (value: Value) => Value;
 };
 
-type AnyNodeTestObservation = NodeTestObservation<string, JsonValue>;
-type ObservationKeys<Observations extends readonly NodeTestObservation[]> = {
-  -readonly [
-    Index in keyof Observations
-  ]: Observations[Index] extends NodeTestObservation<infer Key, JsonValue>
+type AnyNodeTestObservation = {
+  readonly key: string;
+  readonly record: (value: never) => JsonValue;
+};
+type ObservationKeys<
+  Observations extends readonly AnyNodeTestObservation[],
+  Values extends Record<string, JsonValue>,
+> = {
+  -readonly [Index in keyof Observations]: Observations[Index] extends {
+    readonly key: infer Key extends string;
+  }
     ? Key
     : never;
+} & {
+  readonly __dockTypeWitness?: {
+    readonly framework: "node-test";
+    readonly values: Values;
+  };
 };
+type ObservationValues<Observations extends readonly AnyNodeTestObservation[]> =
+  {
+    readonly [
+      Observation in Observations[number] as Observation["key"]
+    ]: ObservationValue<Observation>;
+  };
+type ValuesFromNodeTestRun<Run> = Run extends {
+  readonly observationKeys: {
+    readonly __dockTypeWitness?: { readonly values: infer Values };
+  };
+}
+  ? Values extends Record<string, JsonValue>
+    ? Values
+    : never
+  : never;
 type WidenJson<Value> = Value extends string
   ? string
   : Value extends number
@@ -59,26 +85,27 @@ type WidenJson<Value> = Value extends string
         : Value extends object
           ? { readonly [Key in keyof Value]: WidenJson<Value[Key]> }
           : Value;
-type ObservationValue<Observation> =
-  Observation extends NodeTestObservation<string, infer Value> ? Value : never;
-
-const observationTypes: unique symbol = Symbol("NodeTestRun.observationTypes");
+type ObservationValue<Observation> = Observation extends {
+  readonly record: (value: never) => infer Value;
+}
+  ? Value
+  : never;
 
 export type NodeTestRun<
-  Observations extends readonly NodeTestObservation[] =
-    readonly NodeTestObservation[],
+  Observations extends readonly AnyNodeTestObservation[] =
+    readonly AnyNodeTestObservation[],
+  Values extends Record<string, JsonValue> = ObservationValues<Observations>,
 > = {
   readonly identity: string;
   readonly files: [string, ...string[]];
   readonly testRoot?: string;
   readonly namePattern?: string;
-  readonly observationKeys: ObservationKeys<Observations>;
-  readonly [observationTypes]?: Observations;
+  readonly observationKeys: ObservationKeys<Observations, Values>;
 };
 
 export type NodeTestRunOptions<
-  Observations extends readonly NodeTestObservation[] =
-    readonly NodeTestObservation[],
+  Observations extends readonly AnyNodeTestObservation[] =
+    readonly AnyNodeTestObservation[],
 > = {
   readonly files: readonly [string, ...string[]];
   readonly testRoot?: string;
@@ -89,11 +116,12 @@ export type NodeTestRunOptions<
 export type NodeTestValue = { readonly status: "passed" };
 
 export type NodeTestStatusTarget<
-  Observations extends readonly NodeTestObservation[] =
-    readonly NodeTestObservation[],
+  Observations extends readonly AnyNodeTestObservation[] =
+    readonly AnyNodeTestObservation[],
+  Values extends Record<string, JsonValue> = ObservationValues<Observations>,
 > = {
   readonly kind: "node-test-status";
-  readonly run: NodeTestRun<Observations>;
+  readonly run: NodeTestRun<Observations, Values>;
   readonly file: string;
   readonly name: string;
 };
@@ -110,19 +138,20 @@ export type NodeTestTarget = NodeTestStatusTarget | NodeTestObservationTarget;
 
 export type NodeTestStatusReference<
   Id extends string = string,
-  Observations extends readonly NodeTestObservation[] =
-    readonly NodeTestObservation[],
+  Observations extends readonly AnyNodeTestObservation[] =
+    readonly AnyNodeTestObservation[],
+  Values extends Record<string, JsonValue> = ObservationValues<Observations>,
 > = Reference<
   typeof nodeTestPluginId,
   Id,
-  NodeTestStatusTarget<Observations>,
+  NodeTestStatusTarget<Observations, Values>,
   NodeTestValue,
   never
 >;
 
 export type NodeTestObservationReference<
   Id extends string = string,
-  Observation extends NodeTestObservation = NodeTestObservation,
+  Observation extends AnyNodeTestObservation = AnyNodeTestObservation,
 > = Reference<
   typeof nodeTestPluginId,
   Id,
@@ -152,7 +181,7 @@ export function defineNodeTestObservation<
   void sample;
   return {
     key,
-    record(value): WidenJson<Sample> {
+    record: (value: WidenJson<Sample>): WidenJson<Sample> => {
       recordNodeObservation(key, value);
       return value;
     },
@@ -161,15 +190,15 @@ export function defineNodeTestObservation<
 
 /** 类型化地声明一次 Node 原生运行，不在声明时启动测试进程。 */
 export function defineNodeTestRun<
-  const Observations extends readonly NodeTestObservation[] = readonly [],
+  const Observations extends readonly AnyNodeTestObservation[] = readonly [],
 >(
   identity: string,
   options: NodeTestRunOptions<Observations>,
-): NodeTestRun<Observations> {
+): NodeTestRun<Observations, ObservationValues<Observations>> {
   const observationKeys = (options.observations ?? []).map((observation) => {
     assertObservationDefinition(observation);
     return observation.key;
-  }) as ObservationKeys<Observations>;
+  }) as ObservationKeys<Observations, ObservationValues<Observations>>;
   const run = {
     identity,
     files: [...options.files],
@@ -178,7 +207,7 @@ export function defineNodeTestRun<
       ? {}
       : { namePattern: options.namePattern }),
     observationKeys,
-  } as NodeTestRun<Observations>;
+  } as NodeTestRun<Observations, ObservationValues<Observations>>;
   assertRun(identity, run);
   return run;
 }
@@ -186,19 +215,20 @@ export function defineNodeTestRun<
 /** 声明一条依赖原生测试成功终态的引用。 */
 export function nodeTestStatus<
   const Id extends string,
-  const Observations extends readonly NodeTestObservation[],
+  const Observations extends readonly AnyNodeTestObservation[],
+  Values extends Record<string, JsonValue>,
 >(
   id: Id,
-  run: NodeTestRun<Observations>,
+  run: NodeTestRun<Observations, Values>,
   target: { readonly file: string; readonly name: string },
   options: Pick<ReferenceOptions, "declaredAt" | "note"> = {},
-): NodeTestStatusReference<Id, Observations> {
+): NodeTestStatusReference<Id, Observations, Values> {
   assertRun(run.identity, run);
   assertTestSelection(target);
   return createReference<
     typeof nodeTestPluginId,
     Id,
-    NodeTestStatusTarget<Observations>,
+    NodeTestStatusTarget<Observations, Values>,
     NodeTestValue,
     never
   >(
@@ -222,15 +252,21 @@ export function nodeTestStatus<
 /** 将同一观察声明绑定到选定 Node 测试，并保留其值类型。 */
 export function nodeTestObservation<
   const Id extends string,
-  const Observations extends readonly NodeTestObservation[],
-  const Observation extends Observations[number],
+  const Run extends NodeTestRun,
+  const Key extends keyof ValuesFromNodeTestRun<Run> & string,
 >(
   id: Id,
-  run: NodeTestRun<Observations>,
+  run: Run,
   target: { readonly file: string; readonly name: string },
-  observation: Observation,
+  observation: NodeTestObservation<
+    Key,
+    NoInfer<ValuesFromNodeTestRun<Run>[Key]>
+  >,
   options: Pick<ReferenceOptions, "declaredAt" | "note"> = {},
-): NodeTestObservationReference<Id, Observation> {
+): NodeTestObservationReference<
+  Id,
+  NodeTestObservation<Key, ValuesFromNodeTestRun<Run>[Key]>
+> {
   assertRun(run.identity, run);
   assertTestSelection(target);
   assertObservationDefinition(observation);
@@ -243,7 +279,7 @@ export function nodeTestObservation<
     typeof nodeTestPluginId,
     Id,
     NodeTestObservationTarget,
-    ObservationValue<Observation>,
+    ValuesFromNodeTestRun<Run>[Key],
     never
   >(
     nodeTestPluginId,

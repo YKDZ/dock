@@ -44,6 +44,28 @@ const expectedObservation: ReferenceValue<typeof observedTitle> = "当前标题"
 const roundTripObservation: string = currentTitle.record(expectedObservation);
 void roundTripObservation;
 
+const sharedShape = defineVitestObservation("shared.shape", { count: 0 });
+const sharedRun = defineVitestRun("共享观察类型", {
+  files: ["test/stable.test.mts"],
+  observations: [sharedShape],
+});
+const sharedReference = vitestObservation(
+  "共享结构引用",
+  sharedRun,
+  { file: "test/stable.test.mts", name: "普通通过" },
+  sharedShape,
+);
+const sharedValue: ReferenceValue<typeof sharedReference> = sharedShape.record({
+  count: 1,
+});
+const sharedCount: number = sharedValue.count;
+// @ts-expect-error 运行声明只保证 count。
+const sharedLabel: string = sharedValue.label;
+void sharedCount;
+void sharedLabel;
+
+export { sharedRun, sharedShape };
+
 defineConfig({
   plugins: [vitest],
   bindings: [binding("运行状态", [status])],
