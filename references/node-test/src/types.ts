@@ -25,7 +25,12 @@ type NodeEventRun = {
   readonly files: [string, ...string[]];
   readonly testRoot?: string;
   readonly namePattern?: string;
-  readonly observationKeys: string[];
+  readonly observationKeys: string[] & {
+    readonly __dockTypeWitness?: {
+      readonly framework: "node-test";
+      readonly values: Record<string, JsonValue>;
+    };
+  };
 };
 
 export type NodeEventTarget =
