@@ -12,16 +12,22 @@ import config, {
   inlineCode,
   link,
   list,
+  markerDocument,
   runtimePort,
   standalone,
+  standaloneMarker,
+  stablePort,
   table,
   tableCell,
 } from "./dock.config.mjs";
 
 const source = await readFile("guide.md", "utf8");
+const markerSource = await readFile("markers-guide.md", "utf8");
 const selected = {};
 for (const reference of [
   chapter,
+  stablePort,
+  markerDocument,
   code,
   list,
   inlineCode,
@@ -31,15 +37,21 @@ for (const reference of [
   emptyCell,
   runtimePort,
   standalone,
+  standaloneMarker,
 ]) {
   const result = await readReference(config, reference);
   const collected = await markdown.collect(reference, { root: process.cwd() });
   assert.equal(collected.kind, "value");
   assert.deepEqual({ value: collected.value, range: collected.range }, result);
-  assert.equal(
-    source.slice(result.range.start, result.range.end),
-    result.value,
-  );
+  if (reference.id === "marker-document") {
+    assert.equal(result.range.start, 0);
+    assert.equal(result.range.end, markerSource.length);
+  } else {
+    assert.equal(
+      source.slice(result.range.start, result.range.end),
+      result.value,
+    );
+  }
   selected[reference.id] = result;
 }
 

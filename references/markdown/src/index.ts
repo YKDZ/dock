@@ -19,6 +19,7 @@ import {
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
+import { parseFragment } from "parse5";
 
 export const markdownPluginId = "@dock/reference-markdown" as const;
 
@@ -47,6 +48,7 @@ export type MarkdownSelectionStep =
   | { kind: "section"; heading: string | string[] }
   | { kind: "node"; selector: MarkdownNodeSelection }
   | { kind: "tableCell"; selector: MarkdownTableCellSelection }
+  | { kind: "marker"; id: string }
   | TextSelectionStep;
 
 export type MarkdownSelection = {
@@ -76,6 +78,7 @@ export type MarkdownReferenceBuilder<
   tableCell(
     selector: MarkdownTableCellSelection,
   ): MarkdownReferenceBuilder<MarkdownSelection>;
+  marker(id: string): MarkdownReferenceBuilder<MarkdownSelection>;
   quote(text: string): MarkdownReferenceBuilder<MarkdownSelection>;
   match(
     pattern: string,
@@ -211,6 +214,12 @@ function createBuilder<Selection extends JsonValue>(
         { kind: "tableCell", selector },
       ]);
     },
+    marker(id): MarkdownReferenceBuilder<MarkdownSelection> {
+      return createBuilder<MarkdownSelection>(target, [
+        ...steps,
+        { kind: "marker", id },
+      ]);
+    },
     quote(text): MarkdownReferenceBuilder<MarkdownSelection> {
       return createBuilder<MarkdownSelection>(target, [
         ...steps,
@@ -316,7 +325,7 @@ async function readMarkdownReference(
     }
   }
 
-  return { value: source.slice(current.start, current.end), range: current };
+  return { value: markdownFact(source, current), range: current };
 }
 
 function selectMarkdownRange(
@@ -324,6 +333,9 @@ function selectMarkdownRange(
   input: TextRange,
   step: MarkdownSelectionStep,
 ): TextRange {
+  if (step.kind === "marker") {
+    return selectMarker(source, input, step.id);
+  }
   if (
     step.kind === "quote" ||
     step.kind === "match" ||
@@ -353,6 +365,109 @@ function selectMarkdownRange(
     start: input.start + offsets.start,
     end: input.start + offsets.end,
   };
+}
+
+type MarkdownMarker = {
+  readonly id: string;
+  readonly kind: "start" | "end";
+  readonly start: number;
+  readonly end: number;
+};
+
+type HtmlNode = {
+  readonly nodeName: string;
+  readonly childNodes?: readonly HtmlNode[];
+  readonly content?: HtmlNode;
+  readonly sourceCodeLocation?: {
+    readonly startOffset: number;
+    readonly endOffset: number;
+  } | null;
+};
+
+function documentMarkers(source: string): MarkdownMarker[] {
+  const markers: MarkdownMarker[] = [];
+  const nodes = allNodes(parseMarkdown(source));
+  const masked: string[] = source
+    .split("")
+    .map((character) =>
+      character === "\r" || character === "\n" ? character : " ",
+    );
+  for (const node of nodes) {
+    if (node.type !== "html") continue;
+    const { start, end } = nodeOffsets(source, node);
+    for (let offset = start; offset < end; offset++) {
+      masked[offset] = source[offset]!;
+    }
+  }
+
+  // 保留 Markdown 识别出的 HTML 片段，再统一解析，维持段内 script 的 raw-text 上下文。
+  const fragment = parseFragment(masked.join(""), {
+    sourceCodeLocationInfo: true,
+  }) as unknown as HtmlNode;
+  const visit = (html: HtmlNode): void => {
+    const location = html.sourceCodeLocation;
+    if (
+      html.nodeName === "#comment" &&
+      location !== null &&
+      location !== undefined
+    ) {
+      const markerStart = location.startOffset;
+      const markerEnd = location.endOffset;
+      const match = /^<!--\s*dock:(start|end)\s+([^\s]+)\s*-->$/u.exec(
+        source.slice(markerStart, markerEnd),
+      );
+      if (match !== null) {
+        markers.push({
+          id: match[2]!,
+          kind: match[1]! as MarkdownMarker["kind"],
+          start: markerStart,
+          end: markerEnd,
+        });
+      }
+    }
+    html.childNodes?.forEach(visit);
+    if (html.content !== undefined) visit(html.content);
+  };
+  visit(fragment);
+  return markers.sort((left, right) => left.start - right.start);
+}
+
+function markdownFact(source: string, input: TextRange): string {
+  let result = "";
+  let cursor = input.start;
+  for (const marker of documentMarkers(source)) {
+    if (marker.end <= input.start || marker.start >= input.end) continue;
+    const start = Math.max(input.start, marker.start);
+    const end = Math.min(input.end, marker.end);
+    result += source.slice(cursor, start);
+    cursor = Math.max(cursor, end);
+  }
+  return result + source.slice(cursor, input.end);
+}
+
+function selectMarker(source: string, input: TextRange, id: string): TextRange {
+  if (!nonBlank(id) || /\s/u.test(id)) {
+    throw invalidSelector("标记 ID 必须是非空单行文本。");
+  }
+  const markers = documentMarkers(source).filter((marker) => marker.id === id);
+  const opening = one(
+    markers.filter((marker) => marker.kind === "start"),
+    `标记 ${id} 的起点`,
+  );
+  const closing = one(
+    markers.filter((marker) => marker.kind === "end"),
+    `标记 ${id} 的终点`,
+  );
+  if (opening.end > closing.start) {
+    throw invalidSelector(`标记 ${id} 的终点必须位于起点之后。`);
+  }
+  if (opening.end < input.start || closing.start > input.end) {
+    throw new MarkdownReferenceError(
+      "missing-selection",
+      `标记 ${id} 不在当前选择范围内。`,
+    );
+  }
+  return { path: input.path, start: opening.end, end: closing.start };
 }
 
 function parseMarkdown(source: string): MarkdownRoot {
@@ -734,6 +849,16 @@ function assertMarkdownStep(
       return;
     }
     throw invalidSelector("region 选择步骤必须提供名称且不能有额外字段。");
+  }
+  if (value.kind === "marker") {
+    if (
+      Object.keys(value).length === 2 &&
+      nonBlank(value.id) &&
+      !/\s/u.test(value.id)
+    ) {
+      return;
+    }
+    throw invalidSelector("标记选择必须提供非空单行 ID 且不能有额外字段。");
   }
   throw invalidSelector("不支持的 Markdown 选择步骤。");
 }

@@ -10,6 +10,18 @@ export const chapter = markdown
   .section(sectionHeading)
   .node({ type: "paragraph", contains: "安装片段" })
   .reference("chapter");
+export const stablePort = markdown
+  .from("guide.md")
+  .section("标记位置")
+  .marker("stable-port")
+  .reference("stable-port");
+export const standaloneMarker = markdown
+  .from("guide.md")
+  .marker("standalone")
+  .reference("standalone-marker");
+export const markerDocument = markdown
+  .from("markers-guide.md")
+  .reference("marker-document");
 export const code = markdown
   .from("guide.md")
   .node({ type: "code", language: "ts", contains: "const answer" })
@@ -56,6 +68,7 @@ export const config = defineConfig({
   bindings: [
     binding("markdown-policy", [
       chapter,
+      stablePort,
       code,
       list,
       inlineCode,
@@ -65,6 +78,7 @@ export const config = defineConfig({
       emptyCell,
       runtimePort,
     ]),
+    binding("marker-document-policy", [markerDocument]),
     binding("ordinary-file-policy", [directFile]),
   ],
   baseline: "markdown.baseline.json",
