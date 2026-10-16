@@ -7,7 +7,7 @@ import {
   nodeTest,
   nodeTestStatus,
 } from "@dock/reference-node-test";
-import { binding, check, defineConfig } from "@dock/sdk";
+import { binding, check, defineConfig, updateBaseline } from "@dock/sdk";
 
 const run = defineNodeTestRun("同进程连续操作", {
   files: ["test/operation-local.test.mts"],
@@ -24,9 +24,15 @@ const config = defineConfig({
 
 const first = await check(config);
 assert.deepEqual(first.execution, { commandAttempts: 1, testExecutions: 1 });
-const second = await check(config);
-assert.deepEqual(second.execution, { commandAttempts: 1, testExecutions: 1 });
+const updated = await updateBaseline(config);
+assert.equal(updated.status, "updated");
+assert.deepEqual(updated.report.execution, {
+  commandAttempts: 1,
+  testExecutions: 1,
+});
+const third = await check(config);
+assert.deepEqual(third.execution, { commandAttempts: 1, testExecutions: 1 });
 assert.equal(
   readFileSync(resolve(process.cwd(), "operation-count.txt"), "utf8"),
-  "xx",
+  "xxx",
 );

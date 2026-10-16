@@ -87,6 +87,7 @@ async function main(): Promise<void> {
     );
 
     await verifyInstalledTypes(consumer);
+    await verifyRuntimeInputDiagnostics(consumer);
     const bin = join(
       consumer,
       "node_modules",
@@ -128,6 +129,19 @@ async function verifyInstalledTypes(consumer: string): Promise<void> {
   );
 }
 
+async function verifyRuntimeInputDiagnostics(consumer: string): Promise<void> {
+  const result = await run(
+    process.execPath,
+    [join(consumer, "runtime-inputs.mjs")],
+    consumer,
+  );
+  assert.equal(
+    result.code,
+    0,
+    `动态 Node 声明未给出明确输入诊断：\n${result.stdout}\n${result.stderr}`,
+  );
+}
+
 async function verifyHappyRoundTrip(
   bin: string,
   consumer: string,
@@ -146,6 +160,14 @@ async function verifyHappyRoundTrip(
   const initial = parseEnvelope(firstCheck.stdout);
   assert.equal(initial.variant, "changed", JSON.stringify(initial, null, 2));
   assertExecutionSummary(requireReport(initial), 1, 2);
+
+  const textCheck = await runDock(
+    bin,
+    ["check", "--config", "dock.config.mts"],
+    consumer,
+  );
+  assert.equal(textCheck.code, 1, textCheck.stderr);
+  assert.match(textCheck.stdout, /执行：2 个测试，1 次命令尝试/);
 
   const update = await runDock(
     bin,
@@ -312,15 +334,26 @@ async function verifyConflictPreflight(
 }
 
 async function verifyOrdinaryNodeTest(consumer: string): Promise<void> {
-  const result = await run(
+  const passing = await run(
     process.execPath,
     ["--test", join(consumer, "test-workspace/test/ordinary.test.mts")],
     consumer,
   );
   assert.equal(
-    result.code,
+    passing.code,
     0,
-    `普通 Node 原生测试语义发生变化：\n${result.stdout}\n${result.stderr}`,
+    `普通 Node 原生通过语义发生变化：\n${passing.stdout}\n${passing.stderr}`,
+  );
+
+  const failing = await run(
+    process.execPath,
+    ["--test", join(consumer, "test-workspace/test/ordinary-failure.test.mts")],
+    consumer,
+  );
+  assert.equal(
+    failing.code,
+    1,
+    `普通 Node 原生失败语义发生变化：\n${failing.stdout}\n${failing.stderr}`,
   );
 }
 
