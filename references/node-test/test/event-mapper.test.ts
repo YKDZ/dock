@@ -66,3 +66,28 @@ test("缺少原生最终摘要时不把零退出码当成成功回执", () => {
     true,
   );
 });
+
+test("原生中断事件或进程信号都使运行记录失效", () => {
+  const interruptedEvent = collectNodeRun([{ type: "test:interrupted" }], {
+    testRoot: "/consumer",
+    files: [],
+    selectedTests: [],
+    exitCode: 1,
+    signal: null,
+  });
+  const interruptedProcess = collectNodeRun([], {
+    testRoot: "/consumer",
+    files: [],
+    selectedTests: [],
+    exitCode: null,
+    signal: "SIGTERM",
+  });
+
+  for (const record of [interruptedEvent, interruptedProcess]) {
+    assert.equal(record.lifecycle, "incomplete");
+    assert.equal(
+      record.errors.some((error) => error.code === "node-test-interrupted"),
+      true,
+    );
+  }
+});
