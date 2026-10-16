@@ -212,7 +212,7 @@ function formatReport(report: CheckReport): [string, ...string[]] {
   ];
   if (report.execution !== undefined) {
     lines.push(
-      `执行：${report.execution.testExecutions} 个测试，${report.execution.commandAttempts} 次命令尝试`,
+      `执行：${report.execution.testExecutions} 次测试尝试，${report.execution.commandAttempts} 次命令尝试`,
     );
   }
   for (const binding of report.bindings) {

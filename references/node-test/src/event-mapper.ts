@@ -116,6 +116,7 @@ export function collectNodeRun(
         ),
         status,
         started: node.started,
+        attemptCount: node.started ? 1 : 0,
         ...(node.terminal?.message === undefined
           ? {}
           : { message: node.terminal.message }),
@@ -203,7 +204,10 @@ export function collectNodeRun(
   return {
     lifecycle,
     commandAttempts: 1,
-    testExecutions: tests.filter((test) => test.started).length,
+    testExecutions: tests.reduce(
+      (total, test) => total + test.attemptCount,
+      0,
+    ),
     tests,
     errors: uniqueErrors(errors),
   };
@@ -338,7 +342,7 @@ function appendUnreportedSelections(
           !new RegExp(completion.namePattern).test(selected.name)
         ? "filtered"
         : "not-run";
-    tests.push({ id, status, started: false });
+    tests.push({ id, status, started: false, attemptCount: 0 });
     existing.add(id);
   }
 }
