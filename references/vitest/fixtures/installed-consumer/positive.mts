@@ -1,4 +1,10 @@
-import { defineVitestRun, vitest, vitestStatus } from "@dock/reference-vitest";
+import {
+  defineVitestObservation,
+  defineVitestRun,
+  vitest,
+  vitestObservation,
+  vitestStatus,
+} from "@dock/reference-vitest";
 import type { VitestTestSelection } from "@dock/reference-vitest";
 import { binding, defineConfig, type ReferenceValue } from "@dock/sdk";
 
@@ -22,6 +28,21 @@ const runWithAdditionalTest = defineVitestRun("附加同次运行选择", {
   additionalTests: [additionalTest],
 });
 void runWithAdditionalTest;
+
+const currentTitle = defineVitestObservation("current-title", "标题");
+const observationRun = defineVitestRun("类型化观察", {
+  files: ["test/stable.test.mts"],
+  observations: [currentTitle],
+});
+const observedTitle = vitestObservation(
+  "观察标题",
+  observationRun,
+  { file: "test/stable.test.mts", name: "普通通过" },
+  currentTitle,
+);
+const expectedObservation: ReferenceValue<typeof observedTitle> = "当前标题";
+const roundTripObservation: string = currentTitle.record(expectedObservation);
+void roundTripObservation;
 
 defineConfig({
   plugins: [vitest],
