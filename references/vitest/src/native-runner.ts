@@ -195,18 +195,28 @@ const configuredSource = configuredPattern === undefined
   : configuredPattern instanceof RegExp
     ? configuredPattern.source
     : String(configuredPattern);
+// 用户正则只约束选择结果，不改变派生目标的大小写和锚点。
 const configuredFlags = configuredPattern instanceof RegExp
-  ? configuredPattern.flags.replace(/[gy]/g, "")
+  ? configuredPattern.flags.replace(/[gyd]/g, "")
   : "";
+const configuredInlineFlags = configuredFlags.replace(/[^ims]/g, "");
+const configuredUnicodeFlags = configuredFlags.includes("v")
+  ? "v"
+  : configuredFlags.includes("u") ? "u" : "";
+const configuredExpression = configuredSource === undefined
+  ? ""
+  : configuredInlineFlags.length === 0
+    ? "(?:" + configuredSource + ")"
+    : "(?" + configuredInlineFlags + ":" + configuredSource + ")";
 const filterPattern = configuredSource === undefined
   ? ""
-  : "(?=[\\s\\S]*?(?:" + configuredSource + "))";
+  : "(?=[^]*?" + configuredExpression + ")";
 const testNamePattern = new RegExp(
   "^" + filterPattern + "(?:" + (selectedPatternsForRun.length === 0
     ? "(?!)"
     : selectedPatternsForRun.join("|")
   ) + ")$",
-  configuredFlags,
+  configuredUnicodeFlags,
 );
 export default {
   ...userConfig,

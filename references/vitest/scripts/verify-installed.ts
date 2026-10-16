@@ -1056,6 +1056,67 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   );
   await access(groupMarker);
 
+  const caseBaseline = join(maintenanceRoot, "group-case.baseline.json");
+  const caseMarker = join(maintenanceRoot, "case-extra.marker");
+  await rm(caseBaseline, { force: true });
+  await rm(caseMarker, { force: true });
+  const nonprefixPattern = {
+    DOCK_VITEST_CASE_PATTERN: "nonprefix",
+    DOCK_VITEST_CASE_EXTRA_MARKER: caseMarker,
+  };
+  const patternUpdate = await runDock(
+    dock,
+    ["baseline", "update", "--config", "group-case.config.mts", "--json"],
+    consumer,
+    nonprefixPattern,
+  );
+  assert.equal(patternUpdate.code, 0, patternUpdate.stderr);
+  assert.equal(parseEnvelope(patternUpdate.stdout).variant, "updated");
+  assertBindingHasNoErrors(
+    requireReport(parseEnvelope(patternUpdate.stdout)),
+    "configured pattern",
+  );
+  assertExecutionSummary(
+    requireReport(parseEnvelope(patternUpdate.stdout)),
+    1,
+    1,
+  );
+  await assert.rejects(access(caseMarker), { code: "ENOENT" });
+
+  const nonprefixCheck = await runDock(
+    dock,
+    ["check", "--config", "group-case.config.mts", "--json"],
+    consumer,
+    nonprefixPattern,
+  );
+  assert.equal(nonprefixCheck.code, 0, nonprefixCheck.stderr);
+  assert.equal(parseEnvelope(nonprefixCheck.stdout).variant, "consistent");
+  assertExecutionSummary(
+    requireReport(parseEnvelope(nonprefixCheck.stdout)),
+    1,
+    1,
+  );
+  await assert.rejects(access(caseMarker), { code: "ENOENT" });
+
+  const flaggedPattern = {
+    DOCK_VITEST_CASE_PATTERN: "prefix",
+    DOCK_VITEST_CASE_EXTRA_MARKER: caseMarker,
+  };
+  const flaggedCheck = await runDock(
+    dock,
+    ["check", "--config", "group-case.config.mts", "--json"],
+    consumer,
+    flaggedPattern,
+  );
+  assert.equal(flaggedCheck.code, 0, flaggedCheck.stderr);
+  assert.equal(parseEnvelope(flaggedCheck.stdout).variant, "consistent");
+  assertExecutionSummary(
+    requireReport(parseEnvelope(flaggedCheck.stdout)),
+    1,
+    1,
+  );
+  await assert.rejects(access(caseMarker), { code: "ENOENT" });
+
   const collisionBaseline = join(
     maintenanceRoot,
     "group-collision.baseline.json",
@@ -1184,7 +1245,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
     "含错误组与有效单测",
     "observation-duplicate",
   );
-  assertExecutionSummary(invalidReport, 1, 4);
+  assertExecutionSummary(invalidReport, 1, 3);
 
   const invalidUpdate = await runDock(
     dock,
