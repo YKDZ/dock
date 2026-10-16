@@ -132,7 +132,7 @@ assert.equal(
   parse(preflight.stderr).data.code,
   "plugin-reference-validation-failed",
 );
-assert.deepEqual(await readFile("scope.baseline.json"), initialBaseline);
+assert.deepEqual(await readFile("scope.baseline.json"), nextBaselineBytes);
 
 function invoke(executable, arguments_, env = {}) {
   return spawnSync(executable, arguments_, {
