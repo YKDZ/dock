@@ -1,6 +1,8 @@
 import { relative } from "node:path";
 
 import type {
+  ExecutionObservationRecord,
+  ExecutionReadRecord,
   ExecutionRunRecord,
   ExecutionTestRecord,
   ExecutionTestStatus,
@@ -12,6 +14,8 @@ type CandidateTest = {
   readonly started: boolean;
   readonly attemptCount: number;
   readonly message?: string;
+  readonly observations?: readonly ExecutionObservationRecord[];
+  readonly reads?: readonly ExecutionReadRecord[];
 };
 
 export type VitestCandidate = {
@@ -141,6 +145,7 @@ export function captureVitestCandidate(
         name,
       );
       const status = finalStatus(state, mode, attemptCount);
+      const activity = attemptHistory(metadata, attemptCount, errors, name);
       const message =
         status === "failed" || status === "cancelled"
           ? resultMessage(result)
@@ -151,6 +156,10 @@ export function captureVitestCandidate(
         started: attemptCount > 0,
         attemptCount,
         ...(message === undefined ? {} : { message }),
+        ...(activity.observations.length === 0
+          ? {}
+          : { observations: activity.observations }),
+        ...(activity.reads.length === 0 ? {} : { reads: activity.reads }),
       });
     }
   }
@@ -227,6 +236,10 @@ export function mapVitestRun(
       started: test.started,
       attemptCount: test.attemptCount,
       ...(test.message === undefined ? {} : { message: test.message }),
+      ...(test.observations === undefined
+        ? {}
+        : { observations: test.observations }),
+      ...(test.reads === undefined ? {} : { reads: test.reads }),
     })) ?? [];
   const hasFailedTests = tests.some((test) => test.status === "failed");
   if (processResult.code === 0 && hasFailedTests) {
@@ -316,7 +329,62 @@ function isCandidateTest(value: unknown): value is CandidateTest {
     typeof value.started === "boolean" &&
     isNonNegativeCount(value.attemptCount) &&
     value.started === value.attemptCount > 0 &&
-    (value.message === undefined || typeof value.message === "string")
+    (value.message === undefined || typeof value.message === "string") &&
+    (value.observations === undefined ||
+      (Array.isArray(value.observations) &&
+        value.observations.every(isCandidateObservation))) &&
+    (value.reads === undefined ||
+      (Array.isArray(value.reads) && value.reads.every(isCandidateRead)))
+  );
+}
+
+function isCandidateObservation(
+  value: unknown,
+): value is ExecutionObservationRecord {
+  return (
+    isRecord(value) &&
+    isPositiveCount(value.attempt) &&
+    typeof value.key === "string" &&
+    value.key.length > 0 &&
+    Object.hasOwn(value, "value") &&
+    Object.keys(value).every(
+      (key) => key === "attempt" || key === "key" || key === "value",
+    )
+  );
+}
+
+function isCandidateRead(value: unknown): value is ExecutionReadRecord {
+  return (
+    isRecord(value) &&
+    isPositiveCount(value.attempt) &&
+    typeof value.referenceId === "string" &&
+    value.referenceId.length > 0 &&
+    Object.hasOwn(value, "value") &&
+    Object.keys(value).every(
+      (key) =>
+        key === "attempt" ||
+        key === "referenceId" ||
+        key === "value" ||
+        key === "range",
+    ) &&
+    (value.range === undefined || isTextRange(value.range))
+  );
+}
+
+function isTextRange(
+  value: unknown,
+): value is NonNullable<ExecutionReadRecord["range"]> {
+  return (
+    isRecord(value) &&
+    typeof value.path === "string" &&
+    Number.isSafeInteger(value.start) &&
+    Number.isSafeInteger(value.end) &&
+    (value.start as number) >= 0 &&
+    (value.end as number) >= (value.start as number) &&
+    Object.keys(value).length === 3 &&
+    Object.hasOwn(value, "path") &&
+    Object.hasOwn(value, "start") &&
+    Object.hasOwn(value, "end")
   );
 }
 
@@ -358,12 +426,6 @@ function attemptCountFor(
   if (!isNonNegativeCount(metadataCount)) {
     if (hasTerminalResult) {
       errors.push(`测试 ${name} 缺少可验证的 setup 尝试计数。`);
-      if (
-        isNonNegativeCount(retryCount) &&
-        retryCount < Number.MAX_SAFE_INTEGER
-      ) {
-        return retryCount + 1;
-      }
     }
     return 0;
   }
@@ -388,6 +450,51 @@ function attemptCountFor(
     return metadataCount;
   }
   return metadataCount;
+}
+
+function attemptHistory(
+  metadata: unknown,
+  attemptCount: number,
+  errors: string[],
+  name: string,
+): {
+  readonly observations: ExecutionObservationRecord[];
+  readonly reads: ExecutionReadRecord[];
+} {
+  const attempts = isRecord(metadata) ? metadata.dockVitestAttempts : undefined;
+  if (attemptCount === 0) {
+    if (
+      attempts !== undefined &&
+      (!Array.isArray(attempts) || attempts.length > 0)
+    ) {
+      errors.push(`测试 ${name} 没有已证明的尝试，却包含尝试活动记录。`);
+    }
+    return { observations: [], reads: [] };
+  }
+  if (!Array.isArray(attempts) || attempts.length !== attemptCount) {
+    errors.push(`测试 ${name} 的活动尝试记录数与原生开始数不一致。`);
+    return { observations: [], reads: [] };
+  }
+
+  const observations: ExecutionObservationRecord[] = [];
+  const reads: ExecutionReadRecord[] = [];
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index];
+    if (
+      !isRecord(attempt) ||
+      attempt.attempt !== index + 1 ||
+      !Array.isArray(attempt.observations) ||
+      !attempt.observations.every(isCandidateObservation) ||
+      !Array.isArray(attempt.reads) ||
+      !attempt.reads.every(isCandidateRead)
+    ) {
+      errors.push(`测试 ${name} 的第 ${index + 1} 次活动记录无效。`);
+      continue;
+    }
+    observations.push(...attempt.observations);
+    reads.push(...attempt.reads);
+  }
+  return { observations, reads };
 }
 
 function finalStatus(
@@ -473,6 +580,10 @@ function isIterable(value: unknown): value is Iterable<unknown> {
 
 function isNonNegativeCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === "number" && value >= 0;
+}
+
+function isPositiveCount(value: unknown): value is number {
+  return Number.isSafeInteger(value) && typeof value === "number" && value > 0;
 }
 
 function isAbsolutePath(value: string): boolean {

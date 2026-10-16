@@ -13,6 +13,10 @@ import type {
   ReferencePlugin,
 } from "@dock/sdk";
 
+import {
+  readReferenceInTest,
+  recordVitestObservation,
+} from "./attempt-context.ts";
 import { testIdentity } from "./event-mapper.ts";
 import { executeVitestRun } from "./native-runner.ts";
 import type {
@@ -22,19 +26,62 @@ import type {
 
 export const vitestPluginId = "@dock/reference-vitest" as const;
 
-export type VitestRun = {
+export type VitestObservation<
+  Key extends string = string,
+  Value extends JsonValue = JsonValue,
+> = {
+  readonly key: Key;
+  record(value: Value): Value;
+};
+
+type ObservationKeys<Observations extends readonly VitestObservation[]> = {
+  -readonly [
+    Index in keyof Observations
+  ]: Observations[Index] extends VitestObservation<infer Key, JsonValue>
+    ? Key
+    : never;
+};
+
+type WidenJson<Value> = Value extends string
+  ? string
+  : Value extends number
+    ? number
+    : Value extends boolean
+      ? boolean
+      : Value extends readonly (infer Item)[]
+        ? WidenJson<Item>[]
+        : Value extends object
+          ? { readonly [Key in keyof Value]: WidenJson<Value[Key]> }
+          : Value;
+
+type ObservationValue<Observation> =
+  Observation extends VitestObservation<string, infer Value> ? Value : never;
+
+const observationTypes: unique symbol = Symbol("VitestRun.observationTypes");
+
+export type VitestRun<
+  Observations extends readonly VitestObservation[] =
+    readonly VitestObservation[],
+> = {
   readonly identity: string;
   readonly files: [string, ...string[]];
   /** 扩大本次原生筛选的目标；它们不是必须成功的状态引用。 */
   readonly additionalTests?: VitestTestSelection[];
   readonly testRoot?: string;
   readonly configFile?: string;
+  readonly observationKeys: ObservationKeys<Observations>;
+  readonly [observationTypes]?: Observations;
 };
 
-export type VitestRunOptions = {
+export type VitestRunOptions<
+  Observations extends readonly VitestObservation[] =
+    readonly VitestObservation[],
+> = {
   readonly files: readonly [string, ...string[]];
   /** 只选择 run.files 中的附加测试，不要求它们成功。 */
   readonly additionalTests?: readonly VitestTestSelection[];
+  /** 单份观察声明为测试记录提供键和值类型；sample 不作为默认事实。 */
+  readonly observations?: Observations;
   readonly testRoot?: string;
   readonly configFile?: string;
 };
@@ -48,27 +95,87 @@ export type VitestTestSelection = {
 
 export type VitestStatusValue = { readonly status: "passed" };
 
-export type VitestStatusTarget = {
+export type VitestStatusTarget<
+  Observations extends readonly VitestObservation[] =
+    readonly VitestObservation[],
+> = {
   readonly kind: "vitest-test-status";
-  readonly run: VitestRun;
+  readonly run: VitestRun<Observations>;
   readonly file: string;
   readonly name: string;
 };
 
-export type VitestStatusReference<Id extends string = string> = Reference<
+export type VitestObservationTarget = {
+  readonly kind: "vitest-test-observation";
+  readonly run: VitestRun;
+  readonly file: string;
+  readonly name: string;
+  readonly key: string;
+};
+
+export type VitestTestTarget<
+  Observations extends readonly VitestObservation[] =
+    readonly VitestObservation[],
+> = VitestStatusTarget<Observations> | VitestObservationTarget;
+
+export type VitestStatusReference<
+  Id extends string = string,
+  Observations extends readonly VitestObservation[] =
+    readonly VitestObservation[],
+> = Reference<
   typeof vitestPluginId,
   Id,
-  VitestStatusTarget,
+  VitestStatusTarget<Observations>,
   VitestStatusValue,
   never
 >;
 
+export type VitestObservationReference<
+  Id extends string = string,
+  Observation extends VitestObservation = VitestObservation,
+> = Reference<
+  typeof vitestPluginId,
+  Id,
+  VitestObservationTarget,
+  ObservationValue<Observation>,
+  never
+>;
+
+export type VitestReference<Id extends string = string> =
+  | VitestStatusReference<Id>
+  | VitestObservationReference<Id>;
+
+type AnyVitestObservation = VitestObservation<string, JsonValue>;
+
+/** 声明稳定观察键；sample 只用于推导类型，不会作为默认观察值。 */
+export function defineVitestObservation<
+  const Key extends string,
+  Sample extends JsonValue,
+>(key: Key, sample: Sample): VitestObservation<Key, WidenJson<Sample>> {
+  assertObservationKey(key);
+  void sample;
+  return {
+    key,
+    record(value): WidenJson<Sample> {
+      recordVitestObservation(key, value);
+      return value;
+    },
+  };
+}
+
 /** 类型化地声明一次 Vitest 原生运行；声明阶段不启动测试。 */
-export function defineVitestRun(
+export function defineVitestRun<
+  const Observations extends readonly VitestObservation[] = readonly [],
+>(
   identity: string,
-  options: VitestRunOptions,
-): VitestRun {
+  options: VitestRunOptions<Observations>,
+): VitestRun<Observations> {
+  const observations = options.observations;
   assertRun(identity, options);
+  const observationKeys = (observations ?? []).map((observation) => {
+    assertObservationDefinition(observation);
+    return observation.key;
+  }) as ObservationKeys<Observations>;
   return {
     identity,
     files: [...options.files],
@@ -84,22 +191,26 @@ export function defineVitestRun(
     ...(options.configFile === undefined
       ? {}
       : { configFile: options.configFile }),
+    observationKeys,
   };
 }
 
 /** 声明一条依赖 Vitest 最终成功状态的引用。 */
-export function vitestStatus<Id extends string>(
+export function vitestStatus<
+  const Id extends string,
+  const Observations extends readonly VitestObservation[],
+>(
   id: Id,
-  run: VitestRun,
+  run: VitestRun<Observations>,
   target: { readonly file: string; readonly name: string },
   options: Pick<ReferenceOptions, "declaredAt" | "note"> = {},
-): VitestStatusReference<Id> {
+): VitestStatusReference<Id, Observations> {
   assertRun(run.identity, run);
   assertTestSelection(target);
   return createReference<
     typeof vitestPluginId,
     Id,
-    VitestStatusTarget,
+    VitestStatusTarget<Observations>,
     VitestStatusValue,
     never
   >(
@@ -120,23 +231,73 @@ export function vitestStatus<Id extends string>(
   );
 }
 
-type VitestPlugin = ReferencePlugin<
-  typeof vitestPluginId,
-  VitestStatusReference,
-  VitestStatusValue
->;
+/** 将一条观察声明绑定到测试，并保留记录键和值类型。 */
+export function vitestObservation<
+  const Id extends string,
+  const Observations extends readonly VitestObservation[],
+  const Observation extends Observations[number],
+>(
+  id: Id,
+  run: VitestRun<Observations>,
+  target: { readonly file: string; readonly name: string },
+  observation: Observation,
+  options: Pick<ReferenceOptions, "declaredAt" | "note"> = {},
+): VitestObservationReference<Id, Observation> {
+  assertRun(run.identity, run);
+  assertTestSelection(target);
+  assertObservationDefinition(observation);
+  if (!run.observationKeys.includes(observation.key)) {
+    throw new TypeError(
+      `Vitest 运行 ${run.identity} 未声明观察键 ${observation.key}。`,
+    );
+  }
+  return createReference<
+    typeof vitestPluginId,
+    Id,
+    VitestObservationTarget,
+    ObservationValue<Observation>,
+    never
+  >(
+    vitestPluginId,
+    id,
+    {
+      kind: "vitest-test-observation",
+      run,
+      file: target.file,
+      name: target.name,
+      key: observation.key,
+    },
+    {
+      ...(options.declaredAt === undefined
+        ? {}
+        : { declaredAt: options.declaredAt }),
+      ...(options.note === undefined ? {} : { note: options.note }),
+    },
+  );
+}
+
+type VitestPlugin = ReferencePlugin<typeof vitestPluginId, VitestReference>;
 
 const vitestImplementation: VitestPlugin = definePlugin({
   id: vitestPluginId,
-  validate(reference: VitestStatusReference): void {
+  validate(reference: VitestReference): void {
     if (reference.selection !== undefined) {
-      throw new TypeError("Vitest 测试状态引用不支持 selection。");
+      throw new TypeError("Vitest 测试引用不支持 selection。");
     }
-    assertRun(reference.target.run.identity, reference.target.run);
-    assertTestTarget(reference.target);
+    const target = getVitestTarget(reference.target);
+    assertRun(target.run.identity, target.run);
+    assertTestTarget(target);
+    if (
+      target.kind === "vitest-test-observation" &&
+      !target.run.observationKeys.includes(target.key)
+    ) {
+      throw new TypeError(
+        `Vitest 运行 ${target.run.identity} 未声明观察键 ${target.key}。`,
+      );
+    }
   },
   async prepare(
-    references: readonly VitestStatusReference[],
+    references: readonly VitestReference[],
     context: PluginExecutionContext,
   ): Promise<void> {
     const groups = new Map<
@@ -147,7 +308,7 @@ const vitestImplementation: VitestPlugin = definePlugin({
       }
     >();
     for (const reference of references) {
-      const target = reference.target;
+      const target = getVitestTarget(reference.target);
       const run = normalizeRun(target.run, context.root);
       const groupKey = `${run.identity}\0${JSON.stringify(run.configuration)}`;
       const group = groups.get(groupKey) ?? {
@@ -169,28 +330,30 @@ const vitestImplementation: VitestPlugin = definePlugin({
     }
   },
   collect(
-    reference: VitestStatusReference,
+    reference: VitestReference,
     context: PluginExecutionContext,
-  ): PluginResult<VitestStatusValue> {
-    const run = context.execution.get(reference.target.run.identity);
+  ): PluginResult<JsonValue> {
+    const target = getVitestTarget(reference.target);
+    const run = context.execution.get(target.run.identity);
     if (run === undefined) {
       return {
         kind: "error",
         error: {
           code: "execution-record-missing",
-          message: `Vitest 执行 ${reference.target.run.identity} 没有完成当前维护会话。`,
+          message: `Vitest 执行 ${target.run.identity} 没有完成当前维护会话。`,
         },
       };
     }
     return factFromVitestRun(
       reference,
       run,
-      resolveTestRoot(reference.target.run, context.root),
+      resolveTestRoot(target.run, context.root),
     );
   },
 });
 
 export const vitest = vitestImplementation;
+export { readReferenceInTest };
 
 function normalizeRun(run: VitestRun, root: string): NormalizedVitestRun {
   const testRoot = resolvePath(root, run.testRoot ?? ".");
@@ -215,6 +378,7 @@ function normalizeRun(run: VitestRun, root: string): NormalizedVitestRun {
     root,
     testRoot,
     files,
+    observationKeys: [...run.observationKeys],
     ...(additionalTests.length === 0 ? {} : { additionalTests }),
     ...(configFile === undefined ? {} : { configFile }),
   };
@@ -261,10 +425,10 @@ function resolveConfigFile(
 }
 
 function factFromVitestRun(
-  reference: VitestStatusReference,
+  reference: VitestReference,
   run: ExecutionRunRecord,
   testRoot: string,
-): PluginResult<VitestStatusValue> {
+): PluginResult<JsonValue> {
   if (run.lifecycle !== "complete" || run.errors.length > 0) {
     const detail = run.errors.map((error) => error.message).join("；");
     return {
@@ -276,28 +440,49 @@ function factFromVitestRun(
     };
   }
 
-  const targetFile = resolveTargetFile(testRoot, reference.target.file);
+  const target = getVitestTarget(reference.target);
+  const targetFile = resolveTargetFile(testRoot, target.file);
   const identity = testIdentity(
     relativeTestFile(testRoot, targetFile),
-    reference.target.name,
+    target.name,
   );
   const matches = run.tests.filter((test) => test.id === identity);
   if (matches.length === 0) {
     return vitestError(
       "test-not-executed",
-      `没有执行声明的 Vitest 测试：${reference.target.file} / ${reference.target.name}。`,
+      `没有执行声明的 Vitest 测试：${target.file} / ${target.name}。`,
     );
   }
   if (matches.length > 1 || matches[0]?.status === "duplicate") {
     return vitestError(
       "duplicate-test-identity",
-      `同一 Vitest 文件中有多个测试匹配身份 ${reference.target.name}。`,
+      `同一 Vitest 文件中有多个测试匹配身份 ${target.name}。`,
     );
   }
 
   const test = matches[0];
   if (test?.status === "passed") {
-    return { kind: "value", value: { status: "passed" } };
+    if (target.kind === "vitest-test-status") {
+      return { kind: "value", value: { status: "passed" } };
+    }
+    const observations = (test.observations ?? []).filter(
+      (observation) =>
+        observation.key === target.key &&
+        observation.attempt === test.attemptCount,
+    );
+    if (observations.length === 0) {
+      return vitestError(
+        "observation-missing",
+        `测试 ${target.name} 的最终尝试未记录观察键 ${target.key}。`,
+      );
+    }
+    if (observations.length > 1) {
+      return vitestError(
+        "observation-duplicate",
+        `测试 ${target.name} 的最终尝试重复记录观察键 ${target.key}。`,
+      );
+    }
+    return { kind: "value", value: observations[0]!.value };
   }
   if (test === undefined) {
     return vitestError("test-not-executed", "没有找到声明的 Vitest 测试。");
@@ -391,6 +576,23 @@ function assertRun(
     );
   }
   if (
+    value.observationKeys !== undefined &&
+    (!Array.isArray(value.observationKeys) ||
+      !value.observationKeys.every(isNonEmptyString) ||
+      new Set(value.observationKeys).size !== value.observationKeys.length)
+  ) {
+    throw new TypeError("Vitest 运行的观察键必须唯一且是非空文本。");
+  }
+  if (value.observations !== undefined) {
+    if (!isVitestObservationList(value.observations)) {
+      throw new TypeError("Vitest 运行必须包含有效的观察声明。");
+    }
+    const keys = value.observations.map((observation) => observation.key);
+    if (new Set(keys).size !== keys.length) {
+      throw new TypeError("Vitest 运行的观察键必须唯一。");
+    }
+  }
+  if (
     value.additionalTests !== undefined &&
     (!Array.isArray(value.additionalTests) ||
       !value.additionalTests.every(isVitestTestSelection))
@@ -409,18 +611,33 @@ function isVitestTestSelection(value: unknown): value is VitestTestSelection {
   );
 }
 
-function assertTestTarget(value: unknown): asserts value is VitestStatusTarget {
+function assertTestTarget(value: unknown): asserts value is VitestTestTarget {
   if (
     !isRecord(value) ||
-    value.kind !== "vitest-test-status" ||
+    (value.kind !== "vitest-test-status" &&
+      value.kind !== "vitest-test-observation") ||
     !isRecord(value.run) ||
     !isNonEmptyString(value.file) ||
     !isNonEmptyString(value.name)
   ) {
-    throw new TypeError("Vitest 状态引用必须提供有效文件和完整测试标题。");
+    throw new TypeError("Vitest 测试引用必须提供有效文件和完整测试标题。");
   }
   assertRun(value.run.identity, value.run);
-  assertTestSelection(value);
+  if (!Array.isArray(value.run.observationKeys)) {
+    throw new TypeError("Vitest 测试运行缺少观察键列表。");
+  }
+  if (
+    value.kind === "vitest-test-observation" &&
+    (!isNonEmptyString(value.key) ||
+      !value.run.observationKeys.includes(value.key))
+  ) {
+    throw new TypeError("Vitest 观察引用必须指向已声明的观察键。");
+  }
+}
+
+function getVitestTarget(value: JsonValue): VitestTestTarget {
+  assertTestTarget(value);
+  return value;
 }
 
 function assertTestSelection(
@@ -435,11 +652,39 @@ function assertTestSelection(
   }
 }
 
-function vitestError(
-  code: string,
-  message: string,
-): PluginResult<VitestStatusValue> {
+function vitestError(code: string, message: string): PluginResult<JsonValue> {
   return { kind: "error", error: { code, message } };
+}
+
+function assertObservationKey(value: unknown): asserts value is string {
+  if (typeof value !== "string" || value.length === 0) {
+    throw new TypeError("观察键必须是非空文本。");
+  }
+}
+
+function assertObservationDefinition(
+  value: unknown,
+): asserts value is AnyVitestObservation {
+  if (!isVitestObservationDefinition(value)) {
+    throw new TypeError("Vitest 观察必须由公开声明函数创建。");
+  }
+}
+
+function isVitestObservationDefinition(
+  value: unknown,
+): value is AnyVitestObservation {
+  return (
+    isRecord(value) &&
+    typeof value.key === "string" &&
+    value.key.length > 0 &&
+    typeof value.record === "function"
+  );
+}
+
+function isVitestObservationList(
+  value: unknown,
+): value is AnyVitestObservation[] {
+  return Array.isArray(value) && value.every(isVitestObservationDefinition);
 }
 
 function isNonEmptyString(value: unknown): value is string {
