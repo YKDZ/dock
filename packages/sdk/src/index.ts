@@ -16,9 +16,13 @@ export type {
   ConfigInput,
   DeclarationSource,
   PluginContext,
+  PluginReadResult,
   PluginResult,
+  ReadableReferenceOf,
+  ReadableReferencePlugin,
   Reference,
   ReferencePlugin,
+  ReferenceValue,
 } from "./contracts.ts";
 export {
   binding,
