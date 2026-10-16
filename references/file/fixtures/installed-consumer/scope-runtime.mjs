@@ -92,6 +92,8 @@ const selectedCli = spawnSync(
     "scope-cli-config.mjs",
     "--binding",
     "alpha",
+    "--binding",
+    "beta",
     "--reference",
     "beta-reference",
     "--file",
@@ -122,6 +124,29 @@ assert.equal(
   JSON.parse(unmatchedCli.stderr).data.code,
   "scope-selector-unmatched",
 );
+const baselineBeforeUnmatchedUpdate = await readFile("dock.baseline.json");
+const unmatchedUpdate = spawnSync(
+  cli,
+  [
+    "baseline",
+    "update",
+    "--config",
+    "scope-cli-config.mjs",
+    "--reference",
+    "missing",
+    "--json",
+  ],
+  { encoding: "utf8" },
+);
+assert.equal(unmatchedUpdate.status, 1);
+assert.equal(
+  JSON.parse(unmatchedUpdate.stderr).data.code,
+  "scope-selector-unmatched",
+);
+assert.deepEqual(
+  await readFile("dock.baseline.json"),
+  baselineBeforeUnmatchedUpdate,
+);
 
 const missing = defineConfig({
   plugins: [file],
@@ -136,6 +161,9 @@ const missing = defineConfig({
 const missingReport = await check(missing, { file: ["missing-alpha.txt"] });
 assert.deepEqual(missingReport.scope, ["alpha"]);
 assert.ok("errors" in missingReport.bindings[0]);
+const unselectedMissing = await check(missing, { file: ["beta.txt"] });
+assert.deepEqual(unselectedMissing.scope, ["beta"]);
+assert.ok(!("errors" in unselectedMissing.bindings[0]));
 
 const withoutAlpha = defineConfig({
   plugins: [file],

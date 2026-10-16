@@ -4,7 +4,9 @@ import { fileURLToPath } from "node:url";
 import { createReference, definePlugin } from "@dock/sdk";
 import type {
   JsonValue,
+  PluginContext,
   PluginExecutionContext,
+  PluginExecutionIdentity,
   PluginResult,
   Reference,
   ReferenceOptions,
@@ -114,6 +116,42 @@ const nodeTestImplementation: NodeTestPlugin = definePlugin({
     }
     assertRun(reference.target.run.identity, reference.target.run);
     assertTestTarget(reference.target);
+  },
+  fileInfo(reference: NodeTestReference, context: PluginContext): string {
+    const run = normalizeRun(reference.target.run, context.root);
+    return resolveTargetFile(run.testRoot, reference.target.file);
+  },
+  validateReferences(
+    references: readonly NodeTestReference[],
+    context: PluginContext,
+  ): readonly PluginExecutionIdentity[] {
+    const declarations = new Map<
+      string,
+      {
+        readonly declaration: PluginExecutionIdentity;
+        readonly encoded: string;
+      }
+    >();
+    for (const reference of references) {
+      const run = normalizeRun(reference.target.run, context.root);
+      const encoded = JSON.stringify(run.configuration);
+      const prior = declarations.get(run.identity);
+      if (prior !== undefined && prior.encoded !== encoded) {
+        throw new TypeError(
+          `Node 测试运行身份 ${run.identity} 在完整配置中对应不同设置。`,
+        );
+      }
+      if (prior === undefined) {
+        declarations.set(run.identity, {
+          declaration: {
+            identity: run.identity,
+            configuration: run.configuration,
+          },
+          encoded,
+        });
+      }
+    }
+    return [...declarations.values()].map(({ declaration }) => declaration);
   },
   prepare(
     references: readonly NodeTestReference[],
@@ -253,6 +291,7 @@ function normalizeRun(run: NodeTestRun, root: string): NormalizedNodeRun {
   const testRoot = resolvePath(root, run.testRoot ?? ".");
   const files = run.files.map((file) => resolvePath(testRoot, file));
   const configuration: JsonValue = {
+    framework: nodeTestPluginId,
     root,
     testRoot,
     files,
