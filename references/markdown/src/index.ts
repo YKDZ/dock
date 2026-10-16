@@ -528,7 +528,7 @@ function selectTableCell(
     const row = matchingRows[0]!;
     const cell = row.children?.[valueColumns[0]!];
     if (cell === undefined) continue;
-    matches.push(tableCellOffsets(source, row, cell, valueColumns[0]!));
+    matches.push(tableCellOffsets(source, cell));
   }
   return one(matches, "表格单元格");
 }
@@ -547,12 +547,7 @@ function validateTableCellSelector(selector: MarkdownTableCellSelection): void {
   }
 }
 
-function tableCellOffsets(
-  source: string,
-  row: MarkdownNode,
-  cell: MarkdownNode,
-  index: number,
-): NodeOffsets {
+function tableCellOffsets(source: string, cell: MarkdownNode): NodeOffsets {
   const children = cell.children ?? [];
   if (children.length > 0) {
     return {
@@ -561,93 +556,28 @@ function tableCellOffsets(
     };
   }
 
-  const rowPosition = nodeOffsets(source, row);
-  const lineStart = lineStartOffset(source, row.position?.start.line);
-  const lineEnd = lineEndOffset(source, lineStart);
-  const spans = splitTableRowCells(source, lineStart, lineEnd);
-  const span = spans[index];
-  if (span === undefined) {
+  const position = nodeOffsets(source, cell);
+  const firstPipe = source.indexOf("|", position.start);
+  const lastPipe = source.lastIndexOf("|", position.end - 1);
+  if (
+    firstPipe < position.start ||
+    lastPipe <= firstPipe ||
+    lastPipe >= position.end
+  ) {
     throw invalidMarkdown("Markdown 表格单元格没有对应原文范围。");
   }
-  if (span.start < rowPosition.start || span.end > rowPosition.end) {
-    throw invalidMarkdown("Markdown 表格单元格超出当前原文行。");
+  // 空单元格的 AST 范围包含左右分隔符，只在这段归属范围内取得内部空白。
+  const span = trimCell(source, firstPipe + 1, lastPipe);
+  if (span.start !== span.end) {
+    throw invalidMarkdown("Markdown 空单元格范围包含意外内容。");
   }
   return span;
-}
-
-function splitTableRowCells(
-  source: string,
-  start: number,
-  end: number,
-): NodeOffsets[] {
-  const separators: number[] = [];
-  let codeTicks = 0;
-  for (let index = start; index < end; index++) {
-    const character = source[index]!;
-    if (character === "\\") {
-      index++;
-      continue;
-    }
-    if (character === "`") {
-      let runEnd = index + 1;
-      while (source[runEnd] === "`") runEnd++;
-      const runLength = runEnd - index;
-      if (codeTicks === 0) codeTicks = runLength;
-      else if (runLength === codeTicks) codeTicks = 0;
-      index = runEnd - 1;
-      continue;
-    }
-    if (character === "|" && codeTicks === 0) separators.push(index);
-  }
-
-  const startsWithPipe =
-    separators[0] !== undefined &&
-    source.slice(start, separators[0]).trim().length === 0;
-  const firstContent = startsWithPipe ? separators[0]! + 1 : start;
-  const boundaries = startsWithPipe ? separators.slice(1) : separators;
-  const cells: NodeOffsets[] = [];
-  let cellStart = firstContent;
-  for (const boundary of boundaries) {
-    cells.push(trimCell(source, cellStart, boundary));
-    cellStart = boundary + 1;
-  }
-  const lastSeparator = separators.at(-1);
-  const hasTrailingPipe =
-    lastSeparator !== undefined &&
-    source.slice(lastSeparator + 1, end).trim().length === 0;
-  if (!hasTrailingPipe) cells.push(trimCell(source, cellStart, end));
-  return cells;
 }
 
 function trimCell(source: string, start: number, end: number): NodeOffsets {
   while (start < end && /[ \t]/u.test(source[start]!)) start++;
   while (end > start && /[ \t]/u.test(source[end - 1]!)) end--;
   return { start, end };
-}
-
-function lineStartOffset(source: string, line: number | undefined): number {
-  if (line === undefined || !Number.isInteger(line) || line < 1) {
-    throw invalidMarkdown("Markdown 表格行缺少原文行号。");
-  }
-  let start = 0;
-  for (let currentLine = 1; currentLine < line; currentLine++) {
-    const nextLf = source.indexOf("\n", start);
-    const nextCr = source.indexOf("\r", start);
-    const next =
-      nextLf < 0 ? nextCr : nextCr < 0 ? nextLf : Math.min(nextLf, nextCr);
-    if (next < 0) throw invalidMarkdown("Markdown 行号超出原文。");
-    start =
-      source[next] === "\r" && source[next + 1] === "\n" ? next + 2 : next + 1;
-  }
-  return start;
-}
-
-function lineEndOffset(source: string, start: number): number {
-  const nextLf = source.indexOf("\n", start);
-  const nextCr = source.indexOf("\r", start);
-  if (nextLf < 0) return nextCr < 0 ? source.length : nextCr;
-  if (nextCr < 0) return nextLf;
-  return Math.min(nextLf, nextCr);
 }
 
 function allNodes(root: MarkdownNode): MarkdownNode[] {

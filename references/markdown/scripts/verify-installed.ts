@@ -68,6 +68,7 @@ async function main(): Promise<void> {
     await copyFixtures(consumer);
     await verifyInstalledTypes(consumer);
     await verifyInstalledReads(consumer);
+    await verifyInstalledEmptyCells(consumer);
     await verifyInstalledCli(consumer);
     process.stdout.write("Markdown 安装制品公开类型、读取与 CLI 验收通过。\n");
   } finally {
@@ -112,6 +113,7 @@ async function installConsumer(
 async function copyFixtures(consumer: string): Promise<void> {
   for (const name of [
     "dock.config.mjs",
+    "empty-cells.mjs",
     "guide.md",
     "invalid-config.mjs",
     "negative.mts",
@@ -171,6 +173,59 @@ async function verifyInstalledReads(consumer: string): Promise<void> {
   assert.equal(initial["ordinary-file"].value, source);
   assert.equal(initial["ordinary-file"].range.start, 0);
   assert.equal(initial["ordinary-file"].range.end, source.length);
+}
+
+async function verifyInstalledEmptyCells(consumer: string): Promise<void> {
+  const result = await run(
+    "node",
+    [join(consumer, "empty-cells.mjs")],
+    consumer,
+  );
+  assert.equal(
+    result.code,
+    0,
+    `安装制品空表格单元格读写失败：\n${result.stdout}\n${result.stderr}`,
+  );
+  const outcomes: unknown = JSON.parse(result.stdout);
+  assert.ok(Array.isArray(outcomes));
+  assert.equal(outcomes.length, 3);
+  for (const outcome of outcomes) {
+    assert.ok(isRecord(outcome));
+    assert.ok(typeof outcome.name === "string");
+    assert.ok(typeof outcome.source === "string");
+    assert.ok(isRecord(outcome.read));
+    assert.equal(
+      outcome.read.value,
+      "",
+      `${outcome.name} 应读取空单元格：${JSON.stringify(outcome)}`,
+    );
+    assert.ok(isRecord(outcome.read.range));
+    assert.equal(outcome.read.range.path, "guide.md");
+    assert.ok(typeof outcome.read.range.start === "number");
+    assert.ok(typeof outcome.read.range.end === "number");
+    assert.equal(
+      outcome.read.range.start,
+      outcome.read.range.end,
+      `${outcome.name} 的空范围应为 UTF-16 零长度：${JSON.stringify(outcome)}`,
+    );
+    assert.equal(outcome.read.range.start, outcome.source.indexOf("|  |") + 3);
+    assert.equal(
+      outcome.source.slice(outcome.read.range.start, outcome.read.range.end),
+      "",
+    );
+    assert.equal(outcome.source[outcome.read.range.start - 1], " ");
+    assert.equal(outcome.source[outcome.read.range.start], "|");
+    assert.ok(isRecord(outcome.report));
+    assert.ok(Array.isArray(outcome.report.bindings));
+    const binding = outcome.report.bindings[0];
+    assert.ok(isRecord(binding));
+    assert.ok(isRecord(binding.current));
+    assert.ok(isRecord(binding.current.references));
+    assert.ok(isRecord(binding.current.references.cell));
+    assert.equal(binding.current.references.cell.value, "");
+    assert.equal(outcome.updateStatus, "updated");
+    assert.equal(outcome.savedValue, "");
+  }
 }
 
 async function verifyInstalledCli(consumer: string): Promise<void> {
