@@ -16,6 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { verifyInstalledCurrentConfig } from "./verify-installed-current-config.ts";
+import { verifyInstalledPaths } from "./verify-installed-paths.ts";
 import { verifyInstalledTextRead } from "./verify-installed-text-read.ts";
 
 type ProcessResult = {
@@ -65,6 +66,7 @@ async function main(): Promise<void> {
   const consumer = await mkdtemp(join(tmpdir(), "dock-installed-consumer-"));
   try {
     await runInstalledCli(consumer, tarballs);
+    await verifyInstalledPaths(consumer);
     await verifyInstalledTextRead(consumer);
     await verifyInstalledCurrentConfig(consumer);
     process.stdout.write("干净消费者安装、公开声明与 dock CLI 验收通过。\n");
@@ -83,6 +85,8 @@ async function runConsumerTypechecks(consumer: string): Promise<void> {
   await copyFixture(consumer, "external-plugin-consumer.mts");
   await copyFixture(consumer, "reexported-declarations.mts");
   await copyFixture(consumer, "physical-multiversion.mts");
+  await copyFixture(consumer, "paths-positive.mts");
+  await copyFixture(consumer, "paths-negative.mts");
   await copyFile(
     join(fixtureDirectory, "secondary", "physical-author.mts"),
     join(consumer, "secondary", "physical-author.mts"),
