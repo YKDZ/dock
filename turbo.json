@@ -5,59 +5,76 @@
         "dependencies": {
           "allow": ["library"]
         }
+      },
+      "dock-core": {
+        "dependencies": {
+          "allow": ["dock-tooling"]
+        }
+      },
+      "dock-sdk": {
+        "dependencies": {
+          "allow": ["dock-core", "dock-tooling"]
+        }
+      },
+      "dock-reference": {
+        "dependencies": {
+          "allow": ["dock-core", "dock-sdk", "dock-tooling", "dock-reference"]
+        }
+      },
+      "dock-tooling": {
+        "dependencies": {
+          "allow": ["dock-tooling"]
+        }
+      },
+      "dock-node-test": {
+        "dependencies": {
+          "deny": ["dock-vitest"]
+        }
+      },
+      "dock-vitest": {
+        "dependencies": {
+          "deny": ["dock-node-test"]
+        }
       }
     }
   },
   "globalPassThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"],
   "tasks": {
-    "//#format:check": {
-      "outputs": []
+    "//#check": {
+      "tags": ["quality:entry"]
     },
-    "//#format:write": {
-      "cache": false,
-      "dependsOn": ["//#lint:fix"]
+    "//#check:heavy": {
+      "tags": ["quality:entry"]
+    },
+    "//#check:full": {
+      "tags": ["quality:entry"]
+    },
+    "//#boundaries": {
+      "tags": ["quality:light"]
+    },
+    "//#fix": {
+      "tags": ["work:repair"]
+    },
+    "//#format:check": {
+      "outputs": [],
+      "tags": ["quality:light"]
     },
     "//#lint": {
-      "outputs": []
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#format:write": {
+      "dependsOn": ["//#lint:fix"],
+      "cache": false,
+      "tags": ["work:repair"]
     },
     "//#lint:fix": {
-      "cache": false
-    },
-    "//#toolchain:prepare": {
-      "cache": false
+      "cache": false,
+      "tags": ["work:repair"]
     },
     "//#typecheck": {
-      "outputs": []
-    },
-    "build": {
-      "dependsOn": ["^build"]
-    },
-    "deployment": {
-      "cache": false
-    },
-    "format:check": {
-      "outputs": []
-    },
-    "format:write": {
-      "cache": false,
-      "dependsOn": ["lint:fix"]
-    },
-    "lint": {
-      "outputs": []
-    },
-    "lint:fix": {
-      "cache": false
-    },
-    "test": {
-      "outputs": []
-    },
-    "test:e2e": {
-      "cache": false,
-      "dependsOn": ["build"]
-    },
-    "typecheck": {
-      "dependsOn": ["^typecheck"],
-      "outputs": []
+      "outputs": [],
+      "tags": ["quality:light"]
     }
   }
 }

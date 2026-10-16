@@ -34,5 +34,7 @@ jobs:
           cache: true
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - name: Run Root Check
-        run: pnpm run check
+      - name: Run Light Check
+        run: node --conditions=source scripts/task-gates.ts check
+      - name: Run Heavy Check
+        run: node --conditions=source scripts/task-gates.ts check:heavy

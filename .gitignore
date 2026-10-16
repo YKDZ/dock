@@ -4,6 +4,7 @@ dist/
 target/
 .turbo/
 coverage/
+.vitest/
 .env
 .template/
 data/
