@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 
 import {
+  defineVitestObservation,
   defineVitestRun,
   vitest,
   vitestPluginId,
   vitestStatus,
+  vitestSuite,
 } from "@dock/reference-vitest";
 import { binding, createReference, defineConfig } from "@dock/sdk";
 
@@ -21,8 +23,12 @@ assert.throws(
   /additionalTests/,
 );
 
+const declared = defineVitestObservation("declared", { count: 0 });
+const secondary = defineVitestObservation("secondary", { active: true });
+const unregistered = defineVitestObservation("unregistered", { title: "" });
 const validRun = defineVitestRun("有效运行", {
   files: ["test/retry.test.mts"],
+  observations: [declared, secondary],
 });
 assert.throws(
   () =>
@@ -31,6 +37,36 @@ assert.throws(
       name: "",
     }),
   /有效文件和完整测试标题/,
+);
+assert.throws(
+  () =>
+    vitestSuite(
+      "空路径",
+      validRun,
+      { file: "test/retry.test.mts", suitePath: [] as never },
+      [declared],
+    ),
+  /文件和非空原生路径/,
+);
+assert.throws(
+  () =>
+    vitestSuite(
+      "未声明观察键",
+      validRun,
+      { file: "test/retry.test.mts", suitePath: ["suite"] },
+      [unregistered] as never,
+    ),
+  /未声明观察键 unregistered/,
+);
+assert.throws(
+  () =>
+    vitestSuite(
+      "重复观察键",
+      validRun,
+      { file: "test/retry.test.mts", suitePath: ["suite"] },
+      [declared, declared] as never,
+    ),
+  /观察键必须唯一/,
 );
 
 const malformed = createReference(vitestPluginId, "动态错误", {

@@ -19,10 +19,10 @@ import {
   readReferenceInTest,
   recordVitestObservation,
 } from "./attempt-context.ts";
-import { testIdentity } from "./event-mapper.ts";
 import { executeVitestRun } from "./native-runner.ts";
 import type {
   NormalizedVitestRun,
+  SelectedVitestSuite,
   SelectedVitestTest,
 } from "./native-runner.ts";
 
@@ -519,7 +519,7 @@ const vitestImplementation: VitestPlugin = definePlugin({
       {
         readonly run: NormalizedVitestRun;
         readonly targets: SelectedVitestTest[];
-        allInFiles: boolean;
+        readonly suites: SelectedVitestSuite[];
       }
     >();
     for (const reference of references) {
@@ -529,10 +529,13 @@ const vitestImplementation: VitestPlugin = definePlugin({
       const group = groups.get(groupKey) ?? {
         run,
         targets: [...run.additionalTests],
-        allInFiles: false,
+        suites: [],
       };
       if (target.kind === "vitest-suite") {
-        group.allInFiles = true;
+        group.suites.push({
+          file: resolveTargetFile(run.testRoot, target.file),
+          suitePath: [...target.suitePath],
+        });
       } else {
         group.targets.push({
           file: resolveTargetFile(run.testRoot, target.file),
@@ -541,12 +544,16 @@ const vitestImplementation: VitestPlugin = definePlugin({
       }
       groups.set(groupKey, group);
     }
-    for (const { run, targets, allInFiles } of groups.values()) {
+    for (const { run, targets, suites } of groups.values()) {
       context.execution.register(
         run.identity,
         run.configuration,
         async () =>
-          await executeVitestRun(run, uniqueSelectedTests(targets), allInFiles),
+          await executeVitestRun(
+            run,
+            uniqueSelectedTests(targets),
+            uniqueSelectedSuites(suites),
+          ),
       );
     }
   },
@@ -666,17 +673,26 @@ function factFromVitestRun(
     return factFromVitestSuite(target, run, testRoot);
   }
   const targetFile = resolveTargetFile(testRoot, target.file);
-  const identity = testIdentity(
-    relativeTestFile(testRoot, targetFile),
-    target.name,
+  const relativeFile = relativeTestFile(testRoot, targetFile);
+  const catalogMatches = (run.testCatalog?.tests ?? []).filter(
+    (test) =>
+      test.file === relativeFile &&
+      flattenTestName(test.suitePath, test.name) === target.name,
   );
-  const matches = run.tests.filter((test) => test.id === identity);
-  if (matches.length === 0) {
+  if (catalogMatches.length > 1) {
+    return vitestError(
+      "duplicate-test-identity",
+      `同一 Vitest 文件中有多个原生路径匹配测试标题 ${target.name}。`,
+    );
+  }
+  if (catalogMatches.length === 0) {
     return vitestError(
       "test-not-executed",
       `没有执行声明的 Vitest 测试：${target.file} / ${target.name}。`,
     );
   }
+  const identity = catalogMatches[0]!.executionId;
+  const matches = run.tests.filter((test) => test.id === identity);
   if (matches.length > 1 || matches[0]?.status === "duplicate") {
     return vitestError(
       "duplicate-test-identity",
@@ -779,7 +795,7 @@ function factFromVitestSuite(
         test.file === file && isWithinSuite(test.suitePath, target.suitePath),
     )
     .map((entry) => {
-      const id = JSON.stringify([entry.file, ...entry.suitePath, entry.name]);
+      const id = entry.executionId;
       const matches = run.tests.filter((test) => test.id === entry.executionId);
       if (matches.length !== 1) {
         return {
@@ -876,6 +892,10 @@ function sameStringPath(
   );
 }
 
+function flattenTestName(suitePath: readonly string[], name: string): string {
+  return [...suitePath, name].join(" > ");
+}
+
 function resolveTestRoot(run: VitestRun, root: string): string {
   return resolvePath(root, run.testRoot ?? ".");
 }
@@ -898,6 +918,18 @@ function uniqueSelectedTests(
   const seen = new Set<string>();
   return targets.filter((target) => {
     const identity = `${target.file}\0${target.name}`;
+    if (seen.has(identity)) return false;
+    seen.add(identity);
+    return true;
+  });
+}
+
+function uniqueSelectedSuites(
+  suites: readonly SelectedVitestSuite[],
+): SelectedVitestSuite[] {
+  const seen = new Set<string>();
+  return suites.filter((suite) => {
+    const identity = JSON.stringify([suite.file, ...suite.suitePath]);
     if (seen.has(identity)) return false;
     seen.add(identity);
     return true;

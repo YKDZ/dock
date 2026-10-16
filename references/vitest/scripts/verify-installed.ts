@@ -501,10 +501,10 @@ async function verifyObservationAndReadRoundTrip(
   assertReadDiagnostics(firstReport, [
     {
       runId: "文件读取业务观察",
-      testId: JSON.stringify({
-        file: "test/read-observation.test.mts",
-        name: "业务文本观察",
-      }),
+      testId: JSON.stringify([
+        "test/read-observation.test.mts",
+        "业务文本观察",
+      ]),
       attempt: 1,
       referenceId: "business-text-source",
       value: "ready",
@@ -546,10 +546,10 @@ async function verifyObservationAndReadRoundTrip(
   assertReadDiagnostics(changedReport, [
     {
       runId: "文件读取业务观察",
-      testId: JSON.stringify({
-        file: "test/read-observation.test.mts",
-        name: "业务文本观察",
-      }),
+      testId: JSON.stringify([
+        "test/read-observation.test.mts",
+        "业务文本观察",
+      ]),
       attempt: 1,
       referenceId: "business-text-source",
       value: "changed",
@@ -614,10 +614,10 @@ async function verifyObservationAndReadRoundTrip(
   const missingReport = requireReport(missingEnvelope);
   assertBindingError(missingReport, "最终尝试观察", "observation-missing");
   assertExecutionSummary(missingReport, 1, 2);
-  const retryTestId = JSON.stringify({
-    file: "test/missing-final-observation.test.mts",
-    name: "最终成功缺少观察",
-  });
+  const retryTestId = JSON.stringify([
+    "test/missing-final-observation.test.mts",
+    "最终成功缺少观察",
+  ]);
   const retryRead = {
     runId: "最终尝试观察",
     testId: retryTestId,
@@ -972,11 +972,17 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   );
 
   const sharedBaseline = join(maintenanceRoot, "groups-shared.baseline.json");
+  const groupMarker = join(maintenanceRoot, "groups-extra.marker");
   await rm(sharedBaseline, { force: true });
+  await rm(groupMarker, { force: true });
   const sharedUpdate = await runDock(
     dock,
     ["baseline", "update", "--config", "groups-shared.config.mts", "--json"],
     consumer,
+    {
+      DOCK_VITEST_GROUP_MARKER: groupMarker,
+      DOCK_VITEST_GROUP_POISON: "1",
+    },
   );
   assert.equal(
     sharedUpdate.code,
@@ -986,11 +992,17 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   assert.equal(parseEnvelope(sharedUpdate.stdout).variant, "updated");
   const sharedReport = requireReport(parseEnvelope(sharedUpdate.stdout));
   assertBindingHasNoErrors(sharedReport, "组和单测共享");
-  assertExecutionSummary(sharedReport, 1, 4);
+  assertExecutionSummary(sharedReport, 1, 2);
+  await assert.rejects(access(groupMarker), { code: "ENOENT" });
+  await rm(groupMarker, { force: true });
   const sharedCheck = await runDock(
     dock,
     ["check", "--config", "groups-shared.config.mts", "--json"],
     consumer,
+    {
+      DOCK_VITEST_GROUP_MARKER: groupMarker,
+      DOCK_VITEST_GROUP_POISON: "1",
+    },
   );
   assert.equal(
     sharedCheck.code,
@@ -1001,8 +1013,154 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   assertExecutionSummary(
     requireReport(parseEnvelope(sharedCheck.stdout)),
     1,
-    4,
+    2,
   );
+  await assert.rejects(access(groupMarker), { code: "ENOENT" });
+
+  const additionalEnvironment = {
+    DOCK_VITEST_GROUP_ADDITIONAL: "1",
+    DOCK_VITEST_GROUP_MARKER: groupMarker,
+  };
+  await rm(groupMarker, { force: true });
+  const additionalUpdate = await runDock(
+    dock,
+    ["baseline", "update", "--config", "groups-shared.config.mts", "--json"],
+    consumer,
+    additionalEnvironment,
+  );
+  assert.equal(
+    additionalUpdate.code,
+    0,
+    `${additionalUpdate.stdout}\n${additionalUpdate.stderr}`,
+  );
+  assert.equal(parseEnvelope(additionalUpdate.stdout).variant, "updated");
+  assertExecutionSummary(
+    requireReport(parseEnvelope(additionalUpdate.stdout)),
+    1,
+    3,
+  );
+  await access(groupMarker);
+  await rm(groupMarker, { force: true });
+  const additionalCheck = await runDock(
+    dock,
+    ["check", "--config", "groups-shared.config.mts", "--json"],
+    consumer,
+    additionalEnvironment,
+  );
+  assert.equal(additionalCheck.code, 0, additionalCheck.stderr);
+  assert.equal(parseEnvelope(additionalCheck.stdout).variant, "consistent");
+  assertExecutionSummary(
+    requireReport(parseEnvelope(additionalCheck.stdout)),
+    1,
+    3,
+  );
+  await access(groupMarker);
+
+  const collisionBaseline = join(
+    maintenanceRoot,
+    "group-collision.baseline.json",
+  );
+  await rm(collisionBaseline, { force: true });
+  const collisionUpdate = await runDock(
+    dock,
+    ["baseline", "update", "--config", "group-collision.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(
+    collisionUpdate.code,
+    0,
+    `${collisionUpdate.stdout}\n${collisionUpdate.stderr}`,
+  );
+  assert.equal(parseEnvelope(collisionUpdate.stdout).variant, "updated");
+  const collisionReport = requireReport(parseEnvelope(collisionUpdate.stdout));
+  assertBindingHasNoErrors(collisionReport, "路径相同标题组");
+  assertExecutionSummary(collisionReport, 1, 2);
+  const collisionBinding = collisionReport.bindings.find(
+    (binding) => binding.bindingId === "路径相同标题组",
+  );
+  assert.ok(collisionBinding?.current);
+  const flatMemberId = JSON.stringify([
+    "test/group-collision.test.mts",
+    "outer",
+    "nested > child",
+    "same",
+  ]);
+  const nestedMemberId = JSON.stringify([
+    "test/group-collision.test.mts",
+    "outer",
+    "nested",
+    "child",
+    "same",
+  ]);
+  const flatMembers = collisionBinding.current.references["flat-path"]?.value;
+  const nestedMembers =
+    collisionBinding.current.references["nested-path"]?.value;
+  assert.ok(Array.isArray(flatMembers));
+  assert.ok(Array.isArray(nestedMembers));
+  assert.deepEqual(
+    flatMembers.map((member) => (member as { id?: unknown }).id),
+    [flatMemberId],
+  );
+  assert.deepEqual(
+    nestedMembers.map((member) => (member as { id?: unknown }).id),
+    [nestedMemberId],
+  );
+  assert.notEqual(flatMemberId, nestedMemberId);
+
+  const collisionCheck = await runDock(
+    dock,
+    ["check", "--config", "group-collision.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(collisionCheck.code, 0, collisionCheck.stderr);
+  assert.equal(parseEnvelope(collisionCheck.stdout).variant, "consistent");
+  assertExecutionSummary(
+    requireReport(parseEnvelope(collisionCheck.stdout)),
+    1,
+    2,
+  );
+
+  const ambiguousBaseline = join(
+    maintenanceRoot,
+    "group-collision-single.baseline.json",
+  );
+  await rm(ambiguousBaseline, { force: true });
+  const ambiguousSingle = await runDock(
+    dock,
+    ["check", "--config", "group-collision-single.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(ambiguousSingle.code, 1, ambiguousSingle.stderr);
+  assert.equal(parseEnvelope(ambiguousSingle.stdout).variant, "errors");
+  assertBindingError(
+    requireReport(parseEnvelope(ambiguousSingle.stdout)),
+    "标题对应多个路径",
+    "duplicate-test-identity",
+  );
+  assertExecutionSummary(
+    requireReport(parseEnvelope(ambiguousSingle.stdout)),
+    1,
+    2,
+  );
+  const ambiguousUpdate = await runDock(
+    dock,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "group-collision-single.config.mts",
+      "--json",
+    ],
+    consumer,
+  );
+  assert.equal(ambiguousUpdate.code, 1, ambiguousUpdate.stderr);
+  assert.equal(parseEnvelope(ambiguousUpdate.stdout).variant, "rejected");
+  assertBindingError(
+    requireReport(parseEnvelope(ambiguousUpdate.stdout)),
+    "标题对应多个路径",
+    "duplicate-test-identity",
+  );
+  await assert.rejects(access(ambiguousBaseline), { code: "ENOENT" });
 
   const failureBytes = await readFile(baselinePath);
   const invalid = await runDock(
@@ -1059,7 +1217,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   assert.equal(filtered.code, 1, `${filtered.stdout}\n${filtered.stderr}`);
   const filteredReport = requireReport(parseEnvelope(filtered.stdout));
   assertBindingError(filteredReport, "受筛选组", "test-skipped");
-  assertExecutionSummary(filteredReport, 1, 2);
+  assertExecutionSummary(filteredReport, 1, 1);
   const filteredUpdate = await runDock(
     dock,
     ["baseline", "update", "--config", "group-filter.config.mts", "--json"],

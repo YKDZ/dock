@@ -12,6 +12,13 @@ import { settings, steps } from "./test-workspace/groups.observations.mts";
 const run = defineVitestRun("组与单测共用原生运行", {
   files: ["test/groups.test.mts"],
   testRoot: "../test-workspace",
+  ...(process.env.DOCK_VITEST_GROUP_ADDITIONAL === "1"
+    ? {
+        additionalTests: [
+          { file: "test/groups.test.mts", name: "extra marker" },
+        ],
+      }
+    : {}),
   observations: [settings, steps],
 });
 const suite = vitestSuite(

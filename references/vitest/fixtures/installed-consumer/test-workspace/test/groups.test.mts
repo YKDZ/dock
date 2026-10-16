@@ -1,8 +1,21 @@
-import { describe, expect, test } from "vitest";
+import { existsSync, writeFileSync } from "node:fs";
+
+import { afterAll, describe, expect, test } from "vitest";
 
 import { settings, steps } from "../groups.observations.mts";
 
 const variant = process.env.DOCK_VITEST_GROUP_VARIANT ?? "baseline";
+
+afterAll(() => {
+  const marker = process.env.DOCK_VITEST_GROUP_MARKER;
+  if (
+    process.env.DOCK_VITEST_GROUP_POISON === "1" &&
+    marker !== undefined &&
+    existsSync(marker)
+  ) {
+    throw new Error(`不应执行的附加测试留下了标记：${marker}`);
+  }
+});
 
 describe("preview config", () => {
   describe("inner > label", () => {
@@ -38,3 +51,9 @@ describe("preview config", () => {
 });
 
 describe("empty config", () => {});
+
+test("extra marker", () => {
+  const marker = process.env.DOCK_VITEST_GROUP_MARKER;
+  if (marker !== undefined) writeFileSync(marker, "ran\n");
+  expect(true).toBe(true);
+});

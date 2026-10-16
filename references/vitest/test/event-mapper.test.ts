@@ -61,7 +61,8 @@ test("目录从原生 parent/name 恢复嵌套路径并保留执行身份", () =
       {
         executionId: testIdentity(
           "test/tree.test.mts",
-          "outer > label > inner > case",
+          ["outer > label", "inner"],
+          "case",
         ),
         file: "test/tree.test.mts",
         suitePath: ["outer > label", "inner"],
@@ -70,6 +71,78 @@ test("目录从原生 parent/name 恢复嵌套路径并保留执行身份", () =
     ],
   });
   assert.equal(candidate.tests[0]?.id, candidate.catalog.tests[0]?.executionId);
+});
+
+test("展开标题相同的不同原生路径仍有独立执行身份", () => {
+  const outer = { type: "suite", name: "outer", errors: () => [] };
+  const flat = {
+    type: "suite",
+    name: "nested > child",
+    suite: outer,
+    errors: () => [],
+  };
+  const nested = {
+    type: "suite",
+    name: "nested",
+    suite: outer,
+    errors: () => [],
+  };
+  const nestedChild = {
+    type: "suite",
+    name: "child",
+    suite: nested,
+    errors: () => [],
+  };
+  const makeTest = (suite: object, value: number) => ({
+    type: "test",
+    name: "same",
+    fullName: "outer > nested > child > same",
+    suite,
+    result: () => ({ state: "passed", errors: [] }),
+    meta: () => ({
+      dockVitestAttemptCount: 1,
+      dockVitestAttempts: [
+        {
+          attempt: 1,
+          observations: [{ attempt: 1, key: "count", value }],
+          reads: [],
+        },
+      ],
+    }),
+    diagnostic: () => ({ retryCount: 0 }),
+    options: { mode: "run" },
+  });
+  const requestedFile = "/consumer/test/collision.test.mts";
+  const candidate = captureVitestCandidate(
+    [
+      {
+        moduleId: requestedFile,
+        errors: () => [],
+        children: {
+          allSuites: () => [outer, flat, nested, nestedChild],
+          allTests: () => [makeTest(flat, 1), makeTest(nestedChild, 2)],
+        },
+      },
+    ],
+    [],
+    "passed",
+    "4.1.11",
+    "/consumer",
+    [requestedFile],
+  );
+
+  assert.deepEqual(
+    candidate.tests.map((test) => test.status),
+    ["passed", "passed"],
+  );
+  assert.deepEqual(
+    candidate.catalog.tests.map((test) => test.suitePath),
+    [
+      ["outer", "nested > child"],
+      ["outer", "nested", "child"],
+    ],
+  );
+  assert.notEqual(candidate.tests[0]?.id, candidate.tests[1]?.id);
 });
 
 test("缺少请求文件会标记部分目录并保留已有发现", () => {

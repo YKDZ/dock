@@ -26,6 +26,11 @@ export type SelectedVitestTest = {
   readonly name: string;
 };
 
+export type SelectedVitestSuite = {
+  readonly file: string;
+  readonly suitePath: readonly [string, ...string[]];
+};
+
 type ChildResult = VitestProcessResult & {
   readonly stdout: string;
   readonly stderr: string;
@@ -38,7 +43,7 @@ const diagnosticLimit = 16_384;
 export async function executeVitestRun(
   run: NormalizedVitestRun,
   selectedTests: readonly SelectedVitestTest[],
-  allInFiles = false,
+  selectedSuites: readonly SelectedVitestSuite[] = [],
 ): Promise<ExecutionRunRecord> {
   const temporary = await mkdtemp(join(tmpdir(), "dock-vitest-run-"));
   const receiptPath = join(temporary, "receipt.json");
@@ -52,7 +57,7 @@ export async function executeVitestRun(
       );
     }
     const names = selectedNames(selectedTests);
-    if (names.length === 0 && !allInFiles) {
+    if (names.length === 0 && selectedSuites.length === 0) {
       return incompleteRun(
         "vitest-selection-empty",
         "运行配置中的 testNamePattern 排除了全部声明测试。",
@@ -66,7 +71,7 @@ export async function executeVitestRun(
           : { userConfigPath: run.configFile }),
         root: run.testRoot,
         names,
-        allInFiles,
+        suitePaths: selectedSuites.map(({ suitePath }) => [...suitePath]),
         setupPath: internalFile("setup"),
         reporterPath: internalFile("reporter"),
       }),
@@ -134,7 +139,7 @@ function createOverlayConfig(options: {
   readonly userConfigPath?: string;
   readonly root: string;
   readonly names: readonly string[];
-  readonly allInFiles: boolean;
+  readonly suitePaths: readonly (readonly string[])[];
   readonly setupPath: string;
   readonly reporterPath: string;
 }): string {
@@ -179,9 +184,31 @@ const selectedPatterns = [...new Set(selectedTargets.filter(({ name, filterName 
   pattern.lastIndex = 0;
   return matchesReportedTitle || pattern.test(filterName);
 }).flatMap(({ patterns }) => patterns))];
-const testNamePattern = selectedPatterns.length === 0
-  ? "^(?!)$"
-  : "^(?:" + selectedPatterns.join("|") + ")$";
+const suitePatterns = ${JSON.stringify(
+    options.suitePaths.map(
+      (suitePath) =>
+        `^${escapeRegExp(`${suitePath.join(" > ")} > `)}[\\s\\S]*$`,
+    ),
+  )};
+const selectedPatternsForRun = [...new Set([...selectedPatterns, ...suitePatterns])];
+const configuredSource = configuredPattern === undefined
+  ? undefined
+  : configuredPattern instanceof RegExp
+    ? configuredPattern.source
+    : String(configuredPattern);
+const configuredFlags = configuredPattern instanceof RegExp
+  ? configuredPattern.flags.replace(/[gy]/g, "")
+  : "";
+const filterPattern = configuredSource === undefined
+  ? ""
+  : "(?=[\\s\\S]*?(?:" + configuredSource + "))";
+const testNamePattern = new RegExp(
+  "^" + filterPattern + "(?:" + (selectedPatternsForRun.length === 0
+    ? "(?!)"
+    : selectedPatternsForRun.join("|")
+  ) + ")$",
+  configuredFlags,
+);
 export default {
   ...userConfig,
   root: ${JSON.stringify(options.root)},
@@ -191,7 +218,7 @@ export default {
     dangerouslyIgnoreUnhandledErrors: false,
     // 允许已发现的空原生 suite；声明文件和必需成员由目录映射单独验证。
     passWithNoTests: true,
-    ${options.allInFiles ? "" : "testNamePattern,"}
+    testNamePattern,
     setupFiles: [...setupFiles, ${JSON.stringify(options.setupPath)}],
     reporters: [...reporters, ${JSON.stringify(options.reporterPath)}],
   },

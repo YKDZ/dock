@@ -183,7 +183,7 @@ export function captureVitestCandidate(
       }
 
       const file = relative(root, modulePath).split("\\").join("/");
-      const executionId = testIdentity(file, fullName);
+      const executionId = testIdentity(file, suitePath, name);
       catalogTests.push({ executionId, file, suitePath, name });
       const result = safeCall(test.result, testValue);
       const metadata = safeCall(test.meta, testValue);
@@ -528,8 +528,12 @@ function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
-export function testIdentity(file: string, name: string): string {
-  return JSON.stringify({ file, name });
+export function testIdentity(
+  file: string,
+  suitePath: readonly string[],
+  name: string,
+): string {
+  return JSON.stringify([file, ...suitePath, name]);
 }
 
 function attemptCountFor(
