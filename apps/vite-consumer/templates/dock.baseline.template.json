@@ -78,7 +78,8 @@
                     "packages/vite/src/node/__tests__/static-deploy.spec.ts"
                   ],
                   "testRoot": ".",
-                  "configFile": "vitest.config.ts"
+                  "configFile": "vitest.config.ts",
+                  "observationKeys": []
                 },
                 "file": "packages/vite/src/node/__tests__/static-deploy.spec.ts",
                 "name": "本地静态部署 > 新鲜构建的 HTML 和资源可经预览服务读取"

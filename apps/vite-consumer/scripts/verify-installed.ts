@@ -55,8 +55,10 @@ const previewFactId = "static-preview-order";
 const testStatusId = "static-deploy-workflow";
 const oldPreviewFact =
   "After building the app, you can test it locally by running `npm run preview` command.";
+const currentPreviewFact =
+  "Once you've built the app, you may test it locally by running `npm run preview` command.";
 const driftedPreviewFact =
-  "After building the app, you can verify it locally by running `npm run preview` command.";
+  "Once you've built the app, you can verify it locally by running `npm run preview` command.";
 const checkoutToken = "__VITE_CHECKOUT_ROOT__";
 
 async function main(): Promise<void> {
@@ -260,11 +262,30 @@ async function verifyInstalledMaintenance(viteRoot: string): Promise<void> {
   const baselineBeforeChecks = await readFile(baselinePath);
 
   const initial = await runCheckPair(viteRoot);
-  assert.equal(initial.text.code, 0, initial.text.stderr);
-  assert.equal(initial.json.code, 0, initial.json.stderr);
-  assert.equal(parseEnvelope(initial.json.stdout).variant, "consistent");
-  assertCurrentHistory(initial.report, viteRoot, originalDoc);
-  assert.match(initial.text.stdout, /与基线一致/u);
+  assert.equal(
+    initial.text.code,
+    1,
+    `${initial.text.stdout}\n${initial.text.stderr}`,
+  );
+  assert.equal(
+    initial.json.code,
+    1,
+    `${initial.json.stdout}\n${initial.json.stderr}`,
+  );
+  assert.equal(
+    parseEnvelope(initial.json.stdout).variant,
+    "changed",
+    initial.json.stdout,
+  );
+  assertHistoricalBaselineDrift(
+    initial.report,
+    viteRoot,
+    originalDoc,
+    currentPreviewFact,
+  );
+  assert.match(initial.text.stdout, /变化/u);
+  assert.ok(initial.text.stdout.includes(oldPreviewFact));
+  assert.ok(initial.text.stdout.includes(currentPreviewFact));
   assert.match(initial.text.stdout, /static-local-workflow/u);
   assert.match(
     initial.text.stdout,
@@ -293,10 +314,15 @@ async function verifyInstalledMaintenance(viteRoot: string): Promise<void> {
   );
 
   const recovered = await runCheckPair(viteRoot);
-  assert.equal(recovered.text.code, 0, recovered.text.stderr);
-  assert.equal(recovered.json.code, 0, recovered.json.stderr);
-  assert.equal(parseEnvelope(recovered.json.stdout).variant, "consistent");
-  assertCurrentHistory(recovered.report, viteRoot, originalDoc);
+  assert.equal(recovered.text.code, 1, recovered.text.stdout);
+  assert.equal(recovered.json.code, 1, recovered.json.stdout);
+  assert.equal(parseEnvelope(recovered.json.stdout).variant, "changed");
+  assertHistoricalBaselineDrift(
+    recovered.report,
+    viteRoot,
+    originalDoc,
+    currentPreviewFact,
+  );
   assert.deepEqual(await readFile(baselinePath), baselineBeforeChecks);
 
   const updated = await runDock(viteRoot, [
@@ -315,6 +341,12 @@ async function verifyInstalledMaintenance(viteRoot: string): Promise<void> {
   ) as RecordValue;
   assertCurrentHistory(updatedReport, viteRoot, originalDoc);
   assert.equal(JSON.stringify(updatedBaseline).includes(checkoutToken), false);
+
+  const afterUpdate = await runCheckPair(viteRoot);
+  assert.equal(afterUpdate.text.code, 0, afterUpdate.text.stdout);
+  assert.equal(afterUpdate.json.code, 0, afterUpdate.json.stdout);
+  assert.equal(parseEnvelope(afterUpdate.json.stdout).variant, "consistent");
+  assertCurrentHistory(afterUpdate.report, viteRoot, originalDoc);
 }
 
 async function verifyHistoricalDrift(
@@ -326,7 +358,7 @@ async function verifyHistoricalDrift(
 ): Promise<void> {
   const driftedDoc = replaceExactlyOnce(
     originalDoc,
-    oldPreviewFact,
+    currentPreviewFact,
     driftedPreviewFact,
   );
   await writeFile(docFile, driftedDoc, "utf8");
@@ -335,10 +367,12 @@ async function verifyHistoricalDrift(
     assert.equal(result.text.code, 1, result.text.stdout);
     assert.equal(result.json.code, 1, result.json.stderr);
     assert.equal(parseEnvelope(result.json.stdout).variant, "changed");
-    const change = changeFor(result.report, previewFactId);
-    assert.equal(change.kind, "fact");
-    assert.equal(change.before, oldPreviewFact);
-    assert.equal(change.after, driftedPreviewFact);
+    assertHistoricalBaselineDrift(
+      result.report,
+      viteRoot,
+      driftedDoc,
+      driftedPreviewFact,
+    );
     assert.match(result.text.stdout, /变化/u);
     assert.ok(result.text.stdout.includes(oldPreviewFact));
     assert.ok(result.text.stdout.includes(driftedPreviewFact));
@@ -364,14 +398,8 @@ async function verifyOmittedBuild(
     ["check", "--config", "dock.config.ts", "--json"],
     omittedBuild,
   );
-  const textError = assertErrorReport(text, testStatusId);
   const jsonError = assertErrorReport(json, testStatusId);
-  assertTextError(text.stdout, testStatusId, textError);
-  assert.equal(textError.code, jsonError.code);
-  assert.equal(
-    normalized(text.stdout).includes(normalized(jsonError.message)),
-    true,
-  );
+  assertTextError(text.stdout, testStatusId, jsonError);
   assert.match(jsonError.message, /遗漏构建步骤后预览必须失败/u);
   assert.deepEqual(await readFile(baselinePath), baselineBeforeChecks);
 
@@ -385,14 +413,8 @@ async function verifyOmittedBuild(
     ["baseline", "update", "--config", "dock.config.ts", "--json"],
     omittedBuild,
   );
-  const textUpdateError = assertRejectedUpdate(updateText, testStatusId);
   const jsonUpdateError = assertRejectedUpdate(updateJson, testStatusId);
-  assertTextError(updateText.stdout, testStatusId, textUpdateError);
-  assert.equal(textUpdateError.code, jsonUpdateError.code);
-  assert.equal(
-    normalized(updateText.stdout).includes(normalized(jsonUpdateError.message)),
-    true,
-  );
+  assertTextError(updateText.stdout, testStatusId, jsonUpdateError);
   assert.deepEqual(await readFile(baselinePath), baselineBeforeChecks);
 }
 
@@ -421,11 +443,9 @@ async function verifyMissingBuildCommand(
       "dock.config.ts",
       "--json",
     ]);
-    const textError = assertErrorReport(text, "static-build-command");
     const jsonError = assertErrorReport(json, "static-build-command");
-    assertTextError(text.stdout, "static-build-command", textError);
-    assert.equal(textError.code, "missing-selection");
-    assert.deepEqual(textError.range, jsonError.range);
+    assertTextError(text.stdout, "static-build-command", jsonError);
+    assert.equal(jsonError.code, "missing-selection");
     assertCurrentErrorRange(jsonError.range, invalidDoc);
     assert.match(text.stdout, /docs\/guide\/static-deploy\.md/u);
     assert.match(
@@ -451,17 +471,12 @@ async function verifyMissingBuildCommand(
       "dock.config.ts",
       "--json",
     ]);
-    const textUpdateError = assertRejectedUpdate(
-      updateText,
-      "static-build-command",
-    );
     const jsonUpdateError = assertRejectedUpdate(
       updateJson,
       "static-build-command",
     );
-    assertTextError(updateText.stdout, "static-build-command", textUpdateError);
-    assert.equal(textUpdateError.code, "missing-selection");
-    assert.deepEqual(textUpdateError.range, jsonUpdateError.range);
+    assertTextError(updateText.stdout, "static-build-command", jsonUpdateError);
+    assert.equal(jsonUpdateError.code, "missing-selection");
     assertCurrentErrorRange(jsonUpdateError.range, invalidDoc);
     assert.match(updateText.stdout, /docs\/guide\/static-deploy\.md/u);
     assert.match(
@@ -499,6 +514,7 @@ function assertCurrentHistory(
   report: RecordValue,
   viteRoot: string,
   source: string,
+  expectedPreviewFact = currentPreviewFact,
 ): void {
   const binding = bindingFrom(report);
   assert.ok(isRecord(binding.current));
@@ -506,12 +522,12 @@ function assertCurrentHistory(
   const references = binding.current.references;
   const preview = references[previewFactId];
   assert.ok(isRecord(preview));
-  assert.equal(preview.value, oldPreviewFact);
+  assert.equal(preview.value, expectedPreviewFact);
   assert.ok(isRecord(preview.range));
   assert.equal(preview.range.path, docPath);
   assert.equal(
     source.slice(preview.range.start as number, preview.range.end as number),
-    oldPreviewFact,
+    expectedPreviewFact,
   );
   assert.ok(isRecord(preview.definition));
   assert.ok(isRecord(preview.definition.target));
@@ -617,14 +633,33 @@ function findReferenceError(
   return error;
 }
 
-function changeFor(report: RecordValue, referenceId: string): RecordValue {
+function assertHistoricalBaselineDrift(
+  report: RecordValue,
+  viteRoot: string,
+  source: string,
+  currentFact: string,
+): void {
   const binding = bindingFrom(report);
   assert.ok(Array.isArray(binding.changes));
-  const change = binding.changes.find(
-    (item) => isRecord(item) && item.referenceId === referenceId,
+  const changes = binding.changes.filter(
+    (item) => isRecord(item) && item.referenceId === previewFactId,
   );
-  assert.ok(isRecord(change), `报告未包含引用 ${referenceId} 的变化。`);
-  return change;
+  assert.equal(changes.length, 2);
+  assert.ok(
+    binding.changes.every(
+      (item) => isRecord(item) && item.referenceId === previewFactId,
+    ),
+  );
+  assert.ok(
+    changes.some(
+      (item) => isRecord(item) && item.kind === "reference-definition",
+    ),
+  );
+  const fact = changes.find((item) => isRecord(item) && item.kind === "fact");
+  assert.ok(isRecord(fact), `报告未包含 ${previewFactId} 的历史事实变化。`);
+  assert.equal(fact.before, oldPreviewFact);
+  assert.equal(fact.after, currentFact);
+  assertCurrentHistory(report, viteRoot, source, currentFact);
 }
 
 function bindingFrom(report: RecordValue): RecordValue {
@@ -648,7 +683,14 @@ function reportFrom(output: string): RecordValue {
 }
 
 function parseEnvelope(output: string): RecordValue {
-  const envelope: unknown = JSON.parse(output);
+  let envelope: unknown;
+  try {
+    envelope = JSON.parse(output);
+  } catch (error) {
+    assert.fail(
+      `CLI JSON 输出不可解析：${String(error)}\n实际输出：\n${output}`,
+    );
+  }
   assert.ok(isRecord(envelope));
   return envelope;
 }

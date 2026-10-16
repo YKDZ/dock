@@ -40,8 +40,8 @@ export default defineConfig({
           contains: "By default, the build output will be placed",
         })
         .reference("static-build-output"),
-      guide
-        .node({ type: "paragraph", contains: "After building the app" })
+      preview
+        .node({ type: "paragraph", contains: "Once you've built the app" })
         .reference("static-preview-order"),
       preview
         .node({ type: "code", contains: "$ npm run preview" })
