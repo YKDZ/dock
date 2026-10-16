@@ -463,6 +463,8 @@ function isUnsupportedScope(node: ts.Node): boolean {
     ts.isParameter(node) ||
     ts.isConstructorDeclaration(node) ||
     ts.isClassStaticBlockDeclaration(node) ||
+    ts.isCallSignatureDeclaration(node) ||
+    ts.isConstructSignatureDeclaration(node) ||
     ts.isForStatement(node) ||
     ts.isForInStatement(node) ||
     ts.isForOfStatement(node) ||

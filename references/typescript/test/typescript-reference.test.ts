@@ -201,3 +201,51 @@ void test("缺失声明和语法错误明确失败，范围使用 UTF-16 偏移"
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("无名调用和构造签名的返回类型不提升为接口成员", async () => {
+  const root = await mkdtemp(
+    join(tmpdir(), "dock-typescript-anonymous-signature-"),
+  );
+  try {
+    const source = [
+      "export interface Callable { (): { hidden: string } }",
+      "export interface Constructable { new (): { hidden: string } }",
+      "export interface Proper { nested: { hidden: string } }",
+      "export namespace Space { export const stable = { nested: { value: 1 } }; }",
+    ].join("\n");
+    await writeFile(join(root, "anonymous-signatures.ts"), source, "utf8");
+    const config = defineConfig({ root, plugins: [typescript], bindings: [] });
+
+    for (const name of ["Callable", "Constructable"] as const) {
+      await assert.rejects(
+        readReference(
+          config,
+          typescript
+            .from("anonymous-signatures.ts")
+            .symbol([name, "hidden"], "property")
+            .reference(`${name}-hidden`),
+        ),
+        { code: "missing-symbol" },
+      );
+    }
+
+    for (const [path, declaration] of [
+      [["Proper", "nested", "hidden"], "property"],
+      [["Space", "stable", "nested", "value"], "property"],
+    ] as const) {
+      const result = await readReference(
+        config,
+        typescript
+          .from("anonymous-signatures.ts")
+          .symbol(path, declaration)
+          .reference(path.join("-")),
+      );
+      assert.equal(
+        source.slice(result.range?.start, result.range?.end),
+        result.value,
+      );
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
