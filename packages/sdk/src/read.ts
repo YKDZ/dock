@@ -1,6 +1,5 @@
 import { isJsonValue, type JsonValue, type TextRange } from "@dock/core";
 
-import { prepareConfig, MaintenanceError } from "./maintenance.ts";
 import type {
   Config,
   PluginContext,
@@ -10,6 +9,7 @@ import type {
   ReferencePlugin,
   ReferenceValue,
 } from "./contracts.ts";
+import { prepareConfig, MaintenanceError } from "./maintenance.ts";
 
 type RuntimePlugin = {
   readonly id?: unknown;
@@ -17,10 +17,7 @@ type RuntimePlugin = {
   readonly read?: unknown;
 };
 
-type RuntimeReader = (
-  reference: Reference,
-  context: PluginContext,
-) => unknown;
+type RuntimeReader = (reference: Reference, context: PluginContext) => unknown;
 
 /** 读取给定引用的当前选定值，不要求引用属于配置中的关联。 */
 export async function readReference<
