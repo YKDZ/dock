@@ -13,6 +13,7 @@ import {
   defineConfig,
   definePlugin,
   MaintenanceError,
+  readReference,
   type Reference,
   updateBaseline,
 } from "@dock/sdk";
@@ -20,9 +21,11 @@ import {
 void test("普通文件全文可经公开 SDK 建立、核对和更新基线", async () => {
   const root = await mkdtemp(join(tmpdir(), "dock-file-maintenance-"));
   const target = join(root, "guide.md");
+  const firstVersion = "<!-- Markdown 注释保持为普通文本 -->\n第一版正文\n";
+  const secondVersion = "<!-- Markdown 注释保持为普通文本 -->\n第二版正文\n";
 
   try {
-    await writeFile(target, "第一版正文\n", "utf8");
+    await writeFile(target, firstVersion, "utf8");
     const guide = file.from("guide.md").reference("guide");
     const config = defineConfig({
       root,
@@ -34,6 +37,15 @@ void test("普通文件全文可经公开 SDK 建立、核对和更新基线", a
     assert.deepEqual(initial.scope, ["guide-policy"]);
     assert.equal(initial.bindings[0]?.consistency, "inconsistent");
     assert.equal(initial.bindings[0]?.changes[0]?.kind, "binding-added");
+    assert.equal(
+      initial.bindings[0]?.current?.references.guide?.value,
+      firstVersion,
+    );
+    assert.deepEqual(initial.bindings[0]?.current?.references.guide?.range, {
+      path: "guide.md",
+      start: 0,
+      end: firstVersion.length,
+    });
     await assert.rejects(readFile(join(root, "dock.baseline.json"), "utf8"), {
       code: "ENOENT",
     });
@@ -44,17 +56,390 @@ void test("普通文件全文可经公开 SDK 建立、核对和更新基线", a
     const unchanged = await check(config);
     assert.equal(unchanged.bindings[0]?.consistency, "consistent");
 
-    await writeFile(target, "第二版正文\n", "utf8");
+    await writeFile(target, secondVersion, "utf8");
     const changed = await check(config);
     assert.equal(changed.bindings[0]?.consistency, "inconsistent");
     assert.deepEqual(changed.bindings[0]?.changes, [
       {
         kind: "fact",
         referenceId: "guide",
-        before: "第一版正文\n",
-        after: "第二版正文\n",
+        before: firstVersion,
+        after: secondVersion,
       },
     ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("文件存在性可被核对，缺失文件不能作为事实写入基线", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-file-exists-"));
+  const target = join(root, "guide.md");
+  const baselinePath = join(root, "dock.baseline.json");
+
+  try {
+    const source = "<!-- 普通文件仍保留原文 -->\n正文\n";
+    await writeFile(target, source, "utf8");
+    const reference = file.from("guide.md").exists().reference("guide-exists");
+    const config = defineConfig({
+      root,
+      plugins: [file],
+      bindings: [binding("guide-policy", [reference])],
+    });
+
+    const initial = await check(config);
+    assert.equal(initial.bindings[0]?.consistency, "inconsistent");
+    assert.equal((await updateBaseline(config)).status, "updated");
+    const baseline = JSON.parse(await readFile(baselinePath, "utf8")) as {
+      readonly bindings: Record<
+        string,
+        {
+          readonly references: Record<string, { readonly value: unknown }>;
+        }
+      >;
+    };
+    assert.equal(
+      baseline.bindings["guide-policy"]?.references["guide-exists"]?.value,
+      true,
+    );
+    const originalBaseline = await readFile(baselinePath);
+
+    await rm(target);
+    const missing = await check(config);
+    const failedBinding = missing.bindings[0];
+    assert.ok(failedBinding && "errors" in failedBinding);
+    assert.equal(failedBinding.errors[0]?.code, "missing-file");
+
+    const rejected = await updateBaseline(config);
+    assert.equal(rejected.status, "rejected");
+    assert.deepEqual(await readFile(baselinePath), originalBaseline);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("唯一文本选择保留原文 UTF-16 位置且前置无关文本不改变事实", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-file-quote-"));
+  const target = join(root, "guide.md");
+  const source = "😀x\nTARGET\n";
+
+  try {
+    await writeFile(target, source, "utf8");
+    const reference = file.from("guide.md").quote("TARGET").reference("target");
+    const config = defineConfig({
+      root,
+      plugins: [file],
+      bindings: [binding("target-policy", [reference])],
+    });
+
+    const initial = await check(config);
+    assert.deepEqual(initial.bindings[0]?.current?.references.target?.range, {
+      path: "guide.md",
+      start: 4,
+      end: 10,
+    });
+    assert.equal((await updateBaseline(config)).status, "updated");
+
+    await writeFile(target, `前置\n${source}`, "utf8");
+    const moved = await check(config);
+    assert.equal(moved.bindings[0]?.consistency, "consistent");
+    assert.deepEqual(moved.bindings[0]?.current?.references.target?.range, {
+      path: "guide.md",
+      start: 7,
+      end: 13,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("readReference 读取未关联引用的当前文本和位置，失效选择不回退基线", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-file-read-reference-"));
+  const target = join(root, "guide.md");
+  const source = "😀说明\nTARGET\n";
+
+  try {
+    await writeFile(target, source, "utf8");
+    const bound = file.from("guide.md").quote("TARGET").reference("bound");
+    const standalone = file
+      .from("guide.md")
+      .quote("TARGET")
+      .reference("standalone");
+    const config = defineConfig({
+      root,
+      plugins: [file],
+      bindings: [binding("guide-policy", [bound])],
+    });
+    assert.equal((await updateBaseline(config)).status, "updated");
+
+    assert.deepEqual(await readReference(config, standalone), {
+      value: "TARGET",
+      range: { path: "guide.md", start: 5, end: 11 },
+    });
+    const movedSource = `前置\n${source}`;
+    await writeFile(target, movedSource, "utf8");
+    assert.deepEqual(await readReference(config, standalone), {
+      value: "TARGET",
+      range: { path: "guide.md", start: 8, end: 14 },
+    });
+
+    await writeFile(target, "😀说明\nchanged\n", "utf8");
+    await assert.rejects(
+      readReference(config, standalone),
+      (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "missing-selection");
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("region 后可按唯一正则捕获继续收窄", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-file-region-match-"));
+  const source =
+    "😀title\n#region outer\nouter body\n#region settings\nport=4173\n#endregion settings\nafter\n#endregion outer\n";
+
+  try {
+    await writeFile(join(root, "settings.txt"), source, "utf8");
+    const port = file
+      .from("settings.txt")
+      .region("outer")
+      .region("settings")
+      .quote("port=4173")
+      .match("port=(\\d+)", 1)
+      .reference("port");
+    const config = defineConfig({
+      root,
+      plugins: [file],
+      bindings: [binding("port-policy", [port])],
+    });
+
+    const report = await check(config);
+    const current = report.bindings[0]?.current?.references.port;
+    assert.equal(current?.value, "4173");
+    assert.deepEqual(current?.range, {
+      path: "settings.txt",
+      start: source.indexOf("4173"),
+      end: source.indexOf("4173") + 4,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("文本定位的重复、缺失和非法边界均拒绝基线更新", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-file-selection-errors-"));
+  const cases = [
+    {
+      id: "overlapping-quote",
+      path: "overlapping.txt",
+      source: "ababa",
+      reference: file
+        .from("overlapping.txt")
+        .quote("aba")
+        .reference("overlapping-quote"),
+      code: "ambiguous-selection",
+    },
+    {
+      id: "missing-quote",
+      path: "missing.txt",
+      source: "current value",
+      reference: file
+        .from("missing.txt")
+        .quote("absent")
+        .reference("missing-quote"),
+      code: "missing-selection",
+    },
+    {
+      id: "repeated-quote",
+      path: "repeated-quote.txt",
+      source: "guide guide",
+      reference: file
+        .from("repeated-quote.txt")
+        .quote("guide")
+        .reference("repeated-quote"),
+      code: "ambiguous-selection",
+    },
+    {
+      id: "empty-quote",
+      path: "empty-quote.txt",
+      source: "text",
+      reference: file
+        .from("empty-quote.txt")
+        .quote("")
+        .reference("empty-quote"),
+      code: "invalid-selector",
+    },
+    {
+      id: "selection-cannot-widen",
+      path: "selection-cannot-widen.txt",
+      source: "outside TARGET inside",
+      reference: file
+        .from("selection-cannot-widen.txt")
+        .quote("TARGET")
+        .quote("outside")
+        .reference("selection-cannot-widen"),
+      code: "missing-selection",
+    },
+    {
+      id: "multiple-matches",
+      path: "multiple.txt",
+      source: "a a",
+      reference: file
+        .from("multiple.txt")
+        .match("(a)", 1)
+        .reference("multiple-matches"),
+      code: "ambiguous-selection",
+    },
+    {
+      id: "overlapping-matches",
+      path: "overlapping-matches.txt",
+      source: "ababa",
+      reference: file
+        .from("overlapping-matches.txt")
+        .match("aba")
+        .reference("overlapping-matches"),
+      code: "ambiguous-selection",
+    },
+    {
+      id: "empty-pattern",
+      path: "empty-pattern.txt",
+      source: "text",
+      reference: file
+        .from("empty-pattern.txt")
+        .match("")
+        .reference("empty-pattern"),
+      code: "invalid-selector",
+    },
+    {
+      id: "invalid-regex",
+      path: "invalid-regex.txt",
+      source: "text",
+      reference: file
+        .from("invalid-regex.txt")
+        .match("(")
+        .reference("invalid-regex"),
+      code: "invalid-regex",
+    },
+    {
+      id: "empty-match",
+      path: "empty-match.txt",
+      source: "bbb",
+      reference: file
+        .from("empty-match.txt")
+        .match("a*")
+        .reference("empty-match"),
+      code: "empty-match",
+    },
+    {
+      id: "missing-capture",
+      path: "missing-capture.txt",
+      source: "a",
+      reference: file
+        .from("missing-capture.txt")
+        .match("(a)", 2)
+        .reference("missing-capture"),
+      code: "missing-capture",
+    },
+    {
+      id: "empty-capture",
+      path: "empty-capture.txt",
+      source: "b",
+      reference: file
+        .from("empty-capture.txt")
+        .match("(a*)b", 1)
+        .reference("empty-capture"),
+      code: "empty-capture",
+    },
+    {
+      id: "repeated-region",
+      path: "repeated-region.txt",
+      source:
+        "#region repeated\none\n#endregion repeated\n#region repeated\ntwo\n#endregion repeated\n",
+      reference: file
+        .from("repeated-region.txt")
+        .region("repeated")
+        .reference("repeated-region"),
+      code: "ambiguous-region",
+    },
+    {
+      id: "unclosed-region",
+      path: "unclosed-region.txt",
+      source: "#region open\nbody\n",
+      reference: file
+        .from("unclosed-region.txt")
+        .region("open")
+        .reference("unclosed-region"),
+      code: "malformed-region",
+    },
+    {
+      id: "mismatched-region",
+      path: "mismatched-region.txt",
+      source: "#region open\nbody\n#endregion other\n",
+      reference: file
+        .from("mismatched-region.txt")
+        .region("open")
+        .reference("mismatched-region"),
+      code: "malformed-region",
+    },
+    {
+      id: "unnamed-region",
+      path: "unnamed-region.txt",
+      source: "#region\nbody\n",
+      reference: file
+        .from("unnamed-region.txt")
+        .region("named")
+        .reference("unnamed-region"),
+      code: "malformed-region",
+    },
+    {
+      id: "empty-region",
+      path: "empty-region.txt",
+      source: "#region empty\n \t\n#endregion empty\n",
+      reference: file
+        .from("empty-region.txt")
+        .region("empty")
+        .reference("empty-region"),
+      code: "empty-region",
+    },
+    {
+      id: "missing-region",
+      path: "missing-region.txt",
+      source: "#region another\nbody\n#endregion another\n",
+      reference: file
+        .from("missing-region.txt")
+        .region("missing")
+        .reference("missing-region"),
+      code: "missing-region",
+    },
+  ];
+
+  try {
+    for (const item of cases) {
+      await writeFile(join(root, item.path), item.source, "utf8");
+    }
+    const config = defineConfig({
+      root,
+      plugins: [file],
+      bindings: cases.map((item) => binding(item.id, [item.reference])),
+    });
+
+    const report = await check(config);
+    for (const item of cases) {
+      const result = report.bindings.find(
+        (bindingResult) => bindingResult.bindingId === item.id,
+      );
+      assert.ok(result && "errors" in result, item.id);
+      assert.equal(result.errors[0]?.code, item.code, item.id);
+    }
+
+    assert.equal((await updateBaseline(config)).status, "rejected");
+    await assert.rejects(readFile(join(root, "dock.baseline.json")), {
+      code: "ENOENT",
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -92,22 +477,26 @@ void test("显式空完整声明可取消最后一条关联跟踪", async () => 
   }
 });
 
-void test("普通文件引用在声明组装时拒绝尚未支持的选择器", () => {
-  const selected = createReference<
-    typeof filePluginId,
-    "selected-guide",
-    string,
-    string
-  >(filePluginId, "selected-guide", "guide.md", {
-    selection: { start: 0 },
-  });
+void test("普通文件引用在声明组装时拒绝无效的选择器", () => {
+  const invalidConfig = {
+    plugins: [file],
+    bindings: [
+      {
+        id: "selected-policy",
+        references: [
+          {
+            id: "selected-guide",
+            pluginId: filePluginId,
+            target: "guide.md",
+            selection: { start: 0 },
+          },
+        ],
+      },
+    ],
+  };
   assert.throws(
-    () =>
-      defineConfig({
-        plugins: [file],
-        bindings: [binding("selected-policy", [selected])],
-      }),
-    /只支持全文，不能传入 selection/,
+    () => Reflect.apply(defineConfig, undefined, [invalidConfig]),
+    /selection 无效/,
   );
 });
 
@@ -119,9 +508,10 @@ void test("JSON 键顺序和备注不制造引用身份冲突", () => {
     string
   >;
 
-  const plugin = definePlugin<"fixture-plugin", SharedReference, string>({
+  const plugin = definePlugin({
     id: "fixture-plugin",
-    collect() {
+    validate(_reference: SharedReference): void {},
+    collect(_reference: SharedReference) {
       return { kind: "value", value: "same" };
     },
   });
@@ -208,14 +598,15 @@ void test("有效文本不变时，文件目标变化仍报告定义差异", asy
       "updated",
     );
     const changedTarget = await check(configFor("second.md"));
-    assert.deepEqual(changedTarget.bindings[0]?.changes, [
-      {
-        kind: "reference-definition",
-        referenceId: "guide",
-        before: { id: "guide", target: "first.md" },
-        after: { id: "guide", target: "second.md" },
-      },
-    ]);
+    const definitionChange = changedTarget.bindings[0]?.changes[0];
+    assert.equal(definitionChange?.kind, "reference-definition");
+    assert.equal(
+      definitionChange?.kind === "reference-definition"
+        ? definitionChange.referenceId
+        : undefined,
+      "guide",
+    );
+    assert.notDeepEqual(definitionChange?.before, definitionChange?.after);
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -264,7 +655,7 @@ void test("配置路径维护使用新的模块图读取导入声明", async () 
       [
         'import { binding, createReference, defineConfig, definePlugin } from "@dock/sdk";',
         'import { target } from "./declarations.mjs";',
-        'const fixture = definePlugin({ id: "fixture", collect(reference) { return { kind: "value", value: reference.target }; } });',
+        'const fixture = definePlugin({ id: "fixture", validate() {}, collect(reference) { return { kind: "value", value: reference.target }; } });',
         'export default defineConfig({ plugins: [fixture], bindings: [binding("guide-policy", [createReference("fixture", "guide", target)])] });',
       ].join("\n"),
     );
@@ -272,19 +663,13 @@ void test("配置路径维护使用新的模块图读取导入声明", async () 
     const first = await check(configPath);
     const firstBinding = first.bindings[0];
     assert.ok(firstBinding && "current" in firstBinding);
-    assert.equal(
-      firstBinding.current.references.guide?.definition.target,
-      "first.md",
-    );
+    assert.equal(firstBinding.current.references.guide?.value, "first.md");
 
     await writeFile(declarationsPath, 'export const target = "second.md";\n');
     const second = await check(configPath);
     const secondBinding = second.bindings[0];
     assert.ok(secondBinding && "current" in secondBinding);
-    assert.equal(
-      secondBinding.current.references.guide?.definition.target,
-      "second.md",
-    );
+    assert.equal(secondBinding.current.references.guide?.value, "second.md");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -16,8 +16,8 @@ import {
   type ReferenceResult,
 } from "@dock/core";
 
-import { validateConfig } from "./authoring.ts";
-import type { Config, PluginResult, Reference } from "./contracts.ts";
+import { normalizeConfig, type NormalizedReference } from "./authoring.ts";
+import type { Config, PluginResult } from "./contracts.ts";
 
 export type MaintenanceConfig = Config | string | URL;
 export type Operation = "check" | "updateBaseline";
@@ -36,7 +36,7 @@ type PreparedConfig = {
   readonly root: string;
   readonly baselinePath: string;
   readonly plugins: ReadonlyMap<string, Config["plugins"][number]>;
-  readonly references: readonly Reference[];
+  readonly references: readonly NormalizedReference[];
   readonly bindings: BindingDefinition[];
 };
 
@@ -96,30 +96,26 @@ export function prepareConfig(
   value: unknown,
   defaultRoot: string,
 ): PreparedConfig {
-  validateConfig(value);
-  const root = resolve(defaultRoot, value.root ?? ".");
-  const baselinePath = resolve(root, value.baseline ?? "dock.baseline.json");
-  const plugins = new Map(value.plugins.map((plugin) => [plugin.id, plugin]));
-  const references = new Map<string, Reference>();
+  const normalized = normalizeConfig(value);
+  const { config, references } = normalized;
+  const root = resolve(defaultRoot, config.root ?? ".");
+  const baselinePath = resolve(root, config.baseline ?? "dock.baseline.json");
+  const plugins = new Map(config.plugins.map((plugin) => [plugin.id, plugin]));
   const bindings: PreparedConfig["bindings"][number][] = [];
 
-  for (const binding of value.bindings) {
+  for (const binding of config.bindings) {
     bindings.push({
       id: binding.id,
       references: binding.references.map((reference) => reference.id),
       ...(binding.note === undefined ? {} : { note: binding.note }),
     });
-    for (const reference of binding.references) {
-      if (!references.has(reference.id))
-        references.set(reference.id, reference);
-    }
   }
 
   return {
     root,
     baselinePath,
     plugins,
-    references: [...references.values()],
+    references,
     bindings,
   };
 }
@@ -198,11 +194,14 @@ function invalidPluginResult(id: string): ReferenceResult {
 }
 
 function referenceDefinitions(
-  references: readonly Reference[],
+  references: readonly NormalizedReference[],
 ): ReferenceDefinition[] {
   return references.map((reference) => ({
     id: reference.id,
-    target: reference.target,
+    target: {
+      pluginId: reference.pluginId,
+      target: reference.target,
+    },
     ...(reference.selection === undefined
       ? {}
       : { selection: reference.selection }),

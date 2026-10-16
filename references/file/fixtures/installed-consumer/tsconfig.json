@@ -1,6 +1,7 @@
 {
   "compilerOptions": {
     "exactOptionalPropertyTypes": true,
+    "allowImportingTsExtensions": true,
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "noEmit": true,
@@ -8,5 +9,15 @@
     "target": "ES2024",
     "types": []
   },
-  "include": ["positive.mts", "negative.mts"]
+  "include": [
+    "positive.mts",
+    "negative.mts",
+    "external-plugin.mts",
+    "composition.mts",
+    "reexported-declarations.mts",
+    "composition-consumer.mts",
+    "external-plugin-consumer.mts",
+    "physical-multiversion.mts",
+    "secondary/physical-author.mts"
+  ]
 }

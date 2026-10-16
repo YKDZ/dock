@@ -6,6 +6,7 @@ import {
   copyFile,
   mkdir,
   mkdtemp,
+  realpath,
   readFile,
   rm,
   writeFile,
@@ -15,6 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { verifyInstalledCurrentConfig } from "./verify-installed-current-config.ts";
+import { verifyInstalledTextRead } from "./verify-installed-text-read.ts";
 
 type ProcessResult = {
   readonly code: number;
@@ -63,6 +65,7 @@ async function main(): Promise<void> {
   const consumer = await mkdtemp(join(tmpdir(), "dock-installed-consumer-"));
   try {
     await runInstalledCli(consumer, tarballs);
+    await verifyInstalledTextRead(consumer);
     await verifyInstalledCurrentConfig(consumer);
     process.stdout.write("干净消费者安装、公开声明与 dock CLI 验收通过。\n");
   } finally {
@@ -74,6 +77,16 @@ async function runConsumerTypechecks(consumer: string): Promise<void> {
   await copyFixture(consumer, "positive.mts");
   await copyFixture(consumer, "negative.mts");
   await copyFixture(consumer, "tsconfig.json");
+  await copyFixture(consumer, "composition.mts");
+  await copyFixture(consumer, "composition-consumer.mts");
+  await copyFixture(consumer, "external-plugin.mts");
+  await copyFixture(consumer, "external-plugin-consumer.mts");
+  await copyFixture(consumer, "reexported-declarations.mts");
+  await copyFixture(consumer, "physical-multiversion.mts");
+  await copyFile(
+    join(fixtureDirectory, "secondary", "physical-author.mts"),
+    join(consumer, "secondary", "physical-author.mts"),
+  );
   const compiler = join(
     packageDirectory,
     "node_modules",
@@ -92,17 +105,14 @@ async function runConsumerTypechecks(consumer: string): Promise<void> {
   );
 }
 
-async function runInstalledCli(
+async function installConsumer(
   consumer: string,
   tarballs: readonly string[],
+  name: string,
 ): Promise<void> {
   await writeFile(
     join(consumer, "package.json"),
-    JSON.stringify({
-      name: "dock-installed-consumer",
-      private: true,
-      type: "module",
-    }),
+    JSON.stringify({ name, private: true, type: "module" }),
   );
   const install = await run(
     "npm",
@@ -124,7 +134,52 @@ async function runInstalledCli(
     0,
     `正式 tarball 干净安装失败：\n${install.stdout}\n${install.stderr}`,
   );
+}
+
+async function runInstalledCli(
+  consumer: string,
+  tarballs: readonly string[],
+): Promise<void> {
+  await installConsumer(consumer, tarballs, "dock-installed-consumer");
+  const secondary = join(consumer, "secondary");
+  await mkdir(secondary, { recursive: true });
+  await installConsumer(secondary, tarballs, "dock-secondary-consumer");
+  const primarySdk = await realpath(
+    join(consumer, "node_modules", "@dock", "sdk"),
+  );
+  const secondarySdk = await realpath(
+    join(secondary, "node_modules", "@dock", "sdk"),
+  );
+  assert.notEqual(
+    primarySdk,
+    secondarySdk,
+    "多实例验收必须来自两份物理 SDK 安装。",
+  );
+  const primaryPackage = JSON.parse(
+    await readFile(join(primarySdk, "package.json"), "utf8"),
+  ) as { readonly version: string };
+  const secondaryPackage = JSON.parse(
+    await readFile(join(secondarySdk, "package.json"), "utf8"),
+  ) as { readonly version: string };
+  assert.equal(primaryPackage.version, secondaryPackage.version);
   await runConsumerTypechecks(consumer);
+
+  for (const [fixture, label] of [
+    ["composition-consumer.mts", "拆分声明与插件派发"],
+    ["external-plugin-consumer.mts", "外部插件采集与错误"],
+    ["physical-multiversion.mts", "两份物理安装互操作"],
+  ] as const) {
+    const installedRuntime = await run(
+      "node",
+      [join(consumer, fixture)],
+      consumer,
+    );
+    assert.equal(
+      installedRuntime.code,
+      0,
+      `安装制品${label}运行验收失败：\n${installedRuntime.stdout}\n${installedRuntime.stderr}`,
+    );
+  }
 
   await copyFixture(consumer, "sdk-consumer.mjs");
   const sdkConsumer = await run(
@@ -171,6 +226,8 @@ async function runInstalledCli(
   await copyFixture(consumer, "dock.config.mjs");
   await copyFixture(consumer, "dock.config.ts");
   await copyFixture(consumer, "declarations.mjs");
+  await copyFixture(consumer, "handler-file-config.mjs");
+  await copyFixture(consumer, "handler-other-config.mjs");
   await writeFile(join(consumer, "guide.md"), "第一版正文\n", "utf8");
   await writeFile(join(consumer, "copy.md"), "第一版正文\n", "utf8");
 
@@ -322,6 +379,45 @@ async function runInstalledCli(
     consumer,
   );
   assert.equal(acceptBody.code, 0, acceptBody.stderr);
+  const handlerBaseline = await runDock(
+    bin,
+    ["baseline", "update", "--config", "handler-file-config.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(handlerBaseline.code, 0, handlerBaseline.stderr);
+  const changedHandler = await runDock(
+    bin,
+    ["check", "--config", "handler-other-config.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(changedHandler.code, 1, changedHandler.stderr);
+  const changedHandlerReport = parseEnvelope(changedHandler.stdout).data
+    ?.report as
+    | {
+        readonly bindings: readonly {
+          readonly changes: readonly {
+            readonly kind: string;
+            readonly before?: { readonly target: unknown };
+            readonly after?: { readonly target: unknown };
+          }[];
+        }[];
+      }
+    | undefined;
+  const handlerChange = changedHandlerReport?.bindings[0]?.changes[0];
+  assert.equal(handlerChange?.kind, "reference-definition");
+  assert.deepEqual(handlerChange?.before?.target, {
+    pluginId: "@dock/reference-file",
+    target: "copy.md",
+  });
+  assert.deepEqual(handlerChange?.after?.target, {
+    pluginId: "@fixture/same-target-reader",
+    target: "copy.md",
+  });
+  assert.deepEqual(
+    changedHandlerReport?.bindings[0]?.changes.map((change) => change.kind),
+    ["reference-definition"],
+    "相同目标和事实更换处理器仍应只报告定义变化。",
+  );
   const currentBaseline = await readFile(join(consumer, "dock.baseline.json"));
   const acceptedFacts = JSON.parse(currentBaseline.toString("utf8")) as {
     readonly bindings: {
@@ -360,7 +456,7 @@ async function runInstalledCli(
 
   await writeFile(
     join(consumer, "invalid.mjs"),
-    'export default { plugins: [{ id: "unused", collect() { throw new Error("不得采集"); } }] };\n',
+    'export default { plugins: [{ id: "unused", validate() {}, collect() { throw new Error("不得采集"); } }] };\n',
   );
   const invalidConfig = await runDock(
     bin,
@@ -382,9 +478,7 @@ async function runInstalledCli(
     join(consumer, "unsupported-selection.mjs"),
     [
       'import { file } from "@dock/reference-file";',
-      'import { binding, defineConfig } from "@dock/sdk";',
-      'const selected = file.from("guide.md").reference("selected", { selection: { start: 0 } });',
-      'export default defineConfig({ plugins: [file], bindings: [binding("selected-policy", [selected])] });',
+      'export default { plugins: [file], bindings: [{ id: "selected-policy", references: [{ id: "selected", pluginId: "@dock/reference-file", target: "guide.md", selection: { start: 0 } }] }] };',
     ].join("\n"),
   );
   const unsupportedSelection = await runDock(
@@ -393,14 +487,17 @@ async function runInstalledCli(
     consumer,
   );
   assert.equal(unsupportedSelection.code, 1, unsupportedSelection.stderr);
-  assert.match(unsupportedSelection.stderr, /全文，不能传入 selection/);
+  assert.match(
+    unsupportedSelection.stderr,
+    /文件引用 selected 的 selection 无效/,
+  );
 
   await writeFile(
     join(consumer, "invalid-builder-target.mjs"),
     [
       'import { file } from "@dock/reference-file";',
       'import { binding, defineConfig } from "@dock/sdk";',
-      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
+      'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
       'const invalid = file.from(42).reference("invalid-target");',
       'export default defineConfig({ plugins: [file, unused], bindings: [binding("invalid-target-policy", [invalid])] });',
     ].join("\n"),
@@ -419,8 +516,8 @@ async function runInstalledCli(
     join(consumer, "invalid-raw-target.mjs"),
     [
       'import { file } from "@dock/reference-file";',
-      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
-      'export default { plugins: [file, unused], bindings: [{ id: "invalid-target-policy", references: [{ id: "invalid-target", pluginId: "@dock/reference-file", target: 42 }, { id: "unused-reference", pluginId: "unused", target: "guide.md" }] }] };',
+      'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
+      'export default { plugins: [unused, file], bindings: [{ id: "invalid-target-policy", references: [{ id: "unused-reference", pluginId: "unused", target: "guide.md" }, { id: "invalid-target", pluginId: "@dock/reference-file", target: 42 }] }] };',
     ].join("\n"),
   );
   const invalidRawTarget = await runDock(
@@ -434,9 +531,45 @@ async function runInstalledCli(
   assert.doesNotMatch(invalidRawTarget.stderr, /不得采集/);
 
   await writeFile(
+    join(consumer, "invalid-raw-selection.mjs"),
+    [
+      'import { catalogPlugin } from "./external-plugin.mts";',
+      'export default { plugins: [catalogPlugin], bindings: [{ id: "invalid-selection-policy", references: [{ id: "invalid-selection", pluginId: "@fixture/catalog", target: { kind: "catalog", path: "catalog.json" }, selection: { field: "summary" } }] }] };',
+    ].join("\n"),
+  );
+  const invalidRawSelection = await runDock(
+    bin,
+    ["check", "--config", "invalid-raw-selection.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(invalidRawSelection.code, 1, invalidRawSelection.stderr);
+  assert.match(invalidRawSelection.stderr, /拒绝引用 invalid-selection/);
+  assert.match(invalidRawSelection.stderr, /无效目录引用/);
+
+  await writeFile(
+    join(consumer, "shared-unregistered.mjs"),
+    [
+      'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
+      'const first = { id: "shared", pluginId: "missing-plugin", target: "guide.md", declaredAt: "first-declaration.mjs" };',
+      'const second = { id: "shared", pluginId: "missing-plugin", target: "guide.md", declaredAt: "second-declaration.mjs" };',
+      'export default { plugins: [unused], bindings: [{ id: "first-policy", references: [first] }, { id: "second-policy", references: [second] }] };',
+    ].join("\n"),
+  );
+  const sharedUnregistered = await runDock(
+    bin,
+    ["check", "--config", "shared-unregistered.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(sharedUnregistered.code, 1, sharedUnregistered.stderr);
+  assert.match(sharedUnregistered.stderr, /未登记插件：missing-plugin/);
+  assert.match(sharedUnregistered.stderr, /first-declaration\.mjs/);
+  assert.match(sharedUnregistered.stderr, /second-declaration\.mjs/);
+  assert.doesNotMatch(sharedUnregistered.stderr, /不得采集/);
+
+  await writeFile(
     join(consumer, "unregistered.mjs"),
     [
-      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
+      'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
       'export default { plugins: [unused], bindings: [{ id: "unregistered-policy", references: [{ id: "unregistered-reference", pluginId: "missing-plugin", target: "guide.md", declaredAt: "declarations.mjs" }] }] };',
     ].join("\n"),
   );
@@ -454,7 +587,7 @@ async function runInstalledCli(
   await writeFile(
     join(consumer, "duplicate.mjs"),
     [
-      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
+      'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
       'const reference = { id: "guide", pluginId: "unused", target: "guide.md" };',
       'export default { plugins: [unused], bindings: [{ id: "duplicate-policy", references: [reference] }, { id: "duplicate-policy", references: [reference] }] };',
     ].join("\n"),
@@ -469,9 +602,47 @@ async function runInstalledCli(
   assert.doesNotMatch(duplicateBinding.stderr, /不得采集/);
 
   await writeFile(
+    join(consumer, "duplicate-binding-object.mjs"),
+    [
+      'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
+      'const reference = { id: "guide", pluginId: "unused", target: "guide.md" };',
+      'const binding = { id: "duplicate-object-policy", references: [reference] };',
+      "export default { plugins: [unused], bindings: [binding, binding] };",
+    ].join("\n"),
+  );
+  const duplicateBindingObject = await runDock(
+    bin,
+    ["check", "--config", "duplicate-binding-object.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(duplicateBindingObject.code, 1, duplicateBindingObject.stderr);
+  assert.match(
+    duplicateBindingObject.stderr,
+    /关联身份重复：duplicate-object-policy/,
+  );
+  assert.doesNotMatch(duplicateBindingObject.stderr, /不得采集/);
+
+  await writeFile(
+    join(consumer, "duplicate-reference.mjs"),
+    [
+      'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
+      'const reference = { id: "guide", pluginId: "unused", target: "guide.md" };',
+      'export default { plugins: [unused], bindings: [{ id: "duplicate-reference-policy", references: [reference, reference] }] };',
+    ].join("\n"),
+  );
+  const duplicateReference = await runDock(
+    bin,
+    ["check", "--config", "duplicate-reference.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(duplicateReference.code, 1, duplicateReference.stderr);
+  assert.match(duplicateReference.stderr, /重复身份：guide/);
+  assert.doesNotMatch(duplicateReference.stderr, /不得采集/);
+
+  await writeFile(
     join(consumer, "duplicate-plugin.mjs"),
     [
-      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
+      'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
       'export default { plugins: [unused, unused], bindings: [{ id: "duplicate-plugin-policy", references: [{ id: "guide", pluginId: "unused", target: "guide.md" }] }] };',
     ].join("\n"),
   );
@@ -487,8 +658,8 @@ async function runInstalledCli(
   await writeFile(
     join(consumer, "conflicting-reference.mjs"),
     [
-      'const unused = { id: "unused", collect() { throw new Error("不得采集"); } };',
-      'export default { plugins: [unused], bindings: [{ id: "first-policy", references: [{ id: "shared-guide", pluginId: "unused", target: "guide.md" }] }, { id: "second-policy", references: [{ id: "shared-guide", pluginId: "unused", target: "copy.md" }] }] };',
+      'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
+      'export default { plugins: [unused], bindings: [{ id: "first-policy", references: [{ id: "shared-guide", pluginId: "unused", target: "guide.md", declaredAt: "first-conflict.mjs" }] }, { id: "second-policy", references: [{ id: "shared-guide", pluginId: "unused", target: "copy.md", declaredAt: "second-conflict.mjs" }] }] };',
     ].join("\n"),
   );
   const conflictingReference = await runDock(
@@ -501,6 +672,8 @@ async function runInstalledCli(
     conflictingReference.stderr,
     /引用身份 shared-guide 对应多个不同定义/,
   );
+  assert.match(conflictingReference.stderr, /first-conflict\.mjs/);
+  assert.match(conflictingReference.stderr, /second-conflict\.mjs/);
   assert.doesNotMatch(conflictingReference.stderr, /不得采集/);
 
   await writeFile(join(consumer, "dock.baseline.json"), "{not json", "utf8");

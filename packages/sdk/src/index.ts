@@ -16,9 +16,14 @@ export type {
   ConfigInput,
   DeclarationSource,
   PluginContext,
+  PluginMemberResult,
+  PluginReadResult,
   PluginResult,
+  ReadableReferenceOf,
+  ReadableReferencePlugin,
   Reference,
   ReferencePlugin,
+  ReferenceValue,
 } from "./contracts.ts";
 export {
   binding,
@@ -29,3 +34,4 @@ export {
 export type { ReferenceOptions } from "./authoring.ts";
 export { check, MaintenanceError, updateBaseline } from "./maintenance.ts";
 export type { MaintenanceConfig } from "./maintenance.ts";
+export { readReference } from "./read.ts";

@@ -1,30 +1,63 @@
-import { readFile } from "node:fs/promises";
+import { access, readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
   createReference,
   definePlugin,
+  type JsonValue,
+  type PluginContext,
+  type PluginReadResult,
   type PluginResult,
   type Reference,
   type ReferenceOptions,
-  type ReferencePlugin,
+  type ReadableReferencePlugin,
 } from "@dock/sdk";
+
+import { selectTextRange, TextSelectionError } from "./text-selection.ts";
+import type { TextSelectionStep } from "./text-selection.ts";
 
 export const filePluginId = "@dock/reference-file" as const;
 
-export type FileReference = Reference<
-  typeof filePluginId,
-  string,
-  string,
-  string
->;
+export type FileTextSelection = {
+  readonly kind: "text";
+  readonly steps: TextSelectionStep[];
+};
 
-export type FileReferenceBuilder = {
+export type FileExistsSelection = { readonly kind: "exists" };
+
+export type FileSelection = FileExistsSelection | FileTextSelection;
+
+export type FileReference<
+  Id extends string = string,
+  Value extends JsonValue = JsonValue,
+  Selection extends JsonValue = FileSelection,
+> = Reference<typeof filePluginId, Id, string, Value, Selection>;
+
+export type FileReferenceBuilder = FileTextReferenceBuilder<never> & {
+  exists(): FileExistsReferenceBuilder;
+};
+
+export type FileTextReferenceBuilder<
+  Selection extends JsonValue = FileTextSelection,
+> = {
+  quote(text: string): FileTextReferenceBuilder<FileTextSelection>;
+  match(
+    pattern: string,
+    group?: number,
+  ): FileTextReferenceBuilder<FileTextSelection>;
+  region(name: string): FileTextReferenceBuilder<FileTextSelection>;
   reference<Id extends string>(
     id: Id,
     options?: FileReferenceOptions,
-  ): Reference<typeof filePluginId, Id, string, string>;
+  ): FileReference<Id, string, Selection>;
+};
+
+export type FileExistsReferenceBuilder = {
+  reference<Id extends string>(
+    id: Id,
+    options?: FileReferenceOptions,
+  ): FileReference<Id, true, FileExistsSelection>;
 };
 
 export type FileReferenceOptions = Pick<
@@ -32,129 +65,288 @@ export type FileReferenceOptions = Pick<
   "note" | "declaredAt"
 >;
 
-export type FilePlugin = ReferencePlugin<
+export type FilePlugin = ReadableReferencePlugin<
   typeof filePluginId,
   FileReference,
-  string
+  JsonValue
 > & {
   from(target: string | URL): FileReferenceBuilder;
 };
 
-const implementation = definePlugin<typeof filePluginId, FileReference, string>(
-  {
-    id: filePluginId,
-    validate(reference): void {
-      if (reference.selection !== undefined) {
-        throw new TypeError(
-          `文件引用 ${reference.id} 当前只支持全文，不能传入 selection。`,
-        );
-      }
-      try {
-        assertFileTarget(reference.target);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new TypeError(`文件引用 ${reference.id} 的目标无效：${message}`, {
-          cause: error,
-        });
-      }
-    },
-    async collect(reference, context): Promise<PluginResult<string>> {
-      if (reference.selection !== undefined) {
-        return {
-          kind: "error",
-          error: {
-            code: "unsupported-file-selection",
-            message: `文件引用 ${reference.id} 当前只支持全文。`,
-          },
-        };
-      }
-      const target = reference.target;
-      if (typeof target !== "string") {
-        return {
-          kind: "error",
-          error: {
-            code: "invalid-file-target",
-            message: `文件引用 ${reference.id} 的目标必须是路径文本或 file: URL。`,
-          },
-        };
-      }
-      let absolutePath: string;
-      try {
-        absolutePath = resolveTarget(target, context.root);
-      } catch (error) {
-        return {
-          kind: "error",
-          error: {
-            code: "invalid-file-target",
-            message: error instanceof Error ? error.message : String(error),
-          },
-        };
-      }
-
-      try {
-        const text = await readFile(absolutePath, "utf8");
-        const displayPath = relative(context.root, absolutePath);
-        return {
-          kind: "value",
-          value: text,
-          range: {
-            path: displayPath === "" ? "." : displayPath,
-            start: 0,
-            end: text.length,
-          },
-        };
-      } catch (error) {
-        const code = hasCode(error, "ENOENT")
-          ? "missing-file"
-          : "file-read-failed";
-        const message = error instanceof Error ? error.message : String(error);
-        return {
-          kind: "error",
-          error: {
-            code,
-            message: `无法读取文件 ${displayTarget(absolutePath, context.root)}：${message}`,
-          },
-          range: {
-            path: displayTarget(absolutePath, context.root),
-            start: 0,
-            end: 0,
-          },
-        };
-      }
-    },
+const implementation = definePlugin({
+  id: filePluginId,
+  validate(reference: FileReference): void {
+    try {
+      assertFileTarget(reference.target);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new TypeError(`文件引用 ${reference.id} 的目标无效：${message}`, {
+        cause: error,
+      });
+    }
+    try {
+      assertFileSelection(reference.selection);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new TypeError(
+        `文件引用 ${reference.id} 的 selection 无效：${message}`,
+        { cause: error },
+      );
+    }
   },
-);
+  async collect(
+    reference: FileReference,
+    context: PluginContext,
+  ): Promise<PluginResult<JsonValue>> {
+    try {
+      const result = await readFileReference(reference, context.root);
+      return {
+        kind: "value",
+        value: result.value,
+        ...(result.range === undefined ? {} : { range: result.range }),
+      };
+    } catch (error) {
+      const range =
+        error instanceof FileReferenceError ? error.range : undefined;
+      return {
+        kind: "error",
+        error: {
+          code: fileReferenceErrorCode(error),
+          message: error instanceof Error ? error.message : String(error),
+        },
+        ...(range === undefined ? {} : { range }),
+      };
+    }
+  },
+  async read(
+    reference: FileReference,
+    context: PluginContext,
+  ): Promise<PluginReadResult<JsonValue>> {
+    return await readFileReference(reference, context.root);
+  },
+});
 
 export const file: FilePlugin = {
   ...implementation,
   from(target: string | URL): FileReferenceBuilder {
     assertFileTarget(target);
     const normalizedTarget = target instanceof URL ? target.href : target;
-    return {
-      reference<Id extends string>(
-        id: Id,
-        options: FileReferenceOptions = {},
-      ): Reference<typeof filePluginId, Id, string, string> {
-        if (Object.hasOwn(options, "selection")) {
-          throw new TypeError(
-            "普通文件引用当前只支持全文，不能传入 selection。",
-          );
-        }
-        return createReference<typeof filePluginId, Id, string, string>(
-          filePluginId,
-          id,
-          normalizedTarget,
-          {
-            ...(options.note === undefined ? {} : { note: options.note }),
-            ...(options.declaredAt === undefined
-              ? {}
-              : { declaredAt: options.declaredAt }),
-          },
-        );
-      },
-    };
+    return createFileBuilder(normalizedTarget);
   },
 };
+
+function createFileBuilder(target: string): FileReferenceBuilder {
+  return {
+    ...createTextBuilder(target, []),
+    exists(): FileExistsReferenceBuilder {
+      return {
+        reference<Id extends string>(
+          id: Id,
+          options: FileReferenceOptions = {},
+        ): FileReference<Id, true, FileExistsSelection> {
+          return createFileReference<Id, true, FileExistsSelection>(
+            target,
+            id,
+            options,
+            {
+              kind: "exists",
+            },
+          );
+        },
+      };
+    },
+    reference<Id extends string>(
+      id: Id,
+      options: FileReferenceOptions = {},
+    ): FileReference<Id, string, never> {
+      return createFileReference<Id, string, never>(
+        target,
+        id,
+        options,
+        undefined,
+      );
+    },
+  };
+}
+
+function createTextBuilder(
+  target: string,
+  steps: readonly TextSelectionStep[],
+): FileTextReferenceBuilder<FileTextSelection> {
+  const selection = {
+    kind: "text",
+    steps: [...steps],
+  } satisfies FileTextSelection;
+  return {
+    quote(text: string): FileTextReferenceBuilder<FileTextSelection> {
+      return createTextBuilder(target, [...steps, { kind: "quote", text }]);
+    },
+    match(
+      pattern: string,
+      group?: number,
+    ): FileTextReferenceBuilder<FileTextSelection> {
+      return createTextBuilder(target, [
+        ...steps,
+        { kind: "match", pattern, ...(group === undefined ? {} : { group }) },
+      ]);
+    },
+    region(name: string): FileTextReferenceBuilder<FileTextSelection> {
+      return createTextBuilder(target, [...steps, { kind: "region", name }]);
+    },
+    reference<Id extends string>(
+      id: Id,
+      options: FileReferenceOptions = {},
+    ): FileReference<Id, string, FileTextSelection> {
+      return createFileReference<Id, string, FileTextSelection>(
+        target,
+        id,
+        options,
+        selection,
+      );
+    },
+  };
+}
+
+function createFileReference<
+  Id extends string,
+  Value extends JsonValue,
+  Selection extends JsonValue,
+>(
+  target: string,
+  id: Id,
+  options: FileReferenceOptions,
+  selection: Selection | undefined,
+): FileReference<Id, Value, Selection> {
+  if (Object.hasOwn(options, "selection")) {
+    throw new TypeError("普通文件引用的 selection 必须通过公开定位器构造。");
+  }
+  return createReference<typeof filePluginId, Id, string, Value, Selection>(
+    filePluginId,
+    id,
+    target,
+    {
+      ...(selection === undefined ? {} : { selection }),
+      ...(options.note === undefined ? {} : { note: options.note }),
+      ...(options.declaredAt === undefined
+        ? {}
+        : { declaredAt: options.declaredAt }),
+    },
+  );
+}
+
+class FileReferenceError extends Error {
+  readonly code: string;
+  readonly range: PluginReadResult["range"];
+
+  constructor(
+    code: string,
+    message: string,
+    range?: PluginReadResult["range"],
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = "FileReferenceError";
+    this.code = code;
+    this.range = range;
+  }
+}
+
+async function readFileReference(
+  reference: FileReference,
+  root: string,
+): Promise<PluginReadResult<JsonValue>> {
+  let absolutePath: string;
+  try {
+    assertFileTarget(reference.target);
+    absolutePath = resolveTarget(reference.target, root);
+  } catch (error) {
+    throw new FileReferenceError(
+      "invalid-file-target",
+      error instanceof Error ? error.message : String(error),
+      undefined,
+      { cause: error },
+    );
+  }
+
+  let selection: FileSelection | undefined;
+  try {
+    selection = decodeFileSelection(reference.selection);
+  } catch (error) {
+    throw new FileReferenceError(
+      "invalid-file-selection",
+      `文件引用 ${reference.id} 的 selection 无效：${error instanceof Error ? error.message : String(error)}`,
+      undefined,
+      { cause: error },
+    );
+  }
+
+  const path = displayTarget(absolutePath, root);
+  if (selection?.kind === "exists") {
+    try {
+      await access(absolutePath);
+      return { value: true };
+    } catch (error) {
+      const code = hasCode(error, "ENOENT")
+        ? "missing-file"
+        : "file-read-failed";
+      throw new FileReferenceError(
+        code,
+        `无法读取文件 ${path}：${error instanceof Error ? error.message : String(error)}`,
+        undefined,
+        { cause: error },
+      );
+    }
+  }
+
+  let text: string;
+  try {
+    text = await readFile(absolutePath, "utf8");
+  } catch (error) {
+    const code = hasCode(error, "ENOENT") ? "missing-file" : "file-read-failed";
+    throw new FileReferenceError(
+      code,
+      `无法读取文件 ${path}：${error instanceof Error ? error.message : String(error)}`,
+      undefined,
+      { cause: error },
+    );
+  }
+
+  let selectedRange = { path, start: 0, end: text.length };
+  if (selection?.kind === "text") {
+    try {
+      for (const step of selection.steps) {
+        selectedRange = selectTextRange(text, selectedRange, step);
+      }
+    } catch (error) {
+      const code = isTextSelectionError(error)
+        ? error.code
+        : "file-selection-failed";
+      throw new FileReferenceError(
+        code,
+        error instanceof Error ? error.message : String(error),
+        { path, start: 0, end: text.length },
+        { cause: error },
+      );
+    }
+  }
+
+  return {
+    value: text.slice(selectedRange.start, selectedRange.end),
+    range: selectedRange,
+  };
+}
+
+function fileReferenceErrorCode(error: unknown): string {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof error.code === "string"
+  ) {
+    return error.code;
+  }
+  return "file-selection-failed";
+}
 
 function assertFileTarget(target: unknown): asserts target is string | URL {
   if (typeof target === "string") {
@@ -179,6 +371,61 @@ function assertFileTarget(target: unknown): asserts target is string | URL {
   }
 }
 
+function assertFileSelection(value: JsonValue | undefined): void {
+  if (value === undefined) return;
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    value.kind === "exists" &&
+    Object.keys(value).length === 1
+  ) {
+    return;
+  }
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    value.kind === "text" &&
+    Object.keys(value).length === 2 &&
+    Array.isArray(value.steps) &&
+    value.steps.length > 0 &&
+    value.steps.every(isTextSelectionStep)
+  ) {
+    return;
+  }
+  throw new TypeError("普通文件 selection 必须是合法的文本或存在性选择。");
+}
+
+function decodeFileSelection(
+  value: JsonValue | undefined,
+): FileSelection | undefined {
+  assertFileSelection(value);
+  return value === undefined ? undefined : (value as FileSelection);
+}
+
+function isTextSelectionStep(
+  value: JsonValue,
+): value is JsonValue & TextSelectionStep {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  if (value.kind === "quote") {
+    return typeof value.text === "string" && Object.keys(value).length === 2;
+  }
+  if (value.kind === "match") {
+    return (
+      typeof value.pattern === "string" &&
+      (value.group === undefined || typeof value.group === "number") &&
+      Object.keys(value).length === (value.group === undefined ? 2 : 3)
+    );
+  }
+  if (value.kind === "region") {
+    return typeof value.name === "string" && Object.keys(value).length === 2;
+  }
+  return false;
+}
+
 function resolveTarget(target: string, root: string): string {
   if (target.startsWith("file:")) return fileURLToPath(new URL(target));
   return isAbsolute(target) ? target : resolve(root, target);
@@ -197,3 +444,10 @@ function hasCode(error: unknown, code: string): boolean {
     error.code === code
   );
 }
+
+function isTextSelectionError(error: unknown): error is TextSelectionError {
+  return error instanceof TextSelectionError;
+}
+
+export { selectTextRange, TextSelectionError } from "./text-selection.ts";
+export type { TextSelectionStep } from "./text-selection.ts";
