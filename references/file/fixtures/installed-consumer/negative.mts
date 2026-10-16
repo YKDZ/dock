@@ -4,6 +4,7 @@ import {
   createReference,
   defineConfig,
   definePlugin,
+  type PluginReadResult,
   type PluginResult,
   type Reference,
   type ReferencePlugin,
@@ -53,6 +54,49 @@ const invalidPlugin = {
 } satisfies ReferencePlugin<"typed-plugin", StringFactReference, string>;
 
 definePlugin(invalidPlugin);
+
+type StringReaderReference = Reference<
+  "typed-reader",
+  "string-reader",
+  string,
+  string
+>;
+
+// @ts-expect-error 插件采集成功值必须符合引用声明的 string 类型。
+const inconsistentCollector = definePlugin({
+  id: "typed-collector",
+  validate(_reference: StringReaderReference): void {},
+  collect(_reference: StringReaderReference): PluginResult<number> {
+    return { kind: "value", value: 42 };
+  },
+});
+void inconsistentCollector;
+
+// @ts-expect-error 插件读取成功值必须符合引用声明的 string 类型。
+const inconsistentReader = definePlugin({
+  id: "typed-reader",
+  validate(_reference: StringReaderReference): void {},
+  collect(_reference: StringReaderReference): PluginResult<string> {
+    return { kind: "value", value: "correct" };
+  },
+  read(_reference: StringReaderReference): PluginReadResult<number> {
+    return { value: 42 };
+  },
+});
+void inconsistentReader;
+
+const directConfigMismatch = {
+  id: "typed-direct-config",
+  validate(_reference: StringReaderReference): void {},
+  collect(_reference: StringReaderReference): PluginResult<number> {
+    return { kind: "value", value: 42 };
+  },
+  read(_reference: StringReaderReference): PluginReadResult<number> {
+    return { value: 42 };
+  },
+};
+// @ts-expect-error defineConfig 也必须拒绝未经过 definePlugin 的错配实现。
+defineConfig({ plugins: [directConfigMismatch], bindings: [] });
 
 const invalidCollection: PluginResult<string> = {
   kind: "collection",
