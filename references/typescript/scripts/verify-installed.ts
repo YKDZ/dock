@@ -269,6 +269,22 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   );
   assert.equal(targetUpdate.code, 0, targetUpdate.stderr);
   const targetBaseline = await readFile(baselinePath);
+  const currentFile = await runDock(
+    bin,
+    [
+      "check",
+      "--config",
+      "dock.config.mjs",
+      "--file",
+      "symbol-copy.ts",
+      "--json",
+    ],
+    consumer,
+    { DOCK_SYMBOL_TARGET: "symbol-copy.ts" },
+  );
+  assert.equal(currentFile.code, 0, currentFile.stderr);
+  assert.equal(parseEnvelope(currentFile.stdout).variant, "consistent");
+  assert.deepEqual(readReport(currentFile.stdout).scope, ["typescript-policy"]);
 
   const selectionChange = await runDock(
     bin,

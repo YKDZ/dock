@@ -74,6 +74,7 @@ async function main(): Promise<void> {
     await verifyInstalledInlineScript(consumer);
     await verifyInstalledEmptyCells(consumer);
     await verifyInstalledCli(consumer);
+    await verifyInstalledScope(consumer);
     process.stdout.write("Markdown 安装制品公开类型、读取与 CLI 验收通过。\n");
   } finally {
     await rm(consumer, { recursive: true, force: true });
@@ -128,10 +129,87 @@ async function copyFixtures(consumer: string): Promise<void> {
     "negative.mts",
     "positive.mts",
     "runtime.mjs",
+    "scope.config.mjs",
     "tsconfig.json",
   ]) {
     await copyFile(join(fixtureDirectory, name), join(consumer, name));
   }
+}
+
+async function verifyInstalledScope(consumer: string): Promise<void> {
+  const bin = join(
+    consumer,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "dock.cmd" : "dock",
+  );
+  const oldTarget = "scope-old.md";
+  const newTarget = "scope-new.md";
+  const source = await readFile(join(consumer, "guide.md"));
+  await writeFile(join(consumer, oldTarget), source);
+  await writeFile(join(consumer, newTarget), source);
+
+  const initial = await runDock(
+    bin,
+    ["baseline", "update", "--config", "scope.config.mjs", "--json"],
+    consumer,
+    { DOCK_MARKDOWN_SCOPE_TARGET: oldTarget },
+  );
+  assert.equal(initial.code, 0, initial.stderr);
+  assert.equal(parseEnvelope(initial.stdout).variant, "updated");
+
+  const historical = await runDock(
+    bin,
+    ["check", "--config", "scope.config.mjs", "--file", oldTarget, "--json"],
+    consumer,
+    { DOCK_MARKDOWN_SCOPE_TARGET: newTarget },
+  );
+  assert.equal(historical.code, 1, historical.stderr);
+  assert.equal(parseEnvelope(historical.stdout).variant, "changed");
+  assert.deepEqual(readReport(historical.stdout).scope, [
+    "scope-markdown-policy",
+  ]);
+
+  const current = await runDock(
+    bin,
+    ["check", "--config", "scope.config.mjs", "--file", newTarget, "--json"],
+    consumer,
+    { DOCK_MARKDOWN_SCOPE_TARGET: newTarget },
+  );
+  assert.equal(current.code, 1, current.stderr);
+  assert.equal(parseEnvelope(current.stdout).variant, "changed");
+  assert.deepEqual(readReport(current.stdout).scope, ["scope-markdown-policy"]);
+
+  const localUpdate = await runDock(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "scope.config.mjs",
+      "--file",
+      oldTarget,
+      "--json",
+    ],
+    consumer,
+    { DOCK_MARKDOWN_SCOPE_TARGET: newTarget },
+  );
+  assert.equal(localUpdate.code, 0, localUpdate.stderr);
+  assert.deepEqual(readReport(localUpdate.stdout).scope, [
+    "scope-markdown-policy",
+  ]);
+
+  const consistent = await runDock(
+    bin,
+    ["check", "--config", "scope.config.mjs", "--file", newTarget, "--json"],
+    consumer,
+    { DOCK_MARKDOWN_SCOPE_TARGET: newTarget },
+  );
+  assert.equal(consistent.code, 0, consistent.stderr);
+  assert.equal(parseEnvelope(consistent.stdout).variant, "consistent");
+  assert.deepEqual(readReport(consistent.stdout).scope, [
+    "scope-markdown-policy",
+  ]);
 }
 
 async function verifyInstalledTypes(consumer: string): Promise<void> {
