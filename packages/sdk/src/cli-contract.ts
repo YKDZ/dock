@@ -1,4 +1,8 @@
-import type { BaselineUpdateIssue, BindingCheckResult } from "@dock/core";
+import type {
+  BaselineUpdateIssue,
+  BindingCheckResult,
+  TextRange,
+} from "@dock/core";
 import {
   defineCli,
   helpCapability,
@@ -18,6 +22,9 @@ const updateIssueSchema = z.object({
   memberId: z.string().optional(),
   code: z.string(),
   message: z.string(),
+  range: z
+    .object({ path: z.string(), start: z.number(), end: z.number() })
+    .optional(),
 });
 const rejectedUpdatePayload = z.object({
   report: z.unknown(),
@@ -243,7 +250,7 @@ function formatRejectedUpdate(
       .filter(Boolean)
       .join(" / ");
     lines.push(
-      `更新错误${identity === "" ? "" : ` ${identity}`}（${error.code}）：${error.message}`,
+      `更新错误${identity === "" ? "" : ` ${identity}`}（${error.code}）${formatRange(error.range)}：${error.message}`,
     );
   }
   return lines;
@@ -257,7 +264,7 @@ function formatBinding(binding: BindingCheckResult): string[] {
         .filter(Boolean)
         .join(" / ");
       lines.push(
-        `错误${identity === "" ? "" : ` ${identity}`}（${error.code}）：${error.message}`,
+        `错误${identity === "" ? "" : ` ${identity}`}（${error.code}）${formatRange(error.range)}：${error.message}`,
       );
     }
     return lines;
@@ -283,6 +290,12 @@ function formatBinding(binding: BindingCheckResult): string[] {
     }
   }
   return lines;
+}
+
+function formatRange(range: TextRange | undefined): string {
+  return range === undefined
+    ? ""
+    : `（${range.path}，文本偏移 ${range.start}–${range.end}）`;
 }
 
 function describeChange(change: BindingCheckResult["changes"][number]): string {

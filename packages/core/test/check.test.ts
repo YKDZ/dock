@@ -185,6 +185,11 @@ void test("必需引用缺少、重复或返回错误时整条关联无法判定
     throw new Error("重复事实应产生核对错误。");
   assert.equal(duplicateResult.errors[0]?.code, "ambiguous-evidence");
 
+  const failureRange: TextRange = {
+    path: "docs/config/preview-options.md",
+    start: 441,
+    end: 462,
+  };
   const failed = check({
     references,
     bindings,
@@ -194,6 +199,7 @@ void test("必需引用缺少、重复或返回错误时整条关联无法判定
       {
         referenceId: "preview-port-file",
         error: { code: "missing-file", message: "配置文件无法读取。" },
+        range: failureRange,
       },
     ],
     baseline: updated.baseline,
@@ -202,6 +208,9 @@ void test("必需引用缺少、重复或返回错误时整条关联无法判定
   if (!("errors" in failedResult))
     throw new Error("引用读取错误应产生核对错误。");
   assert.equal(failedResult.errors[0]?.code, "missing-file");
+  assert.deepEqual(failedResult.errors[0]?.range, failureRange);
+  failureRange.start = 0;
+  assert.equal(failedResult.errors[0]?.range?.start, 441);
 });
 
 void test("完整成员清单按稳定 ID 比较，更新基线增删后可再次核对", () => {

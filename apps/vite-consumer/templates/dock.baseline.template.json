@@ -1,0 +1,192 @@
+{
+  "version": 2,
+  "bindings": {
+    "static-local-workflow": {
+      "definition": {
+        "id": "static-local-workflow",
+        "references": [
+          "static-build-command",
+          "static-build-output",
+          "static-deploy-workflow",
+          "static-local-prerequisite",
+          "static-local-scripts",
+          "static-preview-command",
+          "static-preview-order"
+        ]
+      },
+      "references": {
+        "static-build-command": {
+          "definition": {
+            "id": "static-build-command",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "docs/guide/static-deploy.md",
+              "fileInfo": "__VITE_CHECKOUT_ROOT__/docs/guide/static-deploy.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "section",
+                  "heading": "Building the App"
+                },
+                {
+                  "kind": "node",
+                  "selector": {
+                    "type": "code",
+                    "contains": "$ npm run build"
+                  }
+                }
+              ]
+            }
+          },
+          "value": "```bash\n$ npm run build\n```"
+        },
+        "static-build-output": {
+          "definition": {
+            "id": "static-build-output",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "docs/guide/static-deploy.md",
+              "fileInfo": "__VITE_CHECKOUT_ROOT__/docs/guide/static-deploy.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "node",
+                  "selector": {
+                    "type": "paragraph",
+                    "contains": "By default, the build output will be placed"
+                  }
+                }
+              ]
+            }
+          },
+          "value": "By default, the build output will be placed at `dist`. You may deploy this `dist` folder to any of your preferred platforms."
+        },
+        "static-deploy-workflow": {
+          "definition": {
+            "id": "static-deploy-workflow",
+            "target": {
+              "pluginId": "@dock/reference-vitest",
+              "target": {
+                "kind": "vitest-test-status",
+                "run": {
+                  "identity": "Vite 静态部署流程",
+                  "files": [
+                    "packages/vite/src/node/__tests__/static-deploy.spec.ts"
+                  ],
+                  "testRoot": ".",
+                  "configFile": "vitest.config.ts"
+                },
+                "file": "packages/vite/src/node/__tests__/static-deploy.spec.ts",
+                "name": "本地静态部署 > 新鲜构建的 HTML 和资源可经预览服务读取"
+              },
+              "fileInfo": "__VITE_CHECKOUT_ROOT__/packages/vite/src/node/__tests__/static-deploy.spec.ts"
+            }
+          },
+          "value": {
+            "status": "passed"
+          }
+        },
+        "static-local-prerequisite": {
+          "definition": {
+            "id": "static-local-prerequisite",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "docs/guide/static-deploy.md",
+              "fileInfo": "__VITE_CHECKOUT_ROOT__/docs/guide/static-deploy.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "node",
+                  "selector": {
+                    "type": "paragraph",
+                    "contains": "Vite is installed as a local dev dependency"
+                  }
+                }
+              ]
+            }
+          },
+          "value": "Vite is installed as a local dev dependency in your project, and you have setup the following npm scripts:"
+        },
+        "static-local-scripts": {
+          "definition": {
+            "id": "static-local-scripts",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "docs/guide/static-deploy.md",
+              "fileInfo": "__VITE_CHECKOUT_ROOT__/docs/guide/static-deploy.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "node",
+                  "selector": {
+                    "type": "code",
+                    "contains": "\"build\": \"vite build\""
+                  }
+                }
+              ]
+            }
+          },
+          "value": "```json [package.json]\n{\n  \"scripts\": {\n    \"build\": \"vite build\",\n    \"preview\": \"vite preview\"\n  }\n}\n```"
+        },
+        "static-preview-command": {
+          "definition": {
+            "id": "static-preview-command",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "docs/guide/static-deploy.md",
+              "fileInfo": "__VITE_CHECKOUT_ROOT__/docs/guide/static-deploy.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "section",
+                  "heading": "Testing the App Locally"
+                },
+                {
+                  "kind": "node",
+                  "selector": {
+                    "type": "code",
+                    "contains": "$ npm run preview"
+                  }
+                }
+              ]
+            }
+          },
+          "value": "```bash\n$ npm run preview\n```"
+        },
+        "static-preview-order": {
+          "definition": {
+            "id": "static-preview-order",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "docs/guide/static-deploy.md",
+              "fileInfo": "__VITE_CHECKOUT_ROOT__/docs/guide/static-deploy.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "node",
+                  "selector": {
+                    "type": "paragraph",
+                    "contains": "After building the app"
+                  }
+                }
+              ]
+            }
+          },
+          "value": "After building the app, you can test it locally by running `npm run preview` command."
+        }
+      }
+    }
+  }
+}

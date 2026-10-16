@@ -147,6 +147,9 @@ function collectCurrent(
         referenceId,
         code: fact.error.code,
         message: fact.error.message,
+        ...(fact.range === undefined
+          ? {}
+          : { range: structuredClone(fact.range) }),
       });
       continue;
     }

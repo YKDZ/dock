@@ -120,6 +120,7 @@ export type CheckError = {
   memberId?: string;
   code: string;
   message: string;
+  range?: TextRange;
 };
 type BindingCheckResultBase = { bindingId: string; changes: BindingChange[] };
 export type BindingCheckResult =

@@ -1,0 +1,24 @@
+--- a/package.json
++++ b/package.json
+@@ -28,6 +28,9 @@
+     "test-serve-bundled": "VITE_TEST_BUNDLED_DEV=1 vitest run -c vitest.config.e2e.ts",
+     "test-build": "VITE_TEST_BUILD=1 vitest run -c vitest.config.e2e.ts",
+     "test-unit": "vitest run",
++    "dock:typecheck": "tsc -p tsconfig.dock.json --noEmit --pretty false",
++    "dock:check": "pnpm run dock:typecheck && pnpm exec dock check --config dock.config.ts",
++    "dock:baseline:update": "pnpm run dock:typecheck && pnpm exec dock baseline update --config dock.config.ts",
+     "test-docs": "pnpm run docs-build",
+     "debug-serve": "VITE_DEBUG_SERVE=1 vitest run -c vitest.config.e2e.ts",
+     "debug-build": "VITE_TEST_BUILD=1 VITE_PRESERVE_BUILD_ARTIFACTS=1 vitest run -c vitest.config.e2e.ts",
+@@ -41,6 +44,11 @@
+     "merge-changelog": "tsx scripts/mergeChangelog.ts"
+   },
+   "devDependencies": {
++    "@dock/core": "file:.dock-tools/dock-core-0.0.0.tgz",
++    "@dock/reference-file": "file:.dock-tools/dock-reference-file-0.0.0.tgz",
++    "@dock/reference-markdown": "file:.dock-tools/dock-reference-markdown-0.0.0.tgz",
++    "@dock/reference-vitest": "file:.dock-tools/dock-reference-vitest-0.0.0.tgz",
++    "@dock/sdk": "file:.dock-tools/dock-sdk-0.0.0.tgz",
+     "@e18e/eslint-plugin": "^0.8.1",
+     "@eslint/js": "^9.39.5",
+     "@type-challenges/utils": "^0.1.1",

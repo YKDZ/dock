@@ -1,0 +1,27 @@
+{
+  "name": "@dock/consumer-vite",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "devDependencies": {
+    "@dock/reference-markdown": "workspace:*",
+    "@dock/reference-vitest": "workspace:*",
+    "@dock/sdk": "workspace:*",
+    "@dock/typescript-config": "workspace:*",
+    "@types/node": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:",
+    "vitest": "5.0.3"
+  },
+  "engines": {
+    "node": "24.21.0"
+  }
+}
