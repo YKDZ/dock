@@ -282,7 +282,7 @@ function formatReport(report: CheckReport): [string, ...string[]] {
           ? ""
           : `，范围 ${read.range.path}:${read.range.start}-${read.range.end}`;
       lines.push(
-        `测试内读取 ${read.referenceId}（运行 ${read.runId} / 测试 ${read.testId}）：${JSON.stringify(read.value)}${range}`,
+        `测试内读取 ${read.referenceId}（运行 ${read.runId} / 测试 ${read.testId} / 尝试 ${read.attempt}）：${JSON.stringify(read.value)}${range}`,
       );
     }
   }
