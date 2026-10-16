@@ -1,0 +1,263 @@
+{
+  "version": 2,
+  "bindings": {
+    "keep-observation": {
+      "definition": {
+        "id": "keep-observation",
+        "references": [
+          "@observation:keep-case:result",
+          "keep-case",
+          "keep-return-doc"
+        ],
+        "note": "样例对象的实际返回值和对象身份；不证明所有泛型输入或 UI 行为。"
+      },
+      "references": {
+        "@observation:keep-case:result": {
+          "definition": {
+            "id": "@observation:keep-case:result",
+            "target": {
+              "pluginId": "@dock/reference-vitest",
+              "target": {
+                "kind": "vitest-test-observation",
+                "run": {
+                  "identity": "keep-tests",
+                  "files": ["src/__tests__/utils.test.tsx"],
+                  "testRoot": ".",
+                  "configFile": "vite.config.ts",
+                  "observationKeys": ["result"]
+                },
+                "file": "src/__tests__/utils.test.tsx",
+                "name": "core/utils > keepPreviousData > should return the parameter as is",
+                "key": "result",
+                "historicalSelection": {
+                  "execution": {
+                    "command": "pnpm",
+                    "args": [
+                      "exec",
+                      "nx",
+                      "run",
+                      "@tanstack/query-core:test:lib",
+                      "--skip-nx-cache",
+                      "--",
+                      "--run"
+                    ],
+                    "env": {},
+                    "timeoutMs": 30000,
+                    "evidenceRoot": "packages/query-core",
+                    "forwardedArguments": "posix-shell"
+                  },
+                  "prerequisites": []
+                }
+              },
+              "fileInfo": "__QUERY_CHECKOUT_ROOT__/packages/query-core/src/__tests__/utils.test.tsx"
+            }
+          },
+          "value": {
+            "returned": {
+              "a": 1,
+              "b": 2
+            },
+            "sameReference": true
+          }
+        },
+        "keep-case": {
+          "definition": {
+            "id": "keep-case",
+            "target": {
+              "pluginId": "@dock/reference-vitest",
+              "target": {
+                "kind": "vitest-test-status",
+                "run": {
+                  "identity": "keep-tests",
+                  "files": ["src/__tests__/utils.test.tsx"],
+                  "testRoot": ".",
+                  "configFile": "vite.config.ts",
+                  "observationKeys": ["result"]
+                },
+                "file": "src/__tests__/utils.test.tsx",
+                "name": "core/utils > keepPreviousData > should return the parameter as is",
+                "historicalSelection": {
+                  "execution": {
+                    "command": "pnpm",
+                    "args": [
+                      "exec",
+                      "nx",
+                      "run",
+                      "@tanstack/query-core:test:lib",
+                      "--skip-nx-cache",
+                      "--",
+                      "--run"
+                    ],
+                    "env": {},
+                    "timeoutMs": 30000,
+                    "evidenceRoot": "packages/query-core",
+                    "forwardedArguments": "posix-shell"
+                  },
+                  "prerequisites": []
+                }
+              },
+              "fileInfo": "__QUERY_CHECKOUT_ROOT__/packages/query-core/src/__tests__/utils.test.tsx"
+            }
+          },
+          "value": {
+            "status": "passed"
+          }
+        },
+        "keep-return-doc": {
+          "definition": {
+            "id": "keep-return-doc",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "../../docs/framework/react/reference/functions/keepPreviousData.md",
+              "fileInfo": "__QUERY_CHECKOUT_ROOT__/docs/framework/react/reference/functions/keepPreviousData.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "section",
+                  "heading": "Returns"
+                },
+                {
+                  "kind": "quote",
+                  "text": "The previous data is returned unchanged."
+                }
+              ]
+            }
+          },
+          "value": "The previous data is returned unchanged."
+        }
+      }
+    },
+    "keep-source": {
+      "definition": {
+        "id": "keep-source",
+        "references": ["keep-function", "keep-return-doc"],
+        "note": "函数完整符号源码；正常重构也需审阅，不推断语义等价。"
+      },
+      "references": {
+        "keep-function": {
+          "definition": {
+            "id": "keep-function",
+            "target": {
+              "pluginId": "@dock/reference-typescript",
+              "target": "src/utils.ts",
+              "fileInfo": "__QUERY_CHECKOUT_ROOT__/packages/query-core/src/utils.ts"
+            },
+            "selection": {
+              "kind": "typescript",
+              "steps": [
+                {
+                  "kind": "symbol",
+                  "name": ["keepPreviousData"],
+                  "declaration": "function"
+                }
+              ]
+            }
+          },
+          "value": "export function keepPreviousData<T>(\n  previousData: T | undefined,\n): T | undefined {\n  return previousData\n}"
+        },
+        "keep-return-doc": {
+          "definition": {
+            "id": "keep-return-doc",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "../../docs/framework/react/reference/functions/keepPreviousData.md",
+              "fileInfo": "__QUERY_CHECKOUT_ROOT__/docs/framework/react/reference/functions/keepPreviousData.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "section",
+                  "heading": "Returns"
+                },
+                {
+                  "kind": "quote",
+                  "text": "The previous data is returned unchanged."
+                }
+              ]
+            }
+          },
+          "value": "The previous data is returned unchanged."
+        }
+      }
+    },
+    "keep-status": {
+      "definition": {
+        "id": "keep-status",
+        "references": ["keep-case", "keep-return-doc"],
+        "note": "只比较原生测试状态；不能发现实现与测试预期同步改变后仍通过。"
+      },
+      "references": {
+        "keep-case": {
+          "definition": {
+            "id": "keep-case",
+            "target": {
+              "pluginId": "@dock/reference-vitest",
+              "target": {
+                "kind": "vitest-test-status",
+                "run": {
+                  "identity": "keep-tests",
+                  "files": ["src/__tests__/utils.test.tsx"],
+                  "testRoot": ".",
+                  "configFile": "vite.config.ts",
+                  "observationKeys": ["result"]
+                },
+                "file": "src/__tests__/utils.test.tsx",
+                "name": "core/utils > keepPreviousData > should return the parameter as is",
+                "historicalSelection": {
+                  "execution": {
+                    "command": "pnpm",
+                    "args": [
+                      "exec",
+                      "nx",
+                      "run",
+                      "@tanstack/query-core:test:lib",
+                      "--skip-nx-cache",
+                      "--",
+                      "--run"
+                    ],
+                    "env": {},
+                    "timeoutMs": 30000,
+                    "evidenceRoot": "packages/query-core",
+                    "forwardedArguments": "posix-shell"
+                  },
+                  "prerequisites": []
+                }
+              },
+              "fileInfo": "__QUERY_CHECKOUT_ROOT__/packages/query-core/src/__tests__/utils.test.tsx"
+            }
+          },
+          "value": {
+            "status": "passed"
+          }
+        },
+        "keep-return-doc": {
+          "definition": {
+            "id": "keep-return-doc",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "../../docs/framework/react/reference/functions/keepPreviousData.md",
+              "fileInfo": "__QUERY_CHECKOUT_ROOT__/docs/framework/react/reference/functions/keepPreviousData.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "section",
+                  "heading": "Returns"
+                },
+                {
+                  "kind": "quote",
+                  "text": "The previous data is returned unchanged."
+                }
+              ]
+            }
+          },
+          "value": "The previous data is returned unchanged."
+        }
+      }
+    }
+  }
+}
