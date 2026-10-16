@@ -5,6 +5,7 @@ import type {
   Config,
   ConfigInput,
   DeclarationSource,
+  PluginIdentityMatches,
   Reference,
   ReferencePlugin,
   ReferenceValue,
@@ -98,6 +99,12 @@ type PluginReadValue<Plugin> = Plugin extends {
     : never
   : never;
 
+type PluginIdType<Plugin> = Plugin extends {
+  readonly id: infer PluginId extends string;
+}
+  ? PluginId
+  : string;
+
 type AcceptsPluginReference<Ref extends Reference, Accepted> = [
   Accepted,
 ] extends [never]
@@ -106,24 +113,30 @@ type AcceptsPluginReference<Ref extends Reference, Accepted> = [
     ? true
     : false;
 
+type PluginValueContractForReference<Plugin, Ref extends Reference> = [
+  PluginCollectedValue<Plugin>,
+] extends [ReferenceValue<Ref>]
+  ? AcceptsPluginReference<
+      Ref,
+      PluginReferenceArgument<Plugin, "collect">
+    > extends true
+    ? Plugin extends { readonly read: (...arguments_: never[]) => unknown }
+      ? [PluginReadValue<Plugin>] extends [ReferenceValue<Ref>]
+        ? AcceptsPluginReference<
+            Ref,
+            PluginReferenceArgument<Plugin, "read">
+          > extends true
+          ? unknown
+          : never
+        : never
+      : unknown
+    : never
+  : never;
+
 type PluginValueContract<Plugin> =
   PluginReferenceType<Plugin> extends infer Ref extends Reference
-    ? [PluginCollectedValue<Plugin>] extends [ReferenceValue<Ref>]
-      ? AcceptsPluginReference<
-          Ref,
-          PluginReferenceArgument<Plugin, "collect">
-        > extends true
-        ? Plugin extends { readonly read: (...arguments_: never[]) => unknown }
-          ? [PluginReadValue<Plugin>] extends [ReferenceValue<Ref>]
-            ? AcceptsPluginReference<
-                Ref,
-                PluginReferenceArgument<Plugin, "read">
-              > extends true
-              ? unknown
-              : never
-            : never
-          : unknown
-        : never
+    ? PluginIdentityMatches<PluginIdType<Plugin>, Ref> extends true
+      ? PluginValueContractForReference<Plugin, Ref>
       : never
     : never;
 
@@ -132,7 +145,7 @@ type ValidatedPlugins<Plugins extends readonly ReferencePlugin[]> = {
     PluginValueContract<NoInfer<Plugins[Index]>>;
 };
 
-export function definePlugin<Plugin extends ReferencePlugin>(
+export function definePlugin<const Plugin extends ReferencePlugin>(
   plugin: Plugin & PluginValueContract<Plugin>,
 ): Plugin {
   assertPlugin(plugin);
