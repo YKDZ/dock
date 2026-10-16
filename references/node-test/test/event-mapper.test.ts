@@ -140,7 +140,8 @@ test("活动测试的观察和读取按原生测试身份保留真实值与位�
           file,
           line: 28,
           column: 1,
-          message: 'dock:observation:{"key":"total","value":17}',
+          message:
+            'dock:observation:{"key":"total","value":17,"testFullName":"读取并观察当前值"}',
         },
       },
       {
@@ -151,7 +152,7 @@ test("活动测试的观察和读取按原生测试身份保留真实值与位�
           line: 28,
           column: 1,
           message:
-            'dock:read:{"referenceId":"business-copy","value":"🧭 active text","range":{"path":"guide.md","start":8,"end":22}}',
+            'dock:read:{"referenceId":"business-copy","value":"🧭 active text","range":{"path":"guide.md","start":8,"end":22},"testFullName":"读取并观察当前值"}',
         },
       },
       {
@@ -214,7 +215,7 @@ test("同一测试的重复观察保持可见而不被映射层去重", () => {
           entryFile: file,
           file,
           testId: 5,
-          message: `dock:observation:{"key":"same","value":${value}}`,
+          message: `dock:observation:{"key":"same","value":${value},"testFullName":"重复观察"}`,
         },
       })),
       {
@@ -247,4 +248,67 @@ test("同一测试的重复观察保持可见而不被映射层去重", () => {
     { key: "same", value: 1 },
     { key: "same", value: 1 },
   ]);
+});
+
+test("同一源码位置的活动按原生测试全名归属", () => {
+  const file = "/consumer/test/loop.test.mts";
+  const source = {
+    entryFile: file,
+    file,
+    line: 4,
+    column: 3,
+  };
+  const record = collectNodeRun(
+    [
+      ...[
+        { testId: 1, name: "alpha", value: 1 },
+        { testId: 2, name: "beta", value: 2 },
+      ].flatMap(({ testId, name, value }) => [
+        {
+          type: "test:enqueue",
+          data: {
+            ...source,
+            testId,
+            parentId: 0,
+            name,
+            type: "test",
+          },
+        },
+        {
+          type: "test:diagnostic",
+          data: {
+            ...source,
+            message: `dock:observation:{"key":"amount","value":${value},"testFullName":"${name}"}`,
+          },
+        },
+        {
+          type: "test:pass",
+          data: { ...source, testId, name },
+        },
+      ]),
+      {
+        type: "test:summary",
+        data: {
+          success: true,
+          counts: { tests: 2, failed: 0, cancelled: 0 },
+        },
+      },
+    ],
+    {
+      testRoot: "/consumer",
+      files: [file],
+      selectedTests: [
+        { file, name: "alpha" },
+        { file, name: "beta" },
+      ],
+      exitCode: 0,
+      signal: null,
+    },
+  );
+
+  assert.equal(record.lifecycle, "complete");
+  assert.deepEqual(
+    record.tests.map((test) => test.observations),
+    [[{ key: "amount", value: 1 }], [{ key: "amount", value: 2 }]],
+  );
 });

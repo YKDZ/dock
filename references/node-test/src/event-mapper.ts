@@ -80,7 +80,7 @@ export function collectNodeRun(
       event.type === "test:diagnostic"
         ? parseActivityMessage(data.message)
         : undefined;
-    const node = nodeForEvent(nodes, data);
+    const node = nodeForEvent(nodes, data, activity?.testFullName);
     if (node === undefined) {
       if (activity !== undefined) {
         invalidActivity = true;
@@ -297,10 +297,19 @@ function nodeFromEvent(
 type ParsedActivityMessage =
   | {
       readonly kind: "observation";
+      readonly testFullName: string;
       readonly record: ExecutionObservationRecord;
     }
-  | { readonly kind: "read"; readonly record: ExecutionReadRecord }
-  | { readonly kind: "invalid"; readonly message: string };
+  | {
+      readonly kind: "read";
+      readonly testFullName: string;
+      readonly record: ExecutionReadRecord;
+    }
+  | {
+      readonly kind: "invalid";
+      readonly message: string;
+      readonly testFullName?: string;
+    };
 
 function parseActivityMessage(
   value: unknown,
@@ -329,18 +338,34 @@ function parseActivityMessage(
     };
   }
 
+  const testFullName =
+    isRecord(payload) && typeof payload.testFullName === "string"
+      ? payload.testFullName
+      : undefined;
+  const invalid = (message: string): ParsedActivityMessage => ({
+    kind: "invalid",
+    message,
+    ...(testFullName === undefined ? {} : { testFullName }),
+  });
+  if (testFullName === undefined) {
+    return invalid("活动记录缺少原生测试名称。");
+  }
+
   if (kind === "observation") {
     if (
       !isRecord(payload) ||
       typeof payload.key !== "string" ||
       payload.key.length === 0 ||
       !Object.hasOwn(payload, "value") ||
-      Object.keys(payload).some((key) => key !== "key" && key !== "value")
+      Object.keys(payload).some(
+        (key) => key !== "key" && key !== "value" && key !== "testFullName",
+      )
     ) {
-      return { kind: "invalid", message: "观察记录必须包含键和值。" };
+      return invalid("观察记录必须包含键和值。");
     }
     return {
       kind,
+      testFullName,
       record: { key: payload.key, value: payload.value as JsonValue },
     };
   }
@@ -351,14 +376,19 @@ function parseActivityMessage(
     payload.referenceId.length === 0 ||
     !Object.hasOwn(payload, "value") ||
     Object.keys(payload).some(
-      (key) => key !== "referenceId" && key !== "value" && key !== "range",
+      (key) =>
+        key !== "referenceId" &&
+        key !== "value" &&
+        key !== "range" &&
+        key !== "testFullName",
     ) ||
     (payload.range !== undefined && !isTextRange(payload.range))
   ) {
-    return { kind: "invalid", message: "读取记录必须包含有效引用和值。" };
+    return invalid("读取记录必须包含有效引用和值。");
   }
   return {
     kind,
+    testFullName,
     record: {
       referenceId: payload.referenceId,
       value: payload.value as JsonValue,
@@ -385,6 +415,7 @@ function isTextRange(value: unknown): value is ExecutionReadRecord["range"] {
 function nodeForEvent(
   nodes: Map<string, NodeTestNode>,
   data: Record<string, unknown>,
+  testFullName?: string,
 ): NodeTestNode | undefined {
   if (
     (typeof data.testId === "number" || typeof data.testId === "string") &&
@@ -409,7 +440,11 @@ function nodeForEvent(
       node.line === data.line &&
       node.column === data.column,
   );
-  return matches.length === 1 ? matches[0] : undefined;
+  const candidates =
+    testFullName === undefined
+      ? matches
+      : matches.filter((node) => fullName(node, nodes) === testFullName);
+  return candidates.length === 1 ? candidates[0] : undefined;
 }
 
 function nodeKey(file: string, testId: string | number): string {

@@ -10,6 +10,7 @@ import {
 
 import {
   currentText,
+  currentAmount,
   numericObservation,
   objectObservation,
   readConfig,
@@ -31,6 +32,10 @@ test("读取当前值并记录观察", async () => {
     readConfig,
     currentText,
   );
+  const amountRead = await secondaryNodeTest.readReferenceInTest(
+    readConfig,
+    currentAmount,
+  );
   const source = await readFile(
     new URL("../../../read-business.txt", import.meta.url),
     "utf8",
@@ -39,6 +44,13 @@ test("读取当前值并记录观察", async () => {
   assert.ok(read.range !== undefined);
   assert.equal(read.range.start, source.indexOf(read.value));
   assert.equal(read.range.end, read.range.start + read.value.length);
+  assert.match(amountRead.value, /^\d+$/);
+  assert.ok(amountRead.range !== undefined);
+  assert.equal(amountRead.range.start, source.indexOf(amountRead.value));
+  assert.equal(
+    amountRead.range.end,
+    amountRead.range.start + amountRead.value.length,
+  );
 
   const unassociated = await secondaryNodeTest.readReferenceInTest(
     readConfig,
@@ -47,8 +59,9 @@ test("读取当前值并记录观察", async () => {
   assert.equal(unassociated.value, "独立当前内容");
   assert.ok(unassociated.range !== undefined);
 
-  const numeric = secondaryNumericObservation.record(read.value.length);
-  assert.equal(numeric, read.value.length);
+  const amount = Number(amountRead.value);
+  const numeric = secondaryNumericObservation.record(amount);
+  assert.equal(numeric, amount);
   const business = { amount: 17 };
   const recorded = secondaryObjectObservation.record(business);
   assert.strictEqual(recorded, business);

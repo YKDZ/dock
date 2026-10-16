@@ -55,6 +55,12 @@ type MaintenanceReport = {
   readonly bindings: readonly {
     readonly bindingId: string;
     readonly errors?: readonly { readonly code: string }[];
+    readonly changes?: readonly {
+      readonly kind: string;
+      readonly referenceId: string;
+      readonly before?: unknown;
+      readonly after?: unknown;
+    }[];
   }[];
 };
 
@@ -141,6 +147,7 @@ async function main(): Promise<void> {
     );
     await verifyHappyRoundTrip(bin, consumer);
     await verifyObservationAndReadScenarios(bin, consumer);
+    await verifyLoopObservedRegistrations(bin, consumer);
     await verifyEffectiveRoot(bin, consumer);
     await verifyOperationLocalExecution(consumer);
     await verifyFailureIsolation(bin, consumer);
@@ -152,7 +159,7 @@ async function main(): Promise<void> {
     await verifyOrdinaryNodeTest(consumer);
     await verifyNoFrameworkDependency(consumer);
     process.stdout.write(
-      "Node 原生观察、测试内读取、双份安装、维护往返与故障隔离验收通过。\n",
+      "Node 观察值 17→19 漂移、alpha/beta 同源循环归属、双份安装与故障隔离验收通过。\n",
     );
   } finally {
     await rm(temporary, { recursive: true, force: true });
@@ -287,7 +294,7 @@ async function verifyObservationAndReadScenarios(
   bin: string,
   consumer: string,
 ): Promise<void> {
-  const businessText = "😀—Reading: 温度 🧭：24\n";
+  const businessText = "😀—Reading: 温度 🧭：24\nAmount: 17\n";
   await writeFile(join(consumer, "read-business.txt"), businessText);
   await writeFile(
     join(consumer, "read-unassociated.txt"),
@@ -299,7 +306,7 @@ async function verifyObservationAndReadScenarios(
     ["baseline", "update", "--config", "observations.config.mts", "--json"],
     consumer,
   );
-  assert.equal(update.code, 0, update.stderr);
+  assert.equal(update.code, 0, `${update.stdout}\n${update.stderr}`);
   const updated = parseEnvelope(update.stdout);
   assert.equal(updated.variant, "updated");
   const updatedReport = requireReport(updated);
@@ -309,6 +316,12 @@ async function verifyObservationAndReadScenarios(
     "current-business-text",
     "温度 🧭：24",
     businessText.indexOf("温度 🧭：24"),
+  );
+  assertReadDiagnostic(
+    updatedReport,
+    "current-business-amount",
+    "17",
+    businessText.indexOf("17"),
   );
   assertReadDiagnostic(
     updatedReport,
@@ -341,6 +354,44 @@ async function verifyObservationAndReadScenarios(
   assert.match(textCheck.stdout, /温度 🧭：24/);
   assert.match(textCheck.stdout, /读取当前值并记录观察/);
   assert.match(textCheck.stdout, /read-business\.txt/);
+
+  const changedBusinessText = businessText.replace("Amount: 17", "Amount: 19");
+  await writeFile(join(consumer, "read-business.txt"), changedBusinessText);
+  const changed = await runDock(
+    bin,
+    ["check", "--config", "observations.config.mts", "--json"],
+    consumer,
+  );
+  const changedEnvelope = parseEnvelope(changed.stdout);
+  assert.equal(changedEnvelope.variant, "changed", changed.stderr);
+  const changedReport = requireReport(changedEnvelope);
+  assertExecutionSummary(changedReport, 1, 1);
+  const numericChange = changedReport.bindings
+    .flatMap((item) => item.changes ?? [])
+    .find((item) => item.kind === "fact" && item.referenceId === "当前金额");
+  assert.deepEqual(numericChange, {
+    kind: "fact",
+    referenceId: "当前金额",
+    before: 17,
+    after: 19,
+  });
+
+  const driftUpdate = await runDock(
+    bin,
+    ["baseline", "update", "--config", "observations.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(driftUpdate.code, 0, driftUpdate.stderr);
+  assert.equal(parseEnvelope(driftUpdate.stdout).variant, "updated");
+
+  const driftCheck = await runDock(
+    bin,
+    ["check", "--config", "observations.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(driftCheck.code, 0, driftCheck.stderr);
+  assert.equal(parseEnvelope(driftCheck.stdout).variant, "consistent");
+  assertExecutionSummary(requireReport(parseEnvelope(driftCheck.stdout)), 1, 1);
 
   const diagnostics = await runDock(
     bin,
@@ -376,6 +427,47 @@ async function verifyObservationAndReadScenarios(
   );
 
   await verifyReadFailureDiagnostics(bin, consumer);
+}
+
+async function verifyLoopObservedRegistrations(
+  bin: string,
+  consumer: string,
+): Promise<void> {
+  const update = await runDock(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "loop-observations.config.mts",
+      "--json",
+    ],
+    consumer,
+  );
+  assert.equal(update.code, 0, `${update.stdout}\n${update.stderr}`);
+  const updated = parseEnvelope(update.stdout);
+  assert.equal(updated.variant, "updated");
+  assertExecutionSummary(requireReport(updated), 1, 2);
+
+  const baseline = JSON.parse(
+    await readFile(join(consumer, "loop-observations.baseline.json"), "utf8"),
+  ) as {
+    readonly bindings: Record<
+      string,
+      { readonly references: Record<string, { readonly value: unknown }> }
+    >;
+  };
+  assert.equal(baseline.bindings.alpha?.references["alpha 观察"]?.value, 1);
+  assert.equal(baseline.bindings.beta?.references["beta 观察"]?.value, 2);
+
+  const check = await runDock(
+    bin,
+    ["check", "--config", "loop-observations.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(check.code, 0, check.stderr);
+  assert.equal(parseEnvelope(check.stdout).variant, "consistent");
+  assertExecutionSummary(requireReport(parseEnvelope(check.stdout)), 1, 2);
 }
 
 async function verifyReadFailureDiagnostics(

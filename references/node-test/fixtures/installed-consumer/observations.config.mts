@@ -14,6 +14,12 @@ export const currentText = file
   .match("Reading: (.*)", 1)
   .reference("current-business-text");
 
+export const currentAmount = file
+  .at(import.meta.url)
+  .from("./read-business.txt")
+  .match("Amount: (\\d+)", 1)
+  .reference("current-business-amount");
+
 export const unassociatedText = file
   .at(import.meta.url)
   .from("./read-unassociated.txt")
@@ -23,7 +29,7 @@ export const unassociatedText = file
 export const readConfig = defineConfig({ plugins: [file], bindings: [] });
 
 export const numericObservation = defineNodeTestObservation(
-  "business.length",
+  "business.amount",
   0,
 );
 export const objectObservation = defineNodeTestObservation("business.object", {
@@ -41,7 +47,7 @@ const target = {
 };
 const status = nodeTestStatus("观察读取测试状态", run, target);
 const numeric = nodeTestObservation(
-  "当前长度",
+  "当前金额",
   run,
   target,
   numericObservation,

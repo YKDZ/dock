@@ -51,7 +51,9 @@ function logActivity(
   operation: string,
 ): void {
   const context = activeTestContext(operation);
-  context.diagnostic(`${prefix}${JSON.stringify(record)}`);
+  context.diagnostic(
+    `${prefix}${JSON.stringify({ ...record, testFullName: context.fullName })}`,
+  );
 }
 
 function activeTestContext(operation: string) {
