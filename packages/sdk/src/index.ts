@@ -16,6 +16,7 @@ export type {
   ConfigInput,
   DeclarationSource,
   PluginContext,
+  PluginMemberResult,
   PluginReadResult,
   PluginResult,
   ReadableReferenceOf,
