@@ -1,7 +1,137 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { captureVitestCandidate, mapVitestRun } from "../src/event-mapper.ts";
+import {
+  captureVitestCandidate,
+  mapVitestRun,
+  testIdentity,
+} from "../src/event-mapper.ts";
+
+test("目录从原生 parent/name 恢复嵌套路径并保留执行身份", () => {
+  const outer = {
+    type: "suite",
+    name: "outer > label",
+    errors: () => [],
+  };
+  const inner = {
+    type: "suite",
+    name: "inner",
+    parent: outer,
+    errors: () => [],
+  };
+  const nativeTest = {
+    type: "test",
+    name: "case",
+    fullName: "outer > label > inner > case",
+    suite: inner,
+    result: () => ({ state: "passed", errors: [] }),
+    meta: () => ({
+      dockVitestAttemptCount: 1,
+      dockVitestAttempts: [{ attempt: 1, observations: [], reads: [] }],
+    }),
+    diagnostic: () => ({ retryCount: 0 }),
+    options: { mode: "run" },
+  };
+  const requestedFile = "/consumer/test/tree.test.mts";
+  const candidate = captureVitestCandidate(
+    [
+      {
+        moduleId: requestedFile,
+        errors: () => [],
+        children: {
+          allSuites: () => [outer, inner],
+          allTests: () => [nativeTest],
+        },
+      },
+    ],
+    [],
+    "passed",
+    "4.1.11",
+    "/consumer",
+    [requestedFile],
+  );
+
+  assert.deepEqual(candidate.catalog, {
+    completeness: "complete",
+    suites: [
+      { file: "test/tree.test.mts", path: ["outer > label"] },
+      { file: "test/tree.test.mts", path: ["outer > label", "inner"] },
+    ],
+    tests: [
+      {
+        executionId: testIdentity(
+          "test/tree.test.mts",
+          "outer > label > inner > case",
+        ),
+        file: "test/tree.test.mts",
+        suitePath: ["outer > label", "inner"],
+        name: "case",
+      },
+    ],
+  });
+  assert.equal(candidate.tests[0]?.id, candidate.catalog.tests[0]?.executionId);
+});
+
+test("缺少请求文件会标记部分目录并保留已有发现", () => {
+  const requestedFile = "/consumer/test/tree.test.mts";
+  const candidate = captureVitestCandidate(
+    [
+      {
+        moduleId: requestedFile,
+        errors: () => [],
+        children: { allSuites: () => [], allTests: () => [] },
+      },
+    ],
+    [],
+    "passed",
+    "5.0.3",
+    "/consumer",
+    [requestedFile, "/consumer/test/missing.test.mts"],
+  );
+  const record = mapVitestRun(
+    {
+      version: "5.0.3",
+      closed: true,
+      closeErrors: [],
+      candidate,
+    },
+    { code: 0, signal: null },
+  );
+
+  assert.equal(candidate.catalog.completeness, "partial");
+  assert.deepEqual(candidate.catalog.tests, []);
+  assert.equal(record.testCatalog?.completeness, "partial");
+  assert.equal(record.lifecycle, "incomplete");
+});
+
+test("原生收集错误会把目录标为部分，避免据此删除成员", () => {
+  const requestedFile = "/consumer/test/tree.test.mts";
+  const candidate = captureVitestCandidate(
+    [
+      {
+        moduleId: requestedFile,
+        errors: () => [],
+        children: {
+          allSuites: () => [
+            { type: "suite", name: "部分组", errors: () => [] },
+          ],
+          allTests: () => [],
+        },
+      },
+    ],
+    [{ message: "suite collection failed" }],
+    "failed",
+    "5.0.3",
+    "/consumer",
+    [requestedFile],
+  );
+
+  assert.equal(candidate.catalog.completeness, "partial");
+  assert.deepEqual(candidate.catalog.suites, [
+    { file: "test/tree.test.mts", path: ["部分组"] },
+  ]);
+  assert.deepEqual(candidate.catalog.tests, []);
+});
 
 test("retry 次数使用 setup 实际开始数并与最终原生摘要核对", () => {
   const candidate = captureVitestCandidate(
@@ -12,6 +142,7 @@ test("retry 次数使用 setup 实际开始数并与最终原生摘要核对", (
         children: {
           allTests: () => [
             {
+              name: "重试通过",
               fullName: "重试通过",
               result: () => ({ state: "passed", errors: [] }),
               meta: () => ({
@@ -50,6 +181,7 @@ test("观察与读取保留原生尝试序号且不合并历史记录", () => {
         children: {
           allTests: () => [
             {
+              name: "最终尝试缺少观察",
               fullName: "最终尝试缺少观察",
               result: () => ({ state: "passed", errors: [] }),
               meta: () => ({
@@ -118,6 +250,8 @@ test("共同收尾错误使运行无效，无关断言失败仍只作为测试�
         children: {
           allSuites: () => [
             {
+              type: "suite",
+              name: "共同收尾",
               fullName: "共同收尾",
               errors: () => [{ message: "嵌套 afterAll 失败" }],
               state: () => "failed",
@@ -125,6 +259,7 @@ test("共同收尾错误使运行无效，无关断言失败仍只作为测试�
           ],
           allTests: () => [
             {
+              name: "选定通过",
               fullName: "共同收尾 > 选定通过",
               result: () => ({ state: "passed", errors: undefined }),
               meta: () => ({
@@ -137,6 +272,7 @@ test("共同收尾错误使运行无效，无关断言失败仍只作为测试�
               options: { mode: "run" },
             },
             {
+              name: "无关失败",
               fullName: "共同收尾 > 无关失败",
               result: () => ({
                 state: "failed",
@@ -177,6 +313,7 @@ test("可解释的无关断言失败不使已通过测试的运行事实无效",
       version: "5.0.3",
       completed: true,
       errors: [],
+      catalog: { completeness: "complete", suites: [], tests: [] },
       tests: [
         {
           id: JSON.stringify({ file: "selected.test.mts", name: "选中" }),
@@ -219,6 +356,7 @@ test("终态事件与原生命令结果冲突时不形成完整运行", () => {
       version: "4.1.11",
       completed: true,
       errors: [],
+      catalog: { completeness: "complete", suites: [], tests: [] },
       tests: [
         {
           id: JSON.stringify({ file: "test.test.mts", name: "断言失败" }),
@@ -244,6 +382,7 @@ test("close 失败或缺少完整关闭收据使运行记录无效", () => {
     version: "4.1.11",
     completed: true,
     tests: [],
+    catalog: { completeness: "complete", suites: [], tests: [] },
     errors: [],
   };
   const closeFailure = mapVitestRun(
@@ -281,6 +420,7 @@ test("缺少运行版本或关闭摘要的部分收据不暴露测试事实", ()
       candidate: {
         version: "4.1.11",
         completed: true,
+        catalog: { completeness: "complete", suites: [], tests: [] },
         tests: [
           {
             id: JSON.stringify({ file: "test.test.mts", name: "已通过" }),

@@ -20,6 +20,7 @@ export default class DockVitestReporter {
   #enabled = false;
   #root = "";
   #version = "";
+  #requestedFiles: readonly string[] = [];
   #runEndCount = 0;
   #receiptWritten = false;
   #closeFinished = false;
@@ -39,6 +40,9 @@ export default class DockVitestReporter {
     }
     this.#version = context.version;
     this.#root = context.config.root;
+    this.#requestedFiles = parseRequestedFiles(
+      process.env.DOCK_VITEST_REQUESTED_FILES,
+    );
     if (!new Set(["4.1.11", "5.0.3"]).has(this.#version)) {
       throw new TypeError(`尚未验证 Vitest ${this.#version}。`);
     }
@@ -97,6 +101,7 @@ export default class DockVitestReporter {
       reason,
       this.#version,
       this.#root,
+      this.#requestedFiles,
     );
   }
 
@@ -124,4 +129,30 @@ function errorMessage(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseRequestedFiles(value: string | undefined): string[] {
+  if (value === undefined) {
+    throw new TypeError("Vitest reporter 缺少本次声明文件列表。");
+  }
+  let files: unknown;
+  try {
+    files = JSON.parse(value) as unknown;
+  } catch {
+    throw new TypeError("Vitest reporter 收到无效的声明文件列表。");
+  }
+  if (
+    !Array.isArray(files) ||
+    files.length === 0 ||
+    !files.every(
+      (file) => typeof file === "string" && file.length > 0 && isAbsolute(file),
+    )
+  ) {
+    throw new TypeError("Vitest reporter 收到无效的声明文件列表。");
+  }
+  return files;
+}
+
+function isAbsolute(value: string): boolean {
+  return value.startsWith("/") || /^[A-Za-z]:[\\/]/.test(value);
 }

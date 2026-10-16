@@ -38,6 +38,7 @@ const diagnosticLimit = 16_384;
 export async function executeVitestRun(
   run: NormalizedVitestRun,
   selectedTests: readonly SelectedVitestTest[],
+  allInFiles = false,
 ): Promise<ExecutionRunRecord> {
   const temporary = await mkdtemp(join(tmpdir(), "dock-vitest-run-"));
   const receiptPath = join(temporary, "receipt.json");
@@ -51,7 +52,7 @@ export async function executeVitestRun(
       );
     }
     const names = selectedNames(selectedTests);
-    if (names.length === 0) {
+    if (names.length === 0 && !allInFiles) {
       return incompleteRun(
         "vitest-selection-empty",
         "运行配置中的 testNamePattern 排除了全部声明测试。",
@@ -65,6 +66,7 @@ export async function executeVitestRun(
           : { userConfigPath: run.configFile }),
         root: run.testRoot,
         names,
+        allInFiles,
         setupPath: internalFile("setup"),
         reporterPath: internalFile("reporter"),
       }),
@@ -72,6 +74,7 @@ export async function executeVitestRun(
     );
     const environment = { ...process.env };
     environment.DOCK_VITEST_RECEIPT = receiptPath;
+    environment.DOCK_VITEST_REQUESTED_FILES = JSON.stringify(run.files);
     const arguments_ = [
       installation.cliPath,
       "run",
@@ -131,6 +134,7 @@ function createOverlayConfig(options: {
   readonly userConfigPath?: string;
   readonly root: string;
   readonly names: readonly string[];
+  readonly allInFiles: boolean;
   readonly setupPath: string;
   readonly reporterPath: string;
 }): string {
@@ -185,7 +189,9 @@ export default {
     ...userTest,
     watch: false,
     dangerouslyIgnoreUnhandledErrors: false,
-    testNamePattern,
+    // 允许已发现的空原生 suite；声明文件和必需成员由目录映射单独验证。
+    passWithNoTests: true,
+    ${options.allInFiles ? "" : "testNamePattern,"}
     setupFiles: [...setupFiles, ${JSON.stringify(options.setupPath)}],
     reporters: [...reporters, ${JSON.stringify(options.reporterPath)}],
   },

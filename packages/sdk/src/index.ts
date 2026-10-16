@@ -49,6 +49,7 @@ export type {
   ExecutionRunRecord,
   ExecutionSession,
   ExecutionSummary,
+  ExecutionTestCatalog,
   ExecutionTestRecord,
   ExecutionTestStatus,
 } from "./execution.ts";

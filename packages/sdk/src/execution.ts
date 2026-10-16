@@ -1,4 +1,8 @@
-import type { JsonValue, TextRange } from "@dock/core";
+import type {
+  JsonValue,
+  MemberDiscoveryCompleteness,
+  TextRange,
+} from "@dock/core";
 
 /** 框架中一条测试用例的终态。 */
 export type ExecutionTestStatus =
@@ -19,6 +23,22 @@ export type ExecutionTestRecord = {
   readonly message?: string;
   readonly observations?: readonly ExecutionObservationRecord[];
   readonly reads?: readonly ExecutionReadRecord[];
+};
+
+/** 测试执行器在本次运行中发现的测试组与测试路径。 */
+export type ExecutionTestCatalog = {
+  readonly completeness: MemberDiscoveryCompleteness;
+  readonly suites: readonly {
+    readonly file: string;
+    readonly path: readonly string[];
+  }[];
+  readonly tests: readonly {
+    /** 对应 ExecutionTestRecord.id；沿用测试执行器现有身份。 */
+    readonly executionId: string;
+    readonly file: string;
+    readonly suitePath: readonly string[];
+    readonly name: string;
+  }[];
 };
 
 /** 由活动测试按稳定键记录的一条业务观察。 */
@@ -50,6 +70,8 @@ export type ExecutionRunRecord = {
   readonly commandAttempts: number;
   readonly testExecutions: number;
   readonly tests: readonly ExecutionTestRecord[];
+  /** 声明成员发现与测试是否执行分开记录；没有发现能力的执行器可省略。 */
+  readonly testCatalog?: ExecutionTestCatalog;
   readonly errors: readonly {
     readonly code: string;
     readonly message: string;
@@ -231,6 +253,12 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
   ) {
     return invalidRecord();
   }
+  if (
+    value.testCatalog !== undefined &&
+    !isExecutionTestCatalog(value.testCatalog)
+  ) {
+    return invalidRecord();
+  }
 
   const tests: ExecutionTestRecord[] = [];
   for (const test of value.tests) {
@@ -303,6 +331,9 @@ function validateExecutionRunRecord(value: unknown): ExecutionRunRecord {
     commandAttempts: value.commandAttempts,
     testExecutions: value.testExecutions,
     tests,
+    ...(value.testCatalog === undefined
+      ? {}
+      : { testCatalog: cloneExecutionTestCatalog(value.testCatalog) }),
     errors,
     ...(value.commandResult === undefined
       ? {}
@@ -344,10 +375,55 @@ function cloneRecord(record: ExecutionRunRecord): ExecutionRunRecord {
         ? {}
         : { reads: test.reads.map(cloneReadRecord) }),
     })),
+    ...(record.testCatalog === undefined
+      ? {}
+      : { testCatalog: cloneExecutionTestCatalog(record.testCatalog) }),
     errors: record.errors.map((error) => ({ ...error })),
     ...(record.commandResult === undefined
       ? {}
       : { commandResult: { ...record.commandResult } }),
+  };
+}
+
+function isExecutionTestCatalog(value: unknown): value is ExecutionTestCatalog {
+  return (
+    isRecord(value) &&
+    (value.completeness === "complete" || value.completeness === "partial") &&
+    isDenseArray(value.suites) &&
+    value.suites.every(
+      (suite) =>
+        isRecord(suite) &&
+        isNonEmptyString(suite.file) &&
+        isStringPath(suite.path) &&
+        suite.path.length > 0,
+    ) &&
+    isDenseArray(value.tests) &&
+    value.tests.every(
+      (test) =>
+        isRecord(test) &&
+        isNonEmptyString(test.executionId) &&
+        isNonEmptyString(test.file) &&
+        isStringPath(test.suitePath) &&
+        isNonEmptyString(test.name),
+    )
+  );
+}
+
+function cloneExecutionTestCatalog(
+  catalog: ExecutionTestCatalog,
+): ExecutionTestCatalog {
+  return {
+    completeness: catalog.completeness,
+    suites: catalog.suites.map((suite) => ({
+      file: suite.file,
+      path: [...suite.path],
+    })),
+    tests: catalog.tests.map((test) => ({
+      executionId: test.executionId,
+      file: test.file,
+      suitePath: [...test.suitePath],
+      name: test.name,
+    })),
   };
 }
 
@@ -530,6 +606,14 @@ function isJsonConfiguration(
 
 function isCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function isStringPath(value: unknown): value is string[] {
+  return isDenseArray(value) && value.every(isNonEmptyString);
 }
 
 function isTestStatus(value: unknown): value is ExecutionTestStatus {

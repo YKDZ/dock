@@ -74,6 +74,13 @@ type MaintenanceReport = {
     readonly changes?: readonly {
       readonly kind: string;
       readonly referenceId: string;
+      readonly memberChanges?: readonly {
+        readonly memberId: string;
+        readonly beforePresent: boolean;
+        readonly afterPresent: boolean;
+        readonly before?: unknown;
+        readonly after?: unknown;
+      }[];
     }[];
   }[];
 };
@@ -117,6 +124,7 @@ async function main(): Promise<void> {
     sdkTarball,
     vitestTarball,
     nodeTarball,
+    fileTarball,
   ]);
   process.stdout.write(
     "Vitest 4.1.11 与 5.0.3 的安装类型、最终状态、完整关闭及跨框架身份冲突验收通过。\n",
@@ -258,6 +266,7 @@ async function verifyVersion(
     const baselinePath = join(maintenanceRoot, "happy.baseline.json");
     await verifyHappyRoundTrip(dock, consumer, baselinePath);
     await verifyObservationAndReadRoundTrip(dock, consumer, version);
+    await verifyGroups(dock, consumer);
     await verifySuiteFailure(dock, consumer);
     await verifyAdditionalTests(dock, consumer);
     await verifyStatusFailures(dock, consumer, baselinePath);
@@ -788,6 +797,335 @@ async function verifyHappyRoundTrip(
   );
   assert.equal(textCheck.code, 0, `${textCheck.stdout}\n${textCheck.stderr}`);
   assert.match(textCheck.stdout, /原生命令失败：1 次/);
+}
+
+async function verifyGroups(dock: string, consumer: string): Promise<void> {
+  const maintenanceRoot = join(consumer, "maintenance-root");
+  const baselinePath = join(maintenanceRoot, "groups.baseline.json");
+  const primaryMemberId = JSON.stringify([
+    "test/groups.test.mts",
+    "preview config",
+    "inner > label",
+    "primary",
+  ]);
+  const renamedMemberId = JSON.stringify([
+    "test/groups.test.mts",
+    "preview config",
+    "inner > label",
+    "primary renamed",
+  ]);
+  const sameNamedNestedMemberId = JSON.stringify([
+    "test/groups.test.mts",
+    "preview config",
+    "other nested",
+    "primary",
+  ]);
+  const variant = { DOCK_VITEST_GROUP_VARIANT: "baseline" };
+  await rm(baselinePath, { force: true });
+
+  const initial = await runDock(
+    dock,
+    ["baseline", "update", "--config", "groups.config.mts", "--json"],
+    consumer,
+    variant,
+  );
+  assert.equal(initial.code, 0, `${initial.stdout}\n${initial.stderr}`);
+  assert.equal(parseEnvelope(initial.stdout).variant, "updated");
+  const initialReport = requireReport(parseEnvelope(initial.stdout));
+  assertBindingHasNoErrors(initialReport, "预览组");
+  assertBindingHasNoErrors(initialReport, "空组");
+  assertBindingHasNoErrors(initialReport, "全部预览成员");
+  const allPreviewMembers = initialReport.bindings.find(
+    (binding) => binding.bindingId === "全部预览成员",
+  )?.current?.references["all-preview-members"]?.value;
+  assert.ok(Array.isArray(allPreviewMembers));
+  const allPreviewMemberIds = new Set(
+    allPreviewMembers.map((member) => {
+      assert.ok(
+        typeof member === "object" &&
+          member !== null &&
+          "id" in member &&
+          typeof member.id === "string",
+      );
+      return member.id;
+    }),
+  );
+  assert.equal(allPreviewMemberIds.has(primaryMemberId), true);
+  assert.equal(allPreviewMemberIds.has(sameNamedNestedMemberId), true);
+  assert.notEqual(primaryMemberId, sameNamedNestedMemberId);
+  assert.equal(allPreviewMemberIds.size, 4);
+  assertExecutionSummary(initialReport, 1, 4);
+  let baselineBytes = await readFile(baselinePath);
+
+  const stable = await runDock(
+    dock,
+    ["check", "--config", "groups.config.mts", "--json"],
+    consumer,
+    variant,
+  );
+  assert.equal(stable.code, 0, `${stable.stdout}\n${stable.stderr}`);
+  assert.equal(parseEnvelope(stable.stdout).variant, "consistent");
+  assertExecutionSummary(requireReport(parseEnvelope(stable.stdout)), 1, 4);
+
+  const changed = await runDock(
+    dock,
+    ["check", "--config", "groups.config.mts", "--json"],
+    consumer,
+    { DOCK_VITEST_GROUP_VARIANT: "changed" },
+  );
+  assert.equal(changed.code, 1, `${changed.stdout}\n${changed.stderr}`);
+  assert.equal(parseEnvelope(changed.stdout).variant, "changed");
+  const changedReport = requireReport(parseEnvelope(changed.stdout));
+  assertBindingHasNoErrors(changedReport, "预览组");
+  assertExecutionSummary(changedReport, 1, 4);
+  const changedFact = changedReport.bindings
+    .find((binding) => binding.bindingId === "预览组")
+    ?.changes?.find(
+      (change) =>
+        change.kind === "fact" && change.referenceId === "preview-members",
+    );
+  assert.ok(changedFact);
+  const changedPrimary = changedFact.memberChanges?.find(
+    (change) => change.memberId === primaryMemberId,
+  );
+  assert.ok(changedPrimary);
+  assert.equal(changedPrimary.beforePresent, true);
+  assert.equal(changedPrimary.afterPresent, true);
+  assert.notDeepEqual(changedPrimary.before, changedPrimary.after);
+
+  const changedUpdate = await runDock(
+    dock,
+    ["baseline", "update", "--config", "groups.config.mts", "--json"],
+    consumer,
+    { DOCK_VITEST_GROUP_VARIANT: "changed" },
+  );
+  assert.equal(changedUpdate.code, 0, changedUpdate.stderr);
+  assert.equal(parseEnvelope(changedUpdate.stdout).variant, "updated");
+  assertExecutionSummary(
+    requireReport(parseEnvelope(changedUpdate.stdout)),
+    1,
+    4,
+  );
+  baselineBytes = await readFile(baselinePath);
+
+  const renamed = await runDock(
+    dock,
+    ["check", "--config", "groups.config.mts", "--json"],
+    consumer,
+    { DOCK_VITEST_GROUP_VARIANT: "renamed" },
+  );
+  assert.equal(renamed.code, 1, `${renamed.stdout}\n${renamed.stderr}`);
+  assert.equal(parseEnvelope(renamed.stdout).variant, "changed");
+  const renamedReport = requireReport(parseEnvelope(renamed.stdout));
+  assertBindingHasNoErrors(renamedReport, "预览组");
+  assertExecutionSummary(renamedReport, 1, 4);
+  const renamedFact = renamedReport.bindings
+    .find((binding) => binding.bindingId === "预览组")
+    ?.changes?.find(
+      (change) =>
+        change.kind === "fact" && change.referenceId === "preview-members",
+    );
+  assert.ok(renamedFact);
+  const renamedMemberChanges = renamedFact.memberChanges ?? [];
+  const removedMember = renamedMemberChanges.find(
+    (change) => change.memberId === primaryMemberId,
+  );
+  assert.ok(removedMember);
+  assert.equal(removedMember.beforePresent, true);
+  assert.equal(removedMember.afterPresent, false);
+  assert.equal("before" in removedMember, true);
+  assert.equal("after" in removedMember, false);
+  const addedMember = renamedMemberChanges.find(
+    (change) => change.memberId === renamedMemberId,
+  );
+  assert.ok(addedMember);
+  assert.equal(addedMember.beforePresent, false);
+  assert.equal(addedMember.afterPresent, true);
+  assert.equal("before" in addedMember, false);
+  assert.equal("after" in addedMember, true);
+  assert.deepEqual(await readFile(baselinePath), baselineBytes);
+
+  const renamedUpdate = await runDock(
+    dock,
+    ["baseline", "update", "--config", "groups.config.mts", "--json"],
+    consumer,
+    { DOCK_VITEST_GROUP_VARIANT: "renamed" },
+  );
+  assert.equal(renamedUpdate.code, 0, renamedUpdate.stderr);
+  assert.equal(parseEnvelope(renamedUpdate.stdout).variant, "updated");
+  const renamedCheck = await runDock(
+    dock,
+    ["check", "--config", "groups.config.mts", "--json"],
+    consumer,
+    { DOCK_VITEST_GROUP_VARIANT: "renamed" },
+  );
+  assert.equal(
+    renamedCheck.code,
+    0,
+    `${renamedCheck.stdout}\n${renamedCheck.stderr}`,
+  );
+  assert.equal(parseEnvelope(renamedCheck.stdout).variant, "consistent");
+  assertExecutionSummary(
+    requireReport(parseEnvelope(renamedCheck.stdout)),
+    1,
+    4,
+  );
+
+  const sharedBaseline = join(maintenanceRoot, "groups-shared.baseline.json");
+  await rm(sharedBaseline, { force: true });
+  const sharedUpdate = await runDock(
+    dock,
+    ["baseline", "update", "--config", "groups-shared.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(
+    sharedUpdate.code,
+    0,
+    `${sharedUpdate.stdout}\n${sharedUpdate.stderr}`,
+  );
+  assert.equal(parseEnvelope(sharedUpdate.stdout).variant, "updated");
+  const sharedReport = requireReport(parseEnvelope(sharedUpdate.stdout));
+  assertBindingHasNoErrors(sharedReport, "组和单测共享");
+  assertExecutionSummary(sharedReport, 1, 4);
+  const sharedCheck = await runDock(
+    dock,
+    ["check", "--config", "groups-shared.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(
+    sharedCheck.code,
+    0,
+    `${sharedCheck.stdout}\n${sharedCheck.stderr}`,
+  );
+  assert.equal(parseEnvelope(sharedCheck.stdout).variant, "consistent");
+  assertExecutionSummary(
+    requireReport(parseEnvelope(sharedCheck.stdout)),
+    1,
+    4,
+  );
+
+  const failureBytes = await readFile(baselinePath);
+  const invalid = await runDock(
+    dock,
+    ["check", "--config", "group-failures.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(invalid.code, 1, `${invalid.stdout}\n${invalid.stderr}`);
+  const invalidEnvelope = parseEnvelope(invalid.stdout);
+  assert.equal(invalidEnvelope.variant, "errors");
+  const invalidReport = requireReport(invalidEnvelope);
+  assertBindingError(invalidReport, "含错误组与有效单测", "test-skipped");
+  assertBindingError(invalidReport, "含错误组与有效单测", "test-todo");
+  assertBindingError(
+    invalidReport,
+    "含错误组与有效单测",
+    "observation-missing",
+  );
+  assertBindingError(
+    invalidReport,
+    "含错误组与有效单测",
+    "observation-duplicate",
+  );
+  assertExecutionSummary(invalidReport, 1, 4);
+
+  const invalidUpdate = await runDock(
+    dock,
+    ["baseline", "update", "--config", "group-failures.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(
+    invalidUpdate.code,
+    1,
+    `${invalidUpdate.stdout}\n${invalidUpdate.stderr}`,
+  );
+  assert.equal(parseEnvelope(invalidUpdate.stdout).variant, "rejected");
+  assertBindingError(
+    requireReport(parseEnvelope(invalidUpdate.stdout)),
+    "含错误组与有效单测",
+    "observation-missing",
+  );
+  assertBindingError(
+    requireReport(parseEnvelope(invalidUpdate.stdout)),
+    "含错误组与有效单测",
+    "observation-duplicate",
+  );
+  assert.deepEqual(await readFile(baselinePath), failureBytes);
+
+  const filtered = await runDock(
+    dock,
+    ["check", "--config", "group-filter.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(filtered.code, 1, `${filtered.stdout}\n${filtered.stderr}`);
+  const filteredReport = requireReport(parseEnvelope(filtered.stdout));
+  assertBindingError(filteredReport, "受筛选组", "test-skipped");
+  assertExecutionSummary(filteredReport, 1, 2);
+  const filteredUpdate = await runDock(
+    dock,
+    ["baseline", "update", "--config", "group-filter.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(filteredUpdate.code, 1, filteredUpdate.stderr);
+  assert.equal(parseEnvelope(filteredUpdate.stdout).variant, "rejected");
+  assert.deepEqual(await readFile(baselinePath), failureBytes);
+
+  const missingSuite = await runDock(
+    dock,
+    ["check", "--config", "group-missing-suite.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(missingSuite.code, 1, missingSuite.stderr);
+  assertBindingError(
+    requireReport(parseEnvelope(missingSuite.stdout)),
+    "不存在的组",
+    "test-group-not-found",
+  );
+  const missingSuiteUpdate = await runDock(
+    dock,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "group-missing-suite.config.mts",
+      "--json",
+    ],
+    consumer,
+  );
+  assert.equal(missingSuiteUpdate.code, 1, missingSuiteUpdate.stderr);
+  assert.equal(parseEnvelope(missingSuiteUpdate.stdout).variant, "rejected");
+  assert.deepEqual(await readFile(baselinePath), failureBytes);
+
+  const collectionError = await runDock(
+    dock,
+    ["check", "--config", "group-collection-error.config.mts", "--json"],
+    consumer,
+    { DOCK_VITEST_GROUP_SCENARIO: "collection-error" },
+  );
+  assert.equal(
+    collectionError.code,
+    1,
+    `${collectionError.stdout}\n${collectionError.stderr}`,
+  );
+  assertBindingError(
+    requireReport(parseEnvelope(collectionError.stdout)),
+    "收集失败组",
+    "run-lifecycle-failed",
+  );
+  const collectionErrorUpdate = await runDock(
+    dock,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "group-collection-error.config.mts",
+      "--json",
+    ],
+    consumer,
+    { DOCK_VITEST_GROUP_SCENARIO: "collection-error" },
+  );
+  assert.equal(collectionErrorUpdate.code, 1, collectionErrorUpdate.stderr);
+  assert.equal(parseEnvelope(collectionErrorUpdate.stdout).variant, "rejected");
+  assert.deepEqual(await readFile(baselinePath), failureBytes);
 }
 
 async function verifyStatusFailures(

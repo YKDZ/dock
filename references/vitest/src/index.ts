@@ -63,6 +63,19 @@ type ObservationValues<Observations extends readonly AnyVitestObservation[]> = {
   ]: ObservationValue<Observation>;
 };
 
+type ObservationForValues<Values extends Record<string, JsonValue>> = {
+  [Key in keyof Values & string]: VitestObservation<Key, Values[Key]>;
+}[keyof Values & string];
+
+type SuiteMemberValue<Observations extends readonly AnyVitestObservation[]> = {
+  -readonly [Index in keyof Observations]: Observations[Index] extends {
+    readonly key: infer Key extends string;
+    readonly record: (value: never) => infer Value extends JsonValue;
+  }
+    ? { readonly key: Key; readonly value: Value }
+    : never;
+};
+
 type ValuesFromVitestRun<Run> = Run extends {
   readonly observationKeys: {
     readonly __dockTypeWitness?: { readonly values: infer Values };
@@ -146,11 +159,34 @@ export type VitestObservationTarget = {
   readonly key: string;
 };
 
+export type VitestSuiteTarget<
+  Observations extends readonly AnyVitestObservation[] =
+    readonly AnyVitestObservation[],
+  Values extends Record<string, JsonValue> = ObservationValues<Observations>,
+  Selected extends readonly AnyVitestObservation[] =
+    readonly AnyVitestObservation[],
+> = {
+  readonly kind: "vitest-suite";
+  readonly run: VitestRun<Observations, Values>;
+  readonly file: string;
+  readonly suitePath: [string, ...string[]];
+  readonly observationKeys: {
+    -readonly [Index in keyof Selected]: Selected[Index] extends {
+      readonly key: infer Key extends string;
+    }
+      ? Key
+      : never;
+  };
+};
+
 export type VitestTestTarget<
   Observations extends readonly AnyVitestObservation[] =
     readonly AnyVitestObservation[],
   Values extends Record<string, JsonValue> = ObservationValues<Observations>,
-> = VitestStatusTarget<Observations, Values> | VitestObservationTarget;
+> =
+  | VitestStatusTarget<Observations, Values>
+  | VitestObservationTarget
+  | VitestSuiteTarget<Observations, Values>;
 
 export type VitestStatusReference<
   Id extends string = string,
@@ -176,9 +212,25 @@ export type VitestObservationReference<
   never
 >;
 
+export type VitestSuiteReference<
+  Id extends string = string,
+  Observations extends readonly AnyVitestObservation[] =
+    readonly AnyVitestObservation[],
+  Values extends Record<string, JsonValue> = ObservationValues<Observations>,
+  Selected extends readonly AnyVitestObservation[] =
+    readonly AnyVitestObservation[],
+> = Reference<
+  typeof vitestPluginId,
+  Id,
+  VitestSuiteTarget<Observations, Values, Selected>,
+  SuiteMemberValue<Selected>,
+  never
+>;
+
 export type VitestReference<Id extends string = string> =
   | VitestStatusReference<Id>
-  | VitestObservationReference<Id>;
+  | VitestObservationReference<Id>
+  | VitestSuiteReference<Id>;
 
 /** 声明稳定观察键；sample 只用于推导类型，不会作为默认观察值。 */
 export function defineVitestObservation<
@@ -313,6 +365,71 @@ export function vitestObservation<
   );
 }
 
+/** 将原生测试组绑定到本次运行中按稳定键记录的观察集合。 */
+export function vitestSuite<
+  const Id extends string,
+  const Observations extends readonly AnyVitestObservation[],
+  Values extends Record<string, JsonValue>,
+  const Selected extends readonly [
+    ObservationForValues<Values>,
+    ...ObservationForValues<Values>[],
+  ],
+>(
+  id: Id,
+  run: VitestRun<Observations, Values>,
+  target: {
+    readonly file: string;
+    readonly suitePath: readonly [string, ...string[]];
+  },
+  observations: Selected,
+  options: Pick<ReferenceOptions, "declaredAt" | "note"> = {},
+): VitestSuiteReference<Id, Observations, Values, Selected> {
+  assertRun(run.identity, run);
+  assertSuiteSelection(target);
+  if (observations.length === 0) {
+    throw new TypeError("Vitest 测试组必须选择至少一条观察。");
+  }
+  for (const observation of observations) {
+    assertObservationDefinition(observation);
+    if (!run.observationKeys.includes(observation.key)) {
+      throw new TypeError(
+        `Vitest 运行 ${run.identity} 未声明观察键 ${observation.key}。`,
+      );
+    }
+  }
+  const keys = observations.map(({ key }) => key) as VitestSuiteTarget<
+    Observations,
+    Values,
+    Selected
+  >["observationKeys"];
+  if (new Set(keys).size !== keys.length) {
+    throw new TypeError("Vitest 测试组选择的观察键必须唯一。");
+  }
+  return createReference<
+    typeof vitestPluginId,
+    Id,
+    VitestSuiteTarget<Observations, Values, Selected>,
+    SuiteMemberValue<Selected>,
+    never
+  >(
+    vitestPluginId,
+    id,
+    {
+      kind: "vitest-suite",
+      run,
+      file: target.file,
+      suitePath: [...target.suitePath],
+      observationKeys: keys,
+    },
+    {
+      ...(options.declaredAt === undefined
+        ? {}
+        : { declaredAt: options.declaredAt }),
+      ...(options.note === undefined ? {} : { note: options.note }),
+    },
+  );
+}
+
 type VitestPlugin = ReferencePlugin<typeof vitestPluginId, VitestReference>;
 
 const vitestImplementation: VitestPlugin = definePlugin({
@@ -323,13 +440,27 @@ const vitestImplementation: VitestPlugin = definePlugin({
     }
     const target = getVitestTarget(reference.target);
     assertRun(target.run.identity, target.run);
-    assertTestTarget(target);
+    if (target.kind === "vitest-suite") {
+      assertSuiteTarget(target);
+    } else {
+      assertTestTarget(target);
+    }
     if (
       target.kind === "vitest-test-observation" &&
       !target.run.observationKeys.includes(target.key)
     ) {
       throw new TypeError(
         `Vitest 运行 ${target.run.identity} 未声明观察键 ${target.key}。`,
+      );
+    }
+    if (
+      target.kind === "vitest-suite" &&
+      target.observationKeys.some(
+        (key) => !target.run.observationKeys.includes(key),
+      )
+    ) {
+      throw new TypeError(
+        `Vitest 测试组引用了运行 ${target.run.identity} 未声明的观察键。`,
       );
     }
   },
@@ -352,6 +483,14 @@ const vitestImplementation: VitestPlugin = definePlugin({
     for (const reference of references) {
       const target = getVitestTarget(reference.target);
       const run = normalizeRun(target.run, context.root);
+      if (
+        target.kind === "vitest-suite" &&
+        !run.files.includes(resolveTargetFile(run.testRoot, target.file))
+      ) {
+        throw new TypeError(
+          `Vitest 测试组文件 ${target.file} 不在运行 ${run.identity} 的 files 中。`,
+        );
+      }
       const encoded = JSON.stringify(run.configuration);
       const prior = declarations.get(run.identity);
       if (prior !== undefined && prior.encoded !== encoded) {
@@ -380,6 +519,7 @@ const vitestImplementation: VitestPlugin = definePlugin({
       {
         readonly run: NormalizedVitestRun;
         readonly targets: SelectedVitestTest[];
+        allInFiles: boolean;
       }
     >();
     for (const reference of references) {
@@ -389,18 +529,24 @@ const vitestImplementation: VitestPlugin = definePlugin({
       const group = groups.get(groupKey) ?? {
         run,
         targets: [...run.additionalTests],
+        allInFiles: false,
       };
-      group.targets.push({
-        file: resolveTargetFile(run.testRoot, target.file),
-        name: target.name,
-      });
+      if (target.kind === "vitest-suite") {
+        group.allInFiles = true;
+      } else {
+        group.targets.push({
+          file: resolveTargetFile(run.testRoot, target.file),
+          name: target.name,
+        });
+      }
       groups.set(groupKey, group);
     }
-    for (const { run, targets } of groups.values()) {
+    for (const { run, targets, allInFiles } of groups.values()) {
       context.execution.register(
         run.identity,
         run.configuration,
-        async () => await executeVitestRun(run, uniqueSelectedTests(targets)),
+        async () =>
+          await executeVitestRun(run, uniqueSelectedTests(targets), allInFiles),
       );
     }
   },
@@ -516,6 +662,9 @@ function factFromVitestRun(
   }
 
   const target = getVitestTarget(reference.target);
+  if (target.kind === "vitest-suite") {
+    return factFromVitestSuite(target, run, testRoot);
+  }
   const targetFile = resolveTargetFile(testRoot, target.file);
   const identity = testIdentity(
     relativeTestFile(testRoot, targetFile),
@@ -581,6 +730,149 @@ function factFromVitestRun(
   return vitestError(
     code,
     test.message ?? `关联测试最终状态为 ${test.status}。`,
+  );
+}
+
+function factFromVitestSuite(
+  target: VitestSuiteTarget,
+  run: ExecutionRunRecord,
+  testRoot: string,
+): PluginResult<JsonValue> {
+  const catalog = run.testCatalog;
+  if (catalog === undefined) {
+    return vitestError(
+      "test-catalog-missing",
+      "Vitest 没有提供原生测试组目录。",
+    );
+  }
+
+  const file = relativeTestFile(
+    testRoot,
+    resolveTargetFile(testRoot, target.file),
+  );
+  const suites = catalog.suites.filter(
+    (suite) =>
+      suite.file === file && sameStringPath(suite.path, target.suitePath),
+  );
+  if (suites.length > 1) {
+    return vitestError(
+      "duplicate-suite-identity",
+      `Vitest 文件 ${target.file} 中有多个测试组匹配路径 ${target.suitePath.join(" / ")}。`,
+    );
+  }
+  if (suites.length === 0) {
+    if (catalog.completeness === "partial") {
+      return {
+        kind: "collection",
+        collection: { completeness: "partial", members: [] },
+      };
+    }
+    return vitestError(
+      "test-group-not-found",
+      `没有发现声明的 Vitest 测试组：${target.file} / ${target.suitePath.join(" / ")}。`,
+    );
+  }
+
+  const members = catalog.tests
+    .filter(
+      (test) =>
+        test.file === file && isWithinSuite(test.suitePath, target.suitePath),
+    )
+    .map((entry) => {
+      const id = JSON.stringify([entry.file, ...entry.suitePath, entry.name]);
+      const matches = run.tests.filter((test) => test.id === entry.executionId);
+      if (matches.length !== 1) {
+        return {
+          id,
+          error: {
+            code:
+              matches.length === 0
+                ? "test-execution-missing"
+                : "duplicate-test-identity",
+            message:
+              matches.length === 0
+                ? `Vitest 没有提供测试 ${entry.name} 的执行记录。`
+                : `测试 ${entry.name} 对应多条执行记录。`,
+          },
+        } as const;
+      }
+      const test = matches[0]!;
+      if (test.status !== "passed") {
+        return {
+          id,
+          error: {
+            code: statusErrorCode(test.status, test.started),
+            message:
+              test.message ??
+              `组成员 ${entry.name} 的最终状态为 ${test.status}。`,
+          },
+        } as const;
+      }
+
+      const values: { key: string; value: JsonValue }[] = [];
+      for (const key of target.observationKeys) {
+        const observations = (test.observations ?? []).filter(
+          (observation) =>
+            observation.key === key &&
+            observation.attempt === test.attemptCount,
+        );
+        if (observations.length !== 1) {
+          return {
+            id,
+            error: {
+              code:
+                observations.length === 0
+                  ? "observation-missing"
+                  : "observation-duplicate",
+              message:
+                observations.length === 0
+                  ? `组成员 ${entry.name} 的最终尝试没有唯一观察键 ${key}。`
+                  : `组成员 ${entry.name} 的最终尝试重复记录观察键 ${key}。`,
+            },
+          } as const;
+        }
+        values.push({ key, value: observations[0]!.value });
+      }
+      return { id, value: values } as const;
+    });
+
+  return {
+    kind: "collection",
+    collection: { completeness: catalog.completeness, members },
+  };
+}
+
+function statusErrorCode(
+  status: ExecutionRunRecord["tests"][number]["status"],
+  started: boolean,
+): string {
+  if (status === "cancelled")
+    return started ? "test-cancelled" : "test-not-executed";
+  if (status === "skipped") return "test-skipped";
+  if (status === "todo") return "test-todo";
+  if (status === "filtered") return "test-filtered";
+  if (status === "duplicate") return "duplicate-test-identity";
+  if (status === "not-run") return "test-not-executed";
+  return "test-failed";
+}
+
+function isWithinSuite(
+  suitePath: readonly string[],
+  parentPath: readonly string[],
+): boolean {
+  return (
+    suitePath.length >= parentPath.length &&
+    parentPath.every((segment, index) => suitePath[index] === segment)
+  );
+}
+
+function sameStringPath(
+  left: readonly string[],
+  right: readonly string[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((segment, index) => segment === right[index])
   );
 }
 
@@ -686,7 +978,9 @@ function isVitestTestSelection(value: unknown): value is VitestTestSelection {
   );
 }
 
-function assertTestTarget(value: unknown): asserts value is VitestTestTarget {
+function assertTestTarget(
+  value: unknown,
+): asserts value is VitestStatusTarget | VitestObservationTarget {
   if (
     !isRecord(value) ||
     (value.kind !== "vitest-test-status" &&
@@ -710,9 +1004,49 @@ function assertTestTarget(value: unknown): asserts value is VitestTestTarget {
   }
 }
 
+function assertSuiteTarget(value: unknown): asserts value is VitestSuiteTarget {
+  if (
+    !isRecord(value) ||
+    value.kind !== "vitest-suite" ||
+    !isRecord(value.run) ||
+    !isNonEmptyString(value.file) ||
+    !isNonEmptyStringList(value.suitePath) ||
+    value.suitePath.length === 0 ||
+    !isNonEmptyStringList(value.observationKeys) ||
+    value.observationKeys.length === 0 ||
+    new Set(value.observationKeys).size !== value.observationKeys.length
+  ) {
+    throw new TypeError(
+      "Vitest 测试组引用必须提供文件、非空原生路径和观察键。",
+    );
+  }
+  assertRun(value.run.identity, value.run);
+  if (!Array.isArray(value.run.observationKeys)) {
+    throw new TypeError("Vitest 测试组运行缺少观察键列表。");
+  }
+}
+
 function getVitestTarget(value: JsonValue): VitestTestTarget {
+  if (isRecord(value) && value.kind === "vitest-suite") {
+    assertSuiteTarget(value);
+    return value;
+  }
   assertTestTarget(value);
   return value;
+}
+
+function assertSuiteSelection(value: unknown): asserts value is {
+  readonly file: string;
+  readonly suitePath: readonly [string, ...string[]];
+} {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.file) ||
+    !isNonEmptyStringList(value.suitePath) ||
+    value.suitePath.length === 0
+  ) {
+    throw new TypeError("Vitest 测试组必须提供文件和非空原生路径。");
+  }
 }
 
 function assertTestSelection(
@@ -764,6 +1098,10 @@ function isVitestObservationList(
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
+}
+
+function isNonEmptyStringList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(isNonEmptyString);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

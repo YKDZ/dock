@@ -1,4 +1,4 @@
-import { relative } from "node:path";
+import { relative, resolve } from "node:path";
 
 import type {
   ExecutionObservationRecord,
@@ -6,6 +6,7 @@ import type {
   ExecutionRunRecord,
   ExecutionTestRecord,
   ExecutionTestStatus,
+  ExecutionTestCatalog,
 } from "@dock/sdk";
 
 type CandidateTest = {
@@ -22,6 +23,7 @@ export type VitestCandidate = {
   readonly version: string;
   readonly completed: boolean;
   readonly tests: readonly CandidateTest[];
+  readonly catalog: ExecutionTestCatalog;
   readonly errors: readonly string[];
 };
 
@@ -49,6 +51,10 @@ type TestModuleLike = {
 
 type TestSuiteLike = {
   readonly fullName?: unknown;
+  readonly name?: unknown;
+  readonly type?: unknown;
+  readonly suite?: unknown;
+  readonly parent?: unknown;
   readonly errors?: () => readonly unknown[];
 };
 
@@ -56,6 +62,8 @@ type TestCaseLike = {
   readonly type?: unknown;
   readonly name?: unknown;
   readonly fullName?: unknown;
+  readonly suite?: unknown;
+  readonly parent?: unknown;
   readonly options?: { readonly mode?: unknown };
   result?: () => unknown;
   meta?: () => unknown;
@@ -69,42 +77,74 @@ export function captureVitestCandidate(
   reason: unknown,
   version: string,
   root: string,
+  requestedFiles: readonly string[] = [],
 ): VitestCandidate {
   const errors = list(unhandledValue).map(errorMessage);
   const tests: CandidateTest[] = [];
+  const catalogSuites: ExecutionTestCatalog["suites"][number][] = [];
+  const catalogTests: ExecutionTestCatalog["tests"][number][] = [];
   const modules = list(modulesValue);
+  const discoveredFiles = new Set<string>();
+  let catalogComplete =
+    errors.length === 0 && (reason === "passed" || reason === "failed");
 
   for (const moduleValue of modules) {
     if (!isRecord(moduleValue)) {
       errors.push("Vitest 返回了无法解释的测试模块记录。");
+      catalogComplete = false;
       continue;
     }
     const module = moduleValue as TestModuleLike;
     const modulePath = module.moduleId;
     if (typeof modulePath !== "string" || !isAbsolutePath(modulePath)) {
       errors.push("Vitest 返回的测试模块没有可定位的绝对路径。");
+      catalogComplete = false;
+    } else {
+      discoveredFiles.add(resolve(modulePath));
     }
-    for (const error of list(safeCall(module.errors, moduleValue))) {
+    const moduleErrors = list(safeCall(module.errors, moduleValue));
+    for (const error of moduleErrors) {
       errors.push(errorMessage(error));
     }
+    if (moduleErrors.length > 0) catalogComplete = false;
 
     const allSuites = safeCall(module.children?.allSuites, module.children);
     if (allSuites === undefined || !isIterable(allSuites)) {
       errors.push("Vitest 返回的测试模块没有完整测试组列表。");
+      catalogComplete = false;
     } else {
       for (const suiteValue of allSuites) {
         if (!isRecord(suiteValue)) {
           errors.push("Vitest 返回了无法解释的测试组记录。");
+          catalogComplete = false;
           continue;
         }
         const suite = suiteValue as TestSuiteLike;
+        const suitePath = nativeSuitePath(suiteValue, true);
+        if (
+          typeof modulePath !== "string" ||
+          suite.type !== "suite" ||
+          typeof suite.name !== "string" ||
+          suite.name.length === 0 ||
+          suitePath === undefined
+        ) {
+          errors.push("Vitest 返回的测试组没有可还原的原生 parent/name 路径。");
+          catalogComplete = false;
+        } else {
+          catalogSuites.push({
+            file: relative(root, modulePath).split("\\").join("/"),
+            path: suitePath,
+          });
+        }
         const suiteErrors = safeCall(suite.errors, suiteValue);
         if (!Array.isArray(suiteErrors)) {
           errors.push("Vitest 返回的测试组没有可解释的错误列表。");
+          catalogComplete = false;
           continue;
         }
         for (const error of suiteErrors) {
           errors.push(errorMessage(error));
+          catalogComplete = false;
         }
       }
     }
@@ -112,26 +152,39 @@ export function captureVitestCandidate(
     const allTests = safeCall(module.children?.allTests, module.children);
     if (allTests === undefined || !isIterable(allTests)) {
       errors.push("Vitest 返回的测试模块没有完整测试列表。");
+      catalogComplete = false;
       continue;
     }
     for (const testValue of allTests) {
       if (!isRecord(testValue)) {
         errors.push("Vitest 返回了无法解释的测试记录。");
+        catalogComplete = false;
         continue;
       }
       const test = testValue as TestCaseLike;
-      const name =
+      const fullName =
         typeof test.fullName === "string"
           ? test.fullName
           : typeof test.name === "string"
             ? test.name
             : undefined;
-      if (typeof modulePath !== "string" || typeof name !== "string") {
+      const name = typeof test.name === "string" ? test.name : undefined;
+      const suitePath = nativeSuitePath(testValue, false);
+      if (
+        typeof modulePath !== "string" ||
+        typeof fullName !== "string" ||
+        typeof name !== "string" ||
+        name.length === 0 ||
+        suitePath === undefined
+      ) {
         errors.push("Vitest 返回的测试缺少稳定文件路径或标题。");
+        catalogComplete = false;
         continue;
       }
 
       const file = relative(root, modulePath).split("\\").join("/");
+      const executionId = testIdentity(file, fullName);
+      catalogTests.push({ executionId, file, suitePath, name });
       const result = safeCall(test.result, testValue);
       const metadata = safeCall(test.meta, testValue);
       const diagnostic = safeCall(test.diagnostic, testValue);
@@ -151,7 +204,7 @@ export function captureVitestCandidate(
           ? resultMessage(result)
           : undefined;
       tests.push({
-        id: testIdentity(file, name),
+        id: executionId,
         status,
         started: attemptCount > 0,
         attemptCount,
@@ -161,6 +214,13 @@ export function captureVitestCandidate(
           : { observations: activity.observations }),
         ...(activity.reads.length === 0 ? {} : { reads: activity.reads }),
       });
+    }
+  }
+
+  for (const requestedFile of requestedFiles) {
+    if (!discoveredFiles.has(resolve(requestedFile))) {
+      errors.push(`Vitest 没有在原生发现结果中返回声明文件 ${requestedFile}。`);
+      catalogComplete = false;
     }
   }
 
@@ -174,6 +234,11 @@ export function captureVitestCandidate(
     version,
     completed: reason === "passed" || reason === "failed",
     tests,
+    catalog: {
+      completeness: catalogComplete ? "complete" : "partial",
+      suites: catalogSuites,
+      tests: catalogTests,
+    },
     errors: uniqueMessages(errors),
   };
 }
@@ -274,6 +339,7 @@ export function mapVitestRun(
     commandAttempts: 1,
     testExecutions: tests.reduce((total, test) => total + test.attemptCount, 0),
     tests,
+    ...(candidate === undefined ? {} : { testCatalog: candidate.catalog }),
     errors: uniqueExecutionErrors(errors),
     ...(processResult.code === null && processResult.signal === null
       ? {}
@@ -303,6 +369,7 @@ function parseReceipt(value: unknown): VitestReceipt | undefined {
     typeof candidate.completed !== "boolean" ||
     !Array.isArray(candidate.tests) ||
     !candidate.tests.every(isCandidateTest) ||
+    !isCandidateCatalog(candidate.catalog) ||
     !isStringList(candidate.errors)
   ) {
     return undefined;
@@ -314,6 +381,7 @@ function parseReceipt(value: unknown): VitestReceipt | undefined {
       version: candidate.version,
       completed: candidate.completed,
       tests: candidate.tests,
+      catalog: candidate.catalog,
       errors: candidate.errors,
     },
     closeErrors: value.closeErrors,
@@ -336,6 +404,55 @@ function isCandidateTest(value: unknown): value is CandidateTest {
     (value.reads === undefined ||
       (Array.isArray(value.reads) && value.reads.every(isCandidateRead)))
   );
+}
+
+function isCandidateCatalog(value: unknown): value is ExecutionTestCatalog {
+  return (
+    isRecord(value) &&
+    (value.completeness === "complete" || value.completeness === "partial") &&
+    Array.isArray(value.suites) &&
+    value.suites.every(
+      (suite) =>
+        isRecord(suite) &&
+        isNonEmptyString(suite.file) &&
+        isStringList(suite.path) &&
+        suite.path.length > 0 &&
+        suite.path.every(isNonEmptyString),
+    ) &&
+    Array.isArray(value.tests) &&
+    value.tests.every(
+      (test) =>
+        isRecord(test) &&
+        isNonEmptyString(test.executionId) &&
+        isNonEmptyString(test.file) &&
+        isStringList(test.suitePath) &&
+        test.suitePath.every(isNonEmptyString) &&
+        isNonEmptyString(test.name),
+    )
+  );
+}
+
+function nativeSuitePath(
+  value: unknown,
+  includeCurrent: boolean,
+): string[] | undefined {
+  let node: unknown;
+  if (includeCurrent) {
+    node = value;
+  } else if (isRecord(value)) {
+    node = value.suite ?? value.parent;
+  }
+  const path: string[] = [];
+  const seen = new Set<object>();
+  while (node !== undefined && node !== null) {
+    if (!isRecord(node) || seen.has(node)) return undefined;
+    seen.add(node);
+    if (node.type !== "suite") break;
+    if (!isNonEmptyString(node.name)) return undefined;
+    path.unshift(node.name);
+    node = node.suite ?? node.parent;
+  }
+  return path;
 }
 
 function isCandidateObservation(
@@ -405,6 +522,10 @@ function isStringList(value: unknown): value is string[] {
   return (
     Array.isArray(value) && value.every((item) => typeof item === "string")
   );
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
 }
 
 export function testIdentity(file: string, name: string): string {
