@@ -53,7 +53,8 @@
       "dependsOn": [
         "@dock/core#pack",
         "@dock/sdk#pack",
-        "@dock/reference-file#pack"
+        "@dock/reference-file#pack",
+        "@dock/reference-node-test#pack"
       ],
       "cache": false,
       "outputs": [],

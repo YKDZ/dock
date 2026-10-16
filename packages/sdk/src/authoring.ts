@@ -208,6 +208,10 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
 }
 
 function assertPlugin(value: unknown): asserts value is ReferencePlugin {
+  const prepare =
+    typeof value === "object" && value !== null
+      ? (value as { readonly prepare?: unknown }).prepare
+      : undefined;
   if (
     typeof value !== "object" ||
     value === null ||
@@ -215,9 +219,12 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     typeof (value as { id?: unknown }).id !== "string" ||
     (value as { id: string }).id.length === 0 ||
     typeof (value as { collect?: unknown }).collect !== "function" ||
-    typeof (value as { validate?: unknown }).validate !== "function"
+    typeof (value as { validate?: unknown }).validate !== "function" ||
+    (prepare !== undefined && typeof prepare !== "function")
   ) {
-    throw new TypeError("引用插件必须提供非空 id、validate 和 collect 函数。");
+    throw new TypeError(
+      "引用插件必须提供非空 id、validate 和 collect 函数；prepare（若提供）必须是函数。",
+    );
   }
 }
 
