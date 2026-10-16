@@ -25,14 +25,25 @@ export const vitestPluginId = "@dock/reference-vitest" as const;
 export type VitestRun = {
   readonly identity: string;
   readonly files: [string, ...string[]];
+  /** 扩大本次原生筛选的目标；它们不是必须成功的状态引用。 */
+  readonly additionalTests?: VitestTestSelection[];
   readonly testRoot?: string;
   readonly configFile?: string;
 };
 
 export type VitestRunOptions = {
   readonly files: readonly [string, ...string[]];
+  /** 只选择 run.files 中的附加测试，不要求它们成功。 */
+  readonly additionalTests?: readonly VitestTestSelection[];
   readonly testRoot?: string;
   readonly configFile?: string;
+};
+
+export type VitestTestSelection = {
+  /** 必须是此运行声明中的测试文件。 */
+  readonly file: string;
+  /** 完整原生测试标题。 */
+  readonly name: string;
 };
 
 export type VitestStatusValue = { readonly status: "passed" };
@@ -61,6 +72,14 @@ export function defineVitestRun(
   return {
     identity,
     files: [...options.files],
+    ...(options.additionalTests === undefined
+      ? {}
+      : {
+          additionalTests: options.additionalTests.map(({ file, name }) => ({
+            file,
+            name,
+          })),
+        }),
     ...(options.testRoot === undefined ? {} : { testRoot: options.testRoot }),
     ...(options.configFile === undefined
       ? {}
@@ -131,7 +150,10 @@ const vitestImplementation: VitestPlugin = definePlugin({
       const target = reference.target;
       const run = normalizeRun(target.run, context.root);
       const groupKey = `${run.identity}\0${JSON.stringify(run.configuration)}`;
-      const group = groups.get(groupKey) ?? { run, targets: [] };
+      const group = groups.get(groupKey) ?? {
+        run,
+        targets: [...run.additionalTests],
+      };
       group.targets.push({
         file: resolveTargetFile(run.testRoot, target.file),
         name: target.name,
@@ -175,12 +197,25 @@ function normalizeRun(run: VitestRun, root: string): NormalizedVitestRun {
   const files = [
     ...new Set(run.files.map((file) => resolvePath(testRoot, file))),
   ].sort();
+  const fileSet = new Set(files);
+  const additionalTests = uniqueSelectedTests(
+    (run.additionalTests ?? []).map(({ file, name }) => ({
+      file: resolveTargetFile(testRoot, file),
+      name,
+    })),
+  ).sort(compareSelectedTests);
+  if (additionalTests.some((selection) => !fileSet.has(selection.file))) {
+    throw new TypeError(
+      "Vitest 的 additionalTests 必须选择 run.files 中的测试文件。",
+    );
+  }
   const configFile = resolveConfigFile(root, run.configFile, testRoot);
   const configuration: JsonValue = {
     framework: vitestPluginId,
     root,
     testRoot,
     files,
+    ...(additionalTests.length === 0 ? {} : { additionalTests }),
     ...(configFile === undefined ? {} : { configFile }),
   };
   return {
@@ -188,6 +223,7 @@ function normalizeRun(run: VitestRun, root: string): NormalizedVitestRun {
     root,
     testRoot,
     files,
+    additionalTests,
     ...(configFile === undefined ? {} : { configFile }),
     configuration: configuration as NormalizedVitestRun["configuration"],
   };
@@ -316,6 +352,18 @@ function uniqueSelectedTests(
   });
 }
 
+function compareSelectedTests(
+  left: SelectedVitestTest,
+  right: SelectedVitestTest,
+): number {
+  const fileOrder = compareStrings(left.file, right.file);
+  return fileOrder === 0 ? compareStrings(left.name, right.name) : fileOrder;
+}
+
+function compareStrings(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
 function resolvePath(root: string, path: string): string {
   return path.startsWith("file:")
     ? fileURLToPath(new URL(path))
@@ -342,6 +390,23 @@ function assertRun(
       "Vitest 测试运行必须提供身份、至少一个测试文件和有效选项。",
     );
   }
+  if (
+    value.additionalTests !== undefined &&
+    (!Array.isArray(value.additionalTests) ||
+      !value.additionalTests.every(isVitestTestSelection))
+  ) {
+    throw new TypeError(
+      "Vitest additionalTests 必须提供有效文件和完整测试标题。",
+    );
+  }
+}
+
+function isVitestTestSelection(value: unknown): value is VitestTestSelection {
+  return (
+    isRecord(value) &&
+    isNonEmptyString(value.file) &&
+    isNonEmptyString(value.name)
+  );
 }
 
 function assertTestTarget(value: unknown): asserts value is VitestStatusTarget {

@@ -38,7 +38,13 @@ type TestModuleLike = {
   readonly moduleId?: unknown;
   readonly children?: {
     allTests?: () => Iterable<unknown>;
+    allSuites?: () => Iterable<unknown>;
   };
+  readonly errors?: () => readonly unknown[];
+};
+
+type TestSuiteLike = {
+  readonly fullName?: unknown;
   readonly errors?: () => readonly unknown[];
 };
 
@@ -76,6 +82,27 @@ export function captureVitestCandidate(
     }
     for (const error of list(safeCall(module.errors, moduleValue))) {
       errors.push(errorMessage(error));
+    }
+
+    const allSuites = safeCall(module.children?.allSuites, module.children);
+    if (allSuites === undefined || !isIterable(allSuites)) {
+      errors.push("Vitest 返回的测试模块没有完整测试组列表。");
+    } else {
+      for (const suiteValue of allSuites) {
+        if (!isRecord(suiteValue)) {
+          errors.push("Vitest 返回了无法解释的测试组记录。");
+          continue;
+        }
+        const suite = suiteValue as TestSuiteLike;
+        const suiteErrors = safeCall(suite.errors, suiteValue);
+        if (!Array.isArray(suiteErrors)) {
+          errors.push("Vitest 返回的测试组没有可解释的错误列表。");
+          continue;
+        }
+        for (const error of suiteErrors) {
+          errors.push(errorMessage(error));
+        }
+      }
     }
 
     const allTests = safeCall(module.children?.allTests, module.children);

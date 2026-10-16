@@ -16,6 +16,7 @@ export type NormalizedVitestRun = {
   readonly root: string;
   readonly testRoot: string;
   readonly files: readonly string[];
+  readonly additionalTests: readonly SelectedVitestTest[];
   readonly configFile?: string;
   readonly configuration: JsonValue;
 };

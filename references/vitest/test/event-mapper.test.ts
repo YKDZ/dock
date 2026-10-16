@@ -19,6 +19,7 @@ test("retry 次数使用 setup 实际开始数并与最终原生摘要核对", (
               options: { mode: "run" },
             },
           ],
+          allSuites: () => [],
         },
       },
     ],
@@ -32,6 +33,55 @@ test("retry 次数使用 setup 实际开始数并与最终原生摘要核对", (
   assert.deepEqual(candidate.errors, []);
   assert.equal(candidate.tests[0]?.status, "passed");
   assert.equal(candidate.tests[0]?.attemptCount, 2);
+});
+
+test("共同收尾错误使运行无效，无关断言失败仍只作为测试状态", () => {
+  const candidate = captureVitestCandidate(
+    [
+      {
+        moduleId: "/consumer/test/shared.test.mts",
+        errors: () => [],
+        children: {
+          allSuites: () => [
+            {
+              fullName: "共同收尾",
+              errors: () => [{ message: "嵌套 afterAll 失败" }],
+              state: () => "failed",
+            },
+          ],
+          allTests: () => [
+            {
+              fullName: "共同收尾 > 选定通过",
+              result: () => ({ state: "passed", errors: undefined }),
+              meta: () => ({ dockVitestAttemptCount: 1 }),
+              diagnostic: () => ({ retryCount: 0 }),
+              options: { mode: "run" },
+            },
+            {
+              fullName: "共同收尾 > 无关失败",
+              result: () => ({
+                state: "failed",
+                errors: [{ message: "无关纯断言失败" }],
+              }),
+              meta: () => ({ dockVitestAttemptCount: 1 }),
+              diagnostic: () => ({ retryCount: 0 }),
+              options: { mode: "run" },
+            },
+          ],
+        },
+      },
+    ],
+    [],
+    "failed",
+    "4.1.11",
+    "/consumer",
+  );
+
+  assert.deepEqual(candidate.errors, ["嵌套 afterAll 失败"]);
+  assert.deepEqual(
+    candidate.tests.map((entry) => entry.status),
+    ["passed", "failed"],
+  );
 });
 
 test("可解释的无关断言失败不使已通过测试的运行事实无效", () => {

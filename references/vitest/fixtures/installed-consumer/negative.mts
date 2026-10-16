@@ -7,6 +7,11 @@ defineVitestRun("空运行", { files: [] });
 const run = defineVitestRun("有效运行", {
   files: ["test/retry.test.mts"],
 });
+defineVitestRun("缺少额外测试标题", {
+  files: ["test/retry.test.mts"],
+  // @ts-expect-error 额外同次运行选择必须提供完整标题。
+  additionalTests: [{ file: "test/retry.test.mts" }],
+});
 // @ts-expect-error 测试标题必须是文本。
 vitestStatus("错误标题", run, { file: "test/retry.test.mts", name: 42 });
 

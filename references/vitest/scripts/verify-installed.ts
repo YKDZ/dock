@@ -178,6 +178,8 @@ async function verifyVersion(
     );
     const baselinePath = join(maintenanceRoot, "happy.baseline.json");
     await verifyHappyRoundTrip(dock, consumer, baselinePath);
+    await verifySuiteFailure(dock, consumer);
+    await verifyAdditionalTests(dock, consumer);
     await verifyStatusFailures(dock, consumer, baselinePath);
     await verifyFilterAndIdentity(dock, consumer, baselinePath);
     await verifyConflictPreflight(dock, consumer, baselinePath);
@@ -321,6 +323,83 @@ async function verifyStatusFailures(
     assertBindingError(requireReport(envelope), bindingId, code);
     assert.deepEqual(await readFile(baselinePath), baselineBytes);
   }
+}
+
+async function verifySuiteFailure(
+  dock: string,
+  consumer: string,
+): Promise<void> {
+  const maintenanceRoot = join(consumer, "maintenance-root");
+  const baselinePath = join(
+    maintenanceRoot,
+    "suite-close-failure.baseline.json",
+  );
+  const markerPath = join(maintenanceRoot, "suite-after-all.marker");
+  await rm(baselinePath, { force: true });
+  await rm(markerPath, { force: true });
+
+  const check = await runDock(
+    dock,
+    ["check", "--config", "suite-close-failure.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(check.code, 1, `${check.stdout}\n${check.stderr}`);
+  const checkEnvelope = parseEnvelope(check.stdout);
+  assert.equal(checkEnvelope.variant, "errors", check.stdout);
+  const checkReport = requireReport(checkEnvelope);
+  assertBindingError(checkReport, "共同收尾状态", "run-lifecycle-failed");
+  assertExecutionSummary(checkReport, 1, 3, 1);
+  assert.equal(await readFile(markerPath, "utf8"), "收尾已执行\n");
+
+  const update = await runDock(
+    dock,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "suite-close-failure.config.mts",
+      "--json",
+    ],
+    consumer,
+  );
+  assert.equal(update.code, 1, `${update.stdout}\n${update.stderr}`);
+  const updateEnvelope = parseEnvelope(update.stdout);
+  assert.equal(updateEnvelope.variant, "rejected", update.stdout);
+  assertBindingError(
+    requireReport(updateEnvelope),
+    "共同收尾状态",
+    "run-lifecycle-failed",
+  );
+  assertExecutionSummary(requireReport(updateEnvelope), 1, 3, 1);
+  await assert.rejects(access(baselinePath), { code: "ENOENT" });
+}
+
+async function verifyAdditionalTests(
+  dock: string,
+  consumer: string,
+): Promise<void> {
+  const markerPath = join(
+    consumer,
+    "maintenance-root",
+    "additional-test.marker",
+  );
+  await rm(markerPath, { force: true });
+
+  const update = await runDock(
+    dock,
+    ["baseline", "update", "--config", "additional-tests.config.mjs", "--json"],
+    consumer,
+  );
+  assert.equal(update.code, 0, `${update.stdout}\n${update.stderr}`);
+  const envelope = parseEnvelope(update.stdout);
+  assert.equal(envelope.variant, "updated", update.stdout);
+  const report = requireReport(envelope);
+  assertBindingHasNoErrors(report, "明确必需的状态");
+  assert.equal(
+    await readFile(markerPath, "utf8"),
+    "额外测试已执行\n额外测试已执行\n",
+  );
+  assertExecutionSummary(report, 1, 3, 1);
 }
 
 async function verifyFilterAndIdentity(

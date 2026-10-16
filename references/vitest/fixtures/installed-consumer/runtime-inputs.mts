@@ -12,6 +12,14 @@ assert.throws(
   () => defineVitestRun("空文件", { files: [] }),
   /至少一个测试文件/,
 );
+assert.throws(
+  () =>
+    defineVitestRun("缺少附加测试标题", {
+      files: ["test/retry.test.mts"],
+      additionalTests: [{ file: "test/retry.test.mts" }] as never,
+    }),
+  /additionalTests/,
+);
 
 const validRun = defineVitestRun("有效运行", {
   files: ["test/retry.test.mts"],
