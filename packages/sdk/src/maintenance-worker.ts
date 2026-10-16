@@ -7,12 +7,14 @@ import {
   MaintenanceError,
   updateConfig,
   type Operation,
+  type MaintenanceScope,
   type WorkerMessage,
 } from "./maintenance.ts";
 
 type WorkerInput = {
   readonly operation: Operation;
   readonly configPath: string;
+  readonly scope?: MaintenanceScope;
 };
 
 async function run(): Promise<WorkerMessage> {
@@ -51,8 +53,8 @@ async function run(): Promise<WorkerMessage> {
   try {
     const result =
       input.operation === "check"
-        ? await checkConfig(loaded.default, defaultRoot)
-        : await updateConfig(loaded.default, defaultRoot);
+        ? await checkConfig(loaded.default, defaultRoot, input.scope)
+        : await updateConfig(loaded.default, defaultRoot, input.scope);
     return { ok: true, result };
   } catch (error) {
     if (error instanceof MaintenanceError) throw error;

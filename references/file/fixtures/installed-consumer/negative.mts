@@ -47,6 +47,89 @@ type StringFactReference = Reference<
   string
 >;
 
+type HookActualReference = Reference<
+  "hook-file-info",
+  "hook-actual",
+  string,
+  string
+>;
+type HookWrongReference = Reference<
+  "hook-file-info",
+  "hook-actual",
+  { readonly path: string },
+  string
+>;
+const hookActual = createReference<
+  "hook-file-info",
+  "hook-actual",
+  string,
+  string
+>("hook-file-info", "hook-actual", "guide.md");
+
+// @ts-expect-error fileInfo 必须接受与 validate／collect 相同的引用目标。
+const invalidFileInfoHook = definePlugin({
+  id: "hook-file-info",
+  validate(_reference: HookActualReference): void {},
+  collect(_reference: HookActualReference): PluginResult<string> {
+    return { kind: "value", value: "ok" };
+  },
+  fileInfo(reference: HookWrongReference): string {
+    return reference.target.path.toUpperCase();
+  },
+});
+void invalidFileInfoHook;
+
+// @ts-expect-error validateReferences 必须检查同一插件声明的引用目标。
+const invalidPreflightHook = definePlugin({
+  id: "hook-file-info",
+  validate(_reference: HookActualReference): void {},
+  collect(_reference: HookActualReference): PluginResult<string> {
+    return { kind: "value", value: "ok" };
+  },
+  validateReferences(references: readonly HookWrongReference[]) {
+    return references.map((reference) => ({
+      identity: reference.target.path,
+      configuration: {},
+    }));
+  },
+});
+void invalidPreflightHook;
+
+const directFileInfoMismatch = {
+  id: "hook-file-info" as const,
+  validate(_reference: HookActualReference): void {},
+  collect(_reference: HookActualReference): PluginResult<string> {
+    return { kind: "value", value: "ok" };
+  },
+  fileInfo(reference: HookWrongReference): string {
+    return reference.target.path.toUpperCase();
+  },
+};
+defineConfig({
+  // @ts-expect-error 插件对象的 fileInfo 参数目标类型错误。
+  plugins: [directFileInfoMismatch],
+  bindings: [binding("hook-actual", [hookActual])],
+});
+
+const directPreflightMismatch = {
+  id: "hook-file-info" as const,
+  validate(_reference: HookActualReference): void {},
+  collect(_reference: HookActualReference): PluginResult<string> {
+    return { kind: "value", value: "ok" };
+  },
+  validateReferences(references: readonly HookWrongReference[]) {
+    return references.map((reference) => ({
+      identity: reference.target.path,
+      configuration: {},
+    }));
+  },
+};
+defineConfig({
+  // @ts-expect-error 插件对象的 validateReferences 参数目标类型错误。
+  plugins: [directPreflightMismatch],
+  bindings: [binding("hook-actual", [hookActual])],
+});
+
 const invalidPlugin = {
   id: "typed-plugin",
   validate(_reference: StringFactReference): void {},

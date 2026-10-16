@@ -5,8 +5,10 @@ import { createReference, definePlugin, readReference } from "@dock/sdk";
 import type {
   Config,
   JsonValue,
+  PluginContext,
   PluginReadResult,
   PluginExecutionContext,
+  PluginExecutionIdentity,
   PluginResult,
   ReadableReferenceOf,
   Reference,
@@ -288,6 +290,47 @@ const nodeTestImplementation = definePlugin({
       throw new TypeError("Node 测试状态引用不支持 selection。");
     }
     assertTestTarget(reference.target);
+  },
+  fileInfo(
+    reference: RuntimeNodeTestReference,
+    context: PluginContext,
+  ): string {
+    const target = getNodeTestTarget(reference.target);
+    const run = normalizeRun(target.run, context.root);
+    return resolveTargetFile(run.testRoot, target.file);
+  },
+  validateReferences(
+    references: readonly RuntimeNodeTestReference[],
+    context: PluginContext,
+  ): readonly PluginExecutionIdentity[] {
+    const declarations = new Map<
+      string,
+      {
+        readonly declaration: PluginExecutionIdentity;
+        readonly encoded: string;
+      }
+    >();
+    for (const reference of references) {
+      const target = getNodeTestTarget(reference.target);
+      const run = normalizeRun(target.run, context.root);
+      const encoded = JSON.stringify(run.configuration);
+      const prior = declarations.get(run.identity);
+      if (prior !== undefined && prior.encoded !== encoded) {
+        throw new TypeError(
+          `Node 测试运行身份 ${run.identity} 在完整配置中对应不同设置。`,
+        );
+      }
+      if (prior === undefined) {
+        declarations.set(run.identity, {
+          declaration: {
+            identity: run.identity,
+            configuration: run.configuration,
+          },
+          encoded,
+        });
+      }
+    }
+    return [...declarations.values()].map(({ declaration }) => declaration);
   },
   prepare(
     references: readonly RuntimeNodeTestReference[],

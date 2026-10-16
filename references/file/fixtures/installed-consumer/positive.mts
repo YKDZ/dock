@@ -30,6 +30,15 @@ const fixturePlugin: ReferencePlugin<
 > = definePlugin({
   id: "fixture-plugin",
   validate(): void {},
+  fileInfo(reference): string {
+    return reference.target.path;
+  },
+  validateReferences(references) {
+    return references.map((reference) => ({
+      identity: reference.id,
+      configuration: reference.target,
+    }));
+  },
   collect(reference, context): PluginResult<string> {
     return {
       kind: "value",
@@ -51,6 +60,15 @@ const directPlugin = {
   },
   collect(reference: DirectPluginReference): PluginResult<string> {
     return { kind: "value", value: reference.target };
+  },
+  fileInfo(reference: DirectPluginReference): string {
+    return reference.target;
+  },
+  validateReferences(references: readonly DirectPluginReference[]) {
+    return references.map((reference) => ({
+      identity: reference.id,
+      configuration: { target: reference.target },
+    }));
   },
 };
 const directDocument = createReference<

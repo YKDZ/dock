@@ -83,17 +83,6 @@ assert.deepEqual(
   identityChange.bindings[0]?.changes.map((change) => change.kind),
   ["reference-definition"],
 );
-const definition = identityChange.bindings[0]?.changes[0];
-assert.equal(definition?.kind, "reference-definition");
-assert.deepEqual(definition?.before.target, {
-  pluginId: "@dock/reference-file",
-  target: "guide.txt",
-});
-assert.deepEqual(definition?.after.target, {
-  pluginId: "@fixture/same-target-reader",
-  target: "guide.txt",
-});
-
 const empty = defineConfig({ plugins: [], bindings: [] });
 const untracked = await updateBaseline(empty);
 assert.equal(untracked.status, "updated");

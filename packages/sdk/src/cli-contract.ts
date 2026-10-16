@@ -8,7 +8,7 @@ import {
 import { z } from "zod";
 
 import { check, MaintenanceError, updateBaseline } from "./maintenance.ts";
-import type { CheckReport } from "./maintenance.ts";
+import type { CheckReport, MaintenanceScope } from "./maintenance.ts";
 
 const define = defineCli();
 const reportPayload = z.object({ report: z.unknown() });
@@ -36,8 +36,28 @@ const checkCommand = define.command("check")({
       longOption: "--config",
       description: "显式选择 ESM 配置入口",
     },
+    binding: {
+      kind: "repeatableOption",
+      longOption: "--binding",
+      description: "选择关联 ID，可重复提供",
+    },
+    reference: {
+      kind: "repeatableOption",
+      longOption: "--reference",
+      description: "选择引用 ID，可重复提供",
+    },
+    file: {
+      kind: "repeatableOption",
+      longOption: "--file",
+      description: "选择直接目标文件，可重复提供",
+    },
   },
-  input: z.object({ config: z.string().min(1) }),
+  input: z.object({
+    config: z.string().min(1),
+    binding: z.array(z.string().min(1)).optional(),
+    reference: z.array(z.string().min(1)).optional(),
+    file: z.array(z.string().min(1)).optional(),
+  }),
   success: {
     kind: "data",
     variants: {
@@ -71,7 +91,7 @@ const checkCommand = define.command("check")({
   },
   async handler({ input, outcome }) {
     try {
-      const report = await check(input.config);
+      const report = await check(input.config, inputScope(input));
       const hasErrors = report.bindings.some((binding) => "errors" in binding);
       const hasChanges = report.bindings.some(
         (binding) => binding.changes.length > 0,
@@ -96,8 +116,28 @@ const updateCommand = define.command("update")({
       longOption: "--config",
       description: "显式选择 ESM 配置入口",
     },
+    binding: {
+      kind: "repeatableOption",
+      longOption: "--binding",
+      description: "选择关联 ID，可重复提供",
+    },
+    reference: {
+      kind: "repeatableOption",
+      longOption: "--reference",
+      description: "选择引用 ID，可重复提供",
+    },
+    file: {
+      kind: "repeatableOption",
+      longOption: "--file",
+      description: "选择直接目标文件，可重复提供",
+    },
   },
-  input: z.object({ config: z.string().min(1) }),
+  input: z.object({
+    config: z.string().min(1),
+    binding: z.array(z.string().min(1)).optional(),
+    reference: z.array(z.string().min(1)).optional(),
+    file: z.array(z.string().min(1)).optional(),
+  }),
   success: {
     kind: "data",
     variants: {
@@ -131,7 +171,7 @@ const updateCommand = define.command("update")({
   },
   async handler({ input, outcome }) {
     try {
-      const result = await updateBaseline(input.config);
+      const result = await updateBaseline(input.config, inputScope(input));
       if (result.status === "updated") {
         return outcome.data.updated({ report: result.report });
       }
@@ -203,6 +243,25 @@ function asFailure(error: unknown): { code: string; message: string } {
   return {
     code: "maintenance-failed",
     message: error instanceof Error ? error.message : String(error),
+  };
+}
+
+function inputScope(input: {
+  readonly binding?: readonly string[] | undefined;
+  readonly reference?: readonly string[] | undefined;
+  readonly file?: readonly string[] | undefined;
+}): MaintenanceScope | undefined {
+  if (
+    input.binding === undefined &&
+    input.reference === undefined &&
+    input.file === undefined
+  ) {
+    return undefined;
+  }
+  return {
+    ...(input.binding === undefined ? {} : { binding: input.binding }),
+    ...(input.reference === undefined ? {} : { reference: input.reference }),
+    ...(input.file === undefined ? {} : { file: input.file }),
   };
 }
 

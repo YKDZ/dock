@@ -25,11 +25,13 @@ type CliEnvelope = {
   readonly kind: string;
   readonly variant?: string;
   readonly data?: {
+    readonly code?: string;
     readonly report?: unknown;
   };
 };
 
 type MaintenanceReport = {
+  readonly scope?: readonly string[];
   readonly execution?: {
     readonly commandAttempts: number;
     readonly failedCommands: number;
@@ -38,6 +40,10 @@ type MaintenanceReport = {
   readonly bindings: readonly {
     readonly bindingId: string;
     readonly errors?: readonly { readonly code: string }[];
+    readonly changes?: readonly {
+      readonly kind: string;
+      readonly referenceId: string;
+    }[];
   }[];
 };
 
@@ -119,17 +125,45 @@ async function verifyCrossFrameworkIdentityConflict(
     );
     const result = await runDock(
       dock,
-      ["check", "--config", "cross-framework.config.mts", "--json"],
+      [
+        "check",
+        "--config",
+        "cross-framework.config.mts",
+        "--binding",
+        "Node 运行",
+        "--json",
+      ],
       consumer,
     );
     assert.equal(result.code, 1, result.stderr);
-    const envelope = parseEnvelope(result.stdout);
-    assert.equal(envelope.variant, "errors");
-    const report = requireReport(envelope);
-    assertBindingError(report, "Node 运行", "run-lifecycle-failed");
-    assertBindingError(report, "Vitest 运行", "run-lifecycle-failed");
-    assertExecutionSummary(report, 0, 0);
+    assert.equal(
+      parseEnvelope(result.stderr).data?.code,
+      "execution-identity-conflict",
+    );
     await assert.rejects(access(marker), { code: "ENOENT" });
+
+    const update = await runDock(
+      dock,
+      [
+        "baseline",
+        "update",
+        "--config",
+        "cross-framework.config.mts",
+        "--binding",
+        "Node 运行",
+        "--json",
+      ],
+      consumer,
+    );
+    assert.equal(update.code, 1, update.stderr);
+    assert.equal(
+      parseEnvelope(update.stderr).data?.code,
+      "execution-identity-conflict",
+    );
+    await assert.rejects(access(marker), { code: "ENOENT" });
+    await assert.rejects(access(join(maintenanceRoot, "dock.baseline.json")), {
+      code: "ENOENT",
+    });
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
@@ -184,6 +218,7 @@ async function verifyVersion(
     await verifyAdditionalTests(dock, consumer);
     await verifyStatusFailures(dock, consumer, baselinePath);
     await verifyFilterAndIdentity(dock, consumer, baselinePath);
+    await verifyInstalledScope(dock, consumer);
     await verifyConflictPreflight(dock, consumer, baselinePath);
     await verifyLifecycleFailures(dock, consumer, baselinePath, version);
     await verifyOperationLocalExecution(consumer);
@@ -193,6 +228,70 @@ async function verifyVersion(
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+}
+
+async function verifyInstalledScope(
+  dock: string,
+  consumer: string,
+): Promise<void> {
+  const config = "scope.config.mts";
+  const oldFile = "../test-workspace/test/scope-old.test.mts";
+  const newFile = "../test-workspace/test/scope-new.test.mts";
+  const oldTarget = "test/scope-old.test.mts";
+  const newTarget = "test/scope-new.test.mts";
+  const arguments_ = ["--config", config, "--json"];
+
+  const initial = await runDock(
+    dock,
+    ["baseline", "update", ...arguments_],
+    consumer,
+    { DOCK_VITEST_SCOPE_TARGET: oldTarget },
+  );
+  assert.equal(initial.code, 0, initial.stderr);
+  assert.equal(parseEnvelope(initial.stdout).variant, "updated");
+
+  const historical = await runDock(
+    dock,
+    ["check", "--config", config, "--file", oldFile, "--json"],
+    consumer,
+    { DOCK_VITEST_SCOPE_TARGET: newTarget },
+  );
+  assert.equal(historical.code, 1, historical.stderr);
+  assert.equal(parseEnvelope(historical.stdout).variant, "changed");
+  assertScopeDefinitionChange(historical.stdout, "scope-vitest-reference");
+
+  const current = await runDock(
+    dock,
+    ["check", "--config", config, "--file", newFile, "--json"],
+    consumer,
+    { DOCK_VITEST_SCOPE_TARGET: newTarget },
+  );
+  assert.equal(current.code, 1, current.stderr);
+  assert.equal(parseEnvelope(current.stdout).variant, "changed");
+  assertScopeDefinitionChange(current.stdout, "scope-vitest-reference");
+
+  const localUpdate = await runDock(
+    dock,
+    ["baseline", "update", "--config", config, "--file", oldFile, "--json"],
+    consumer,
+    { DOCK_VITEST_SCOPE_TARGET: newTarget },
+  );
+  assert.equal(localUpdate.code, 0, localUpdate.stderr);
+  assert.deepEqual(requireReport(parseEnvelope(localUpdate.stdout)).scope, [
+    "scope-vitest-policy",
+  ]);
+
+  const consistent = await runDock(
+    dock,
+    ["check", "--config", config, "--file", newFile, "--json"],
+    consumer,
+    { DOCK_VITEST_SCOPE_TARGET: newTarget },
+  );
+  assert.equal(consistent.code, 0, consistent.stderr);
+  assert.equal(parseEnvelope(consistent.stdout).variant, "consistent");
+  assert.deepEqual(requireReport(parseEnvelope(consistent.stdout)).scope, [
+    "scope-vitest-policy",
+  ]);
 }
 
 async function verifyInstalledTypes(
@@ -458,12 +557,10 @@ async function verifyConflictPreflight(
     consumer,
   );
   assert.equal(check.code, 1, check.stderr);
-  const checkEnvelope = parseEnvelope(check.stdout);
-  assert.equal(checkEnvelope.variant, "errors");
-  const report = requireReport(checkEnvelope);
-  assertBindingError(report, "冲突首项", "run-lifecycle-failed");
-  assertBindingError(report, "冲突次项", "run-lifecycle-failed");
-  assertExecutionSummary(report, 0, 0);
+  assert.equal(
+    parseEnvelope(check.stderr).data?.code,
+    "plugin-reference-validation-failed",
+  );
   await assert.rejects(access(marker), { code: "ENOENT" });
 
   const update = await runDock(
@@ -472,8 +569,10 @@ async function verifyConflictPreflight(
     consumer,
   );
   assert.equal(update.code, 1, update.stderr);
-  assert.equal(parseEnvelope(update.stdout).variant, "rejected");
-  assertExecutionSummary(requireReport(parseEnvelope(update.stdout)), 0, 0);
+  assert.equal(
+    parseEnvelope(update.stderr).data?.code,
+    "plugin-reference-validation-failed",
+  );
   await assert.rejects(access(marker), { code: "ENOENT" });
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
 }
@@ -616,8 +715,9 @@ async function runDock(
   dock: string,
   arguments_: readonly string[],
   cwd: string,
+  env: NodeJS.ProcessEnv = {},
 ): Promise<ProcessResult> {
-  return await run(dock, arguments_, cwd);
+  return await run(dock, arguments_, cwd, 60_000, env);
 }
 
 function run(
@@ -625,6 +725,7 @@ function run(
   arguments_: readonly string[],
   cwd: string,
   timeoutMs = 60_000,
+  env: NodeJS.ProcessEnv = {},
 ): Promise<ProcessResult> {
   return new Promise((resolveResult, rejectResult) => {
     let stdout = "";
@@ -635,6 +736,7 @@ function run(
       child = spawn(command, [...arguments_], {
         cwd,
         detached: process.platform !== "win32",
+        env: { ...process.env, ...env },
         stdio: ["ignore", "pipe", "pipe"],
       });
     } catch (error) {
@@ -699,6 +801,27 @@ function assertBindingError(
     binding.errors?.some((error) => error.code === code),
     `关联 ${bindingId} 未报告 ${code}：${JSON.stringify(binding.errors)}`,
   );
+}
+
+function assertScopeDefinitionChange(
+  output: string,
+  referenceId: string,
+): void {
+  const report = requireReport(parseEnvelope(output));
+  assert.deepEqual(report.scope, ["scope-vitest-policy"]);
+  const binding = report.bindings.find(
+    (candidate) => candidate.bindingId === "scope-vitest-policy",
+  );
+  assert.ok(binding, "缺少 Vitest 范围关联");
+  assert.ok(
+    binding.changes?.some(
+      (change) =>
+        change.kind === "reference-definition" &&
+        change.referenceId === referenceId,
+    ),
+    `文件改指没有报告引用定义变化：${JSON.stringify(binding.changes)}`,
+  );
+  assertBindingHasNoErrors(report, "scope-vitest-policy");
 }
 
 function assertBindingHasSomeError(

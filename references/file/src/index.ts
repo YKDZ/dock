@@ -99,6 +99,17 @@ const implementation = definePlugin({
       );
     }
   },
+  fileInfo(reference: FileReference, context: PluginContext): string {
+    try {
+      assertFileTarget(reference.target);
+      return resolveTarget(reference.target, context.root);
+    } catch (error) {
+      throw new TypeError(
+        `文件引用 ${reference.id} 无法说明文件目标：${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+  },
   async collect(
     reference: FileReference,
     context: PluginContext,

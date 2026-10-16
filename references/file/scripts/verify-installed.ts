@@ -17,6 +17,7 @@ import { fileURLToPath } from "node:url";
 
 import { verifyInstalledCurrentConfig } from "./verify-installed-current-config.ts";
 import { verifyInstalledPaths } from "./verify-installed-paths.ts";
+import { verifyInstalledScope } from "./verify-installed-scope.ts";
 import { verifyInstalledTextRead } from "./verify-installed-text-read.ts";
 
 type ProcessResult = {
@@ -68,6 +69,7 @@ async function main(): Promise<void> {
     await runInstalledCli(consumer, tarballs);
     await verifyInstalledPaths(consumer);
     await verifyInstalledTextRead(consumer);
+    await verifyInstalledScope(consumer);
     await verifyInstalledCurrentConfig(consumer);
     process.stdout.write("干净消费者安装、公开声明与 dock CLI 验收通过。\n");
   } finally {
@@ -87,6 +89,8 @@ async function runConsumerTypechecks(consumer: string): Promise<void> {
   await copyFixture(consumer, "physical-multiversion.mts");
   await copyFixture(consumer, "paths-positive.mts");
   await copyFixture(consumer, "paths-negative.mts");
+  await copyFixture(consumer, "scope-positive.mts");
+  await copyFixture(consumer, "scope-negative.mts");
   await copyFile(
     join(fixtureDirectory, "secondary", "physical-author.mts"),
     join(consumer, "secondary", "physical-author.mts"),
@@ -401,22 +405,12 @@ async function runInstalledCli(
         readonly bindings: readonly {
           readonly changes: readonly {
             readonly kind: string;
-            readonly before?: { readonly target: unknown };
-            readonly after?: { readonly target: unknown };
           }[];
         }[];
       }
     | undefined;
   const handlerChange = changedHandlerReport?.bindings[0]?.changes[0];
   assert.equal(handlerChange?.kind, "reference-definition");
-  assert.deepEqual(handlerChange?.before?.target, {
-    pluginId: "@dock/reference-file",
-    target: "copy.md",
-  });
-  assert.deepEqual(handlerChange?.after?.target, {
-    pluginId: "@fixture/same-target-reader",
-    target: "copy.md",
-  });
   assert.deepEqual(
     changedHandlerReport?.bindings[0]?.changes.map((change) => change.kind),
     ["reference-definition"],
