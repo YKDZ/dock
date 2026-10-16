@@ -15,19 +15,31 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json --pretty false",
+    "pack": "mkdir -p .artifacts && pnpm pack --pack-destination .artifacts",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix . --fix",
+    "test": "node --conditions=source --test --test-reporter=spec 'test/**/*.test.ts'",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
+  "dependencies": {
+    "@dock/reference-file": "workspace:*",
+    "mdast-util-from-markdown": "2.0.2",
+    "mdast-util-gfm": "3.0.0",
+    "micromark-extension-gfm": "3.0.0"
+  },
   "devDependencies": {
+    "@dock/sdk": "workspace:*",
     "@dock/typescript-config": "workspace:*",
     "@types/node": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript-7": "catalog:"
+  },
+  "peerDependencies": {
+    "@dock/sdk": "0.0.0"
   },
   "engines": {
     "node": "24"
