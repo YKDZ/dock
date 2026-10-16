@@ -292,6 +292,26 @@ async function verifyHappyRoundTrip(
   const checked = parseEnvelope(current.stdout);
   assert.equal(checked.variant, "consistent");
   assertExecutionSummary(requireReport(checked), 1, 2);
+
+  const currentText = await runDock(
+    bin,
+    ["check", "--config", "dock.config.mts"],
+    consumer,
+  );
+  assert.equal(currentText.code, 0, currentText.stderr);
+  assert.match(
+    currentText.stdout,
+    /引用 主要业务状态，文件 .*test\/happy\.test\.mts/,
+  );
+  assert.match(
+    currentText.stdout,
+    /引用 辅助业务状态，文件 .*test\/happy\.test\.mts/,
+  );
+  assert.match(currentText.stdout, /当前事实：\{"status":"passed"\}/);
+  assert.doesNotMatch(
+    currentText.stdout,
+    /"pluginId"|"kind"|"files"|"testRoot"|"observationKeys"|"namePattern"/,
+  );
 }
 
 async function verifyObservationAndReadScenarios(

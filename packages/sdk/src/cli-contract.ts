@@ -330,9 +330,9 @@ function formatBinding(binding: BindingCheckResult): string[] {
   }
   if ("current" in binding) {
     for (const reference of Object.values(binding.current.references)) {
-      lines.push(
-        `引用 ${reference.definition.id}，目标 ${JSON.stringify(reference.definition.target)}`,
-      );
+      const fileInfo = referenceFileInfo(reference.definition.target);
+      const file = fileInfo === undefined ? "" : `，文件 ${fileInfo}`;
+      lines.push(`引用 ${reference.definition.id}${file}`);
       lines.push(`当前事实：${JSON.stringify(reference.value)}`);
       if (reference.range !== undefined) {
         lines.push(
@@ -368,7 +368,37 @@ function describeChange(change: BindingCheckResult["changes"][number]): string {
     return `关联定义：旧值 ${JSON.stringify(change.before)}；新值 ${JSON.stringify(change.after)}`;
   }
   if (change.kind === "reference-definition") {
-    return `引用 ${change.referenceId} 定义：旧值 ${JSON.stringify(change.before)}；新值 ${JSON.stringify(change.after)}`;
+    return `引用 ${change.referenceId} 定义变化${formatDefinitionLocations(change.before, change.after)}`;
   }
   return JSON.stringify(change);
+}
+
+function formatDefinitionLocations(before: unknown, after: unknown): string {
+  const beforeFile = definitionFileInfo(before);
+  const afterFile = definitionFileInfo(after);
+  if (beforeFile !== undefined && afterFile !== undefined) {
+    return beforeFile === afterFile
+      ? `（目标文件 ${afterFile}）`
+      : `：旧目标文件 ${beforeFile}；新目标文件 ${afterFile}`;
+  }
+  if (beforeFile !== undefined) return `：旧目标文件 ${beforeFile}`;
+  if (afterFile !== undefined) return `：新目标文件 ${afterFile}`;
+  return "";
+}
+
+function definitionFileInfo(definition: unknown): string | undefined {
+  if (!isRecord(definition)) return undefined;
+  return referenceFileInfo(definition.target);
+}
+
+function referenceFileInfo(target: unknown): string | undefined {
+  if (!isRecord(target)) return undefined;
+  const fileInfo = target.fileInfo;
+  return typeof fileInfo === "string" && fileInfo.length > 0
+    ? fileInfo
+    : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }

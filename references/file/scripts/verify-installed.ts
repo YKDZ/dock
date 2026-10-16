@@ -326,8 +326,10 @@ async function runInstalledCli(
   );
   assert.equal(textCheck.code, 0, textCheck.stderr);
   assert.match(textCheck.stdout, /范围：guide-policy/);
+  assert.match(textCheck.stdout, /引用 guide，文件 .*guide\.md/);
   assert.match(textCheck.stdout, /当前事实："第一版正文\\n"/);
   assert.match(textCheck.stdout, /位置 guide\.md（文本偏移 0–6）/);
+  assert.doesNotMatch(textCheck.stdout, /"pluginId"|"fileInfo"/);
 
   const childDirectory = join(consumer, "scripts");
   await mkdir(childDirectory, { recursive: true });
@@ -353,6 +355,17 @@ async function runInstalledCli(
     targetChangeReport.bindings[0]?.changes[0]?.kind,
     "reference-definition",
   );
+  const targetChangeText = await runDock(
+    bin,
+    ["check", "--config", "dock.config.mjs"],
+    consumer,
+  );
+  assert.equal(targetChangeText.code, 1, targetChangeText.stderr);
+  assert.match(targetChangeText.stdout, /引用 guide 定义变化/);
+  assert.match(targetChangeText.stdout, /旧目标文件 .*guide\.md/);
+  assert.match(targetChangeText.stdout, /新目标文件 .*copy\.md/);
+  assert.match(targetChangeText.stdout, /当前事实："第一版正文\\n"/);
+  assert.doesNotMatch(targetChangeText.stdout, /"pluginId"|"fileInfo"/);
 
   const acceptTarget = await runDock(
     bin,
@@ -439,6 +452,14 @@ async function runInstalledCli(
   );
   assert.equal(missingTarget.code, 1, missingTarget.stderr);
   assert.equal(parseEnvelope(missingTarget.stdout).variant, "errors");
+  const missingTargetText = await runDock(
+    bin,
+    ["check", "--config", "dock.config.mjs"],
+    consumer,
+  );
+  assert.equal(missingTargetText.code, 1, missingTargetText.stderr);
+  assert.match(missingTargetText.stdout, /关联 guide-policy/);
+  assert.match(missingTargetText.stdout, /错误 guide/);
   const rejectedUpdate = await runDock(
     bin,
     ["baseline", "update", "--config", "dock.config.mjs", "--json"],
