@@ -2,13 +2,13 @@ import {
   assertBaseline,
   assertBindingDefinition,
   assertReferenceDefinition,
-  isJsonValue,
 } from "./contracts.ts";
 import type {
   BindingCheckResult,
   BindingChange,
   BindingDefinition,
   BindingBaseline,
+  CheckContext,
   CheckInput,
   CheckReport,
   CollectionMemberChange,
@@ -20,6 +20,7 @@ import type {
   ReferenceResult,
   ReferenceMemberResult,
 } from "./contracts.ts";
+import { canonicalJson, copyJsonValue, isJsonValue } from "./json-value.ts";
 
 type CollectionSnapshot = {
   definition: ReferenceDefinition;
@@ -31,6 +32,33 @@ type CollectionSnapshot = {
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** 完整声明的默认范围包含历史关联，以保留取消跟踪的语义。 */
+export function resolveCheckScope(input: CheckContext): string[] {
+  const completeness = input.declarationCompleteness ?? "partial";
+  if (completeness !== "complete" && completeness !== "partial")
+    throw new TypeError("关联声明完整性必须是 complete 或 partial。");
+  const declaredBindingIds = input.bindings.map((binding) => binding.id).sort();
+  const defaultScope =
+    completeness === "complete"
+      ? [
+          ...new Set([
+            ...declaredBindingIds,
+            ...Object.keys(input.baseline?.bindings ?? {}),
+          ]),
+        ].sort()
+      : declaredBindingIds;
+  const scope = [...(input.scope ?? defaultScope)];
+  const seen = new Set<string>();
+  for (const bindingId of scope) {
+    if (typeof bindingId !== "string" || bindingId.length === 0)
+      throw new TypeError("检查范围中的关联 ID 必须是非空文本。");
+    if (seen.has(bindingId))
+      throw new TypeError(`检查范围重复选择关联：${bindingId}`);
+    seen.add(bindingId);
+  }
+  return scope;
 }
 
 function ownEntry<T>(
@@ -50,16 +78,7 @@ function memberValue(members: readonly ReferenceMemberResult[]): JsonValue {
   return [...members]
     .filter(isValueMember)
     .sort((left, right) => compareText(left.id, right.id))
-    .map((member) => ({ id: member.id, value: structuredClone(member.value) }));
-}
-
-function canonical(value: JsonValue): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
-  return `{${Object.entries(value)
-    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonical(item)}`)
-    .join(",")}}`;
+    .map((member) => ({ id: member.id, value: copyJsonValue(member.value) }));
 }
 
 function comparableReference(definition: ReferenceDefinition): JsonValue {
@@ -80,7 +99,7 @@ function comparableBinding(definition: BindingDefinition): JsonValue {
 }
 
 function same(left: JsonValue, right: JsonValue): boolean {
-  return canonical(left) === canonical(right);
+  return canonicalJson(left) === canonicalJson(right);
 }
 
 function collectCurrent(
@@ -493,27 +512,8 @@ export function check(input: CheckInput): CheckReport {
   }
 
   const completeness = input.declarationCompleteness ?? "partial";
-  if (completeness !== "complete" && completeness !== "partial")
-    throw new TypeError("关联声明完整性必须是 complete 或 partial。");
   const declaredBindingIds = [...declaredBindings.keys()].sort();
-  const defaultScope =
-    completeness === "complete"
-      ? [
-          ...new Set([
-            ...declaredBindingIds,
-            ...Object.keys(input.baseline?.bindings ?? {}),
-          ]),
-        ].sort()
-      : declaredBindingIds;
-  const scope = [...(input.scope ?? defaultScope)];
-  const seenScopeIds = new Set<string>();
-  for (const bindingId of scope) {
-    if (typeof bindingId !== "string" || bindingId.length === 0)
-      throw new TypeError("检查范围中的关联 ID 必须是非空文本。");
-    if (seenScopeIds.has(bindingId))
-      throw new TypeError(`检查范围重复选择关联：${bindingId}`);
-    seenScopeIds.add(bindingId);
-  }
+  const scope = resolveCheckScope(input);
 
   const facts = new Map<string, ReferenceResult[]>();
   for (const fact of input.facts) {

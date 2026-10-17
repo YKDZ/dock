@@ -8,14 +8,14 @@ import { collectNodeRun } from "./event-mapper.ts";
 import type {
   NodeEvent,
   NodeSelectedTest,
-  NormalizedNodeRun,
+  NodeRunConfiguration,
 } from "./types.ts";
 
 const diagnosticLimit = 8_192;
 
 /** 通过 Node 原生 `--test` 执行一次声明，并只读取其 reporter 事件流。 */
 export async function executeNodeTestRun(
-  run: NormalizedNodeRun,
+  run: NodeRunConfiguration,
   selectedTests: readonly NodeSelectedTest[],
 ): Promise<ExecutionRunRecord> {
   const reporterPath = fileURLToPath(

@@ -87,10 +87,7 @@ const invalidPreflightHook = definePlugin({
     return { kind: "value", value: "ok" };
   },
   validateReferences(references: readonly HookWrongReference[]) {
-    return references.map((reference) => ({
-      identity: reference.target.path,
-      configuration: {},
-    }));
+    for (const reference of references) void reference.target.path;
   },
 });
 void invalidPreflightHook;
@@ -118,10 +115,7 @@ const directPreflightMismatch = {
     return { kind: "value", value: "ok" };
   },
   validateReferences(references: readonly HookWrongReference[]) {
-    return references.map((reference) => ({
-      identity: reference.target.path,
-      configuration: {},
-    }));
+    for (const reference of references) void reference.target.path;
   },
 };
 defineConfig({

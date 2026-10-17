@@ -1,0 +1,29 @@
+{
+  "name": "@dock/consumer-readme",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "dock:check": "dock check --config dock.config.ts",
+    "dock:baseline": "dock baseline update --config dock.config.ts && oxfmt --write dock.baseline.json"
+  },
+  "devDependencies": {
+    "@dock/reference-file": "workspace:*",
+    "@dock/reference-markdown": "workspace:*",
+    "@dock/reference-node-test": "workspace:*",
+    "@dock/sdk": "workspace:*",
+    "@types/node": "catalog:",
+    "dock": "workspace:*",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "oxlint-tsgolint": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "24.21.0"
+  }
+}

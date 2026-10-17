@@ -11,8 +11,14 @@ import {
 } from "@ykdz/cli-contract";
 import { z } from "zod";
 
-import { check, MaintenanceError, updateBaseline } from "./maintenance.ts";
+import {
+  check,
+  inspect,
+  MaintenanceError,
+  updateBaseline,
+} from "./maintenance.ts";
 import type { CheckReport, MaintenanceScope } from "./maintenance.ts";
+import type { ResolvedMaintenance } from "./resolution.ts";
 
 const define = defineCli();
 const reportPayload = z.object({ report: z.unknown() });
@@ -31,6 +37,69 @@ const rejectedUpdatePayload = z.object({
   errors: z.array(updateIssueSchema),
 });
 const failurePayload = z.object({ code: z.string(), message: z.string() });
+
+const inspectCommand = define.command("inspect")({
+  kind: "command",
+  parent: "dock",
+  name: "inspect",
+  description: "查看解析后的声明、检查范围与文件信息",
+  fields: {
+    config: {
+      kind: "valueOption",
+      longOption: "--config",
+      description: "显式选择 ESM 配置入口",
+    },
+    binding: {
+      kind: "repeatableOption",
+      longOption: "--binding",
+      description: "选择关联 ID，可重复提供",
+    },
+    reference: {
+      kind: "repeatableOption",
+      longOption: "--reference",
+      description: "选择引用 ID，可重复提供",
+    },
+    file: {
+      kind: "repeatableOption",
+      longOption: "--file",
+      description: "选择直接目标文件，可重复提供",
+    },
+  },
+  input: z.object({
+    config: z.string().min(1),
+    binding: z.array(z.string().min(1)).optional(),
+    reference: z.array(z.string().min(1)).optional(),
+    file: z.array(z.string().min(1)).optional(),
+  }),
+  success: {
+    kind: "data",
+    variants: {
+      inspected: {
+        description: "已解析声明与检查范围",
+        schema: z.object({ resolution: z.unknown() }),
+        exitCode: 0,
+        text: ({ resolution }) =>
+          text.lines(formatResolution(resolution as ResolvedMaintenance)),
+      },
+    },
+  },
+  failures: {
+    maintenanceFailed: {
+      description: "配置加载或解析失败",
+      schema: failurePayload,
+      exitCode: 1,
+      text: ({ code, message }) => text.lines([`维护失败（${code}）`, message]),
+    },
+  },
+  async handler({ input, outcome }) {
+    try {
+      const resolution = await inspect(input.config, inputScope(input));
+      return outcome.data.inspected({ resolution });
+    } catch (error) {
+      return outcome.failure.maintenanceFailed(asFailure(error));
+    }
+  },
+});
 
 const checkCommand = define.command("check")({
   kind: "command",
@@ -238,6 +307,7 @@ export const cli = define({
       name: "baseline",
       description: "基线维护命令",
     },
+    ...inspectCommand,
     ...checkCommand,
     ...updateCommand,
   },
@@ -297,6 +367,55 @@ function formatReport(report: CheckReport): [string, ...string[]] {
     lines.push(...formatBinding(binding));
   }
   return lines as [string, ...string[]];
+}
+
+function formatResolution(
+  resolution: ResolvedMaintenance,
+): [string, ...string[]] {
+  const { context } = resolution;
+  const scope = context.scope;
+  const lines: [string, ...string[]] = [
+    `根目录：${resolution.root}`,
+    `基线：${resolution.baselinePath}`,
+    `基线状态：${context.baseline === undefined ? "尚未创建" : "已读取"}`,
+    `检查范围：${scope.length === 0 ? "无关联" : scope.join("、")}`,
+    `插件：${resolution.plugins.length === 0 ? "无" : resolution.plugins.join("、")}`,
+  ];
+  if (resolution.configPath !== undefined) {
+    lines.unshift(`配置入口：${resolution.configPath}`);
+  }
+  for (const reference of context.references) {
+    lines.push(`引用声明 ${reference.id}：${JSON.stringify(reference)}`);
+  }
+  for (const binding of context.bindings) {
+    lines.push(`关联声明 ${binding.id}：${JSON.stringify(binding)}`);
+  }
+  for (const run of resolution.runs) {
+    lines.push(
+      `运行声明 ${run.identity}（插件 ${run.pluginId}）：关联引用 ${run.references.join("、")}；本次选中 ${run.selectedReferences.length === 0 ? "无" : run.selectedReferences.join("、")}`,
+    );
+  }
+  for (const file of resolution.files) {
+    lines.push(`目标文件 ${file.path}：${file.references.join("、")}`);
+  }
+  for (const source of resolution.declarationSources.config) {
+    lines.push(`配置来源：${source}`);
+  }
+  for (const [id, sources] of Object.entries(
+    resolution.declarationSources.bindings,
+  )) {
+    for (const source of sources) {
+      lines.push(`关联 ${id} 的声明来源：${source}`);
+    }
+  }
+  for (const [id, sources] of Object.entries(
+    resolution.declarationSources.references,
+  )) {
+    for (const source of sources) {
+      lines.push(`引用 ${id} 的声明来源：${source}`);
+    }
+  }
+  return lines;
 }
 
 function formatRejectedUpdate(

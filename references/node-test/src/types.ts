@@ -1,13 +1,12 @@
 import type { JsonValue, ExecutionRunRecord } from "@dock/sdk";
 
-export type NormalizedNodeRun = {
-  readonly identity: string;
+export type NodeRunConfiguration = {
+  readonly framework: string;
   readonly root: string;
   readonly testRoot: string;
-  readonly files: readonly string[];
-  readonly observationKeys: readonly string[];
+  readonly files: string[];
+  readonly observationKeys: string[];
   readonly namePattern?: string;
-  readonly configuration: JsonValue;
 };
 
 export type NodeEvent = {

@@ -8,7 +8,8 @@ import type {
   PluginContext,
   PluginReadResult,
   PluginExecutionContext,
-  PluginExecutionIdentity,
+  PluginExecution,
+  RunDeclaration,
   PluginResult,
   ReadableReferenceOf,
   Reference,
@@ -27,7 +28,7 @@ import {
 import type {
   NodeEventTarget,
   NodeSelectedTest,
-  NormalizedNodeRun,
+  NodeRunConfiguration,
 } from "./types.ts";
 
 export const nodeTestPluginId = "@dock/reference-node-test" as const;
@@ -167,7 +168,6 @@ export type NodeTestReference<Id extends string = string> =
 type RuntimeNodeTestReference = Reference<
   typeof nodeTestPluginId,
   string,
-  JsonValue,
   JsonValue,
   JsonValue
 >;
@@ -332,74 +332,41 @@ const nodeTestImplementation = definePlugin({
     context: PluginContext,
   ): string {
     const target = getNodeTestTarget(reference.target);
-    const run = normalizeRun(target.run, context.root);
-    return resolveTargetFile(run.testRoot, target.file);
+    return resolveTargetFile(
+      resolvePath(context.root, target.run.testRoot ?? "."),
+      target.file,
+    );
   },
-  validateReferences(
-    references: readonly RuntimeNodeTestReference[],
-    context: PluginContext,
-  ): readonly PluginExecutionIdentity[] {
-    const declarations = new Map<
-      string,
-      {
-        readonly declaration: PluginExecutionIdentity;
-        readonly encoded: string;
-      }
-    >();
-    for (const reference of references) {
-      const target = getNodeTestTarget(reference.target);
-      const run = normalizeRun(target.run, context.root);
-      const encoded = JSON.stringify(run.configuration);
-      const prior = declarations.get(run.identity);
-      if (prior !== undefined && prior.encoded !== encoded) {
-        throw new TypeError(
-          `Node 测试运行身份 ${run.identity} 在完整配置中对应不同设置。`,
-        );
-      }
-      if (prior === undefined) {
-        declarations.set(run.identity, {
-          declaration: {
-            identity: run.identity,
-            configuration: run.configuration,
-          },
-          encoded,
-        });
-      }
-    }
-    return [...declarations.values()].map(({ declaration }) => declaration);
-  },
-  prepare(
-    references: readonly RuntimeNodeTestReference[],
-    context: PluginExecutionContext,
-  ): void {
-    const groups = new Map<
-      string,
-      { readonly run: NormalizedNodeRun; readonly targets: NodeSelectedTest[] }
-    >();
-    for (const reference of references) {
-      const target = getNodeTestTarget(reference.target);
-      const run = normalizeRun(target.run, context.root);
-      const groupKey = `${run.identity}\0${JSON.stringify(run.configuration)}`;
-      const group = groups.get(groupKey) ?? { run, targets: [] };
-      group.targets.push({
-        file: resolveTargetFile(run.testRoot, target.file),
-        name: target.name,
+  execution: {
+    declare(
+      references: readonly RuntimeNodeTestReference[],
+      context: PluginContext,
+    ): readonly RunDeclaration<NodeRunConfiguration>[] {
+      return references.map((reference) => {
+        const target = getNodeTestTarget(reference.target);
+        return {
+          identity: target.run.identity,
+          configuration: normalizeRun(target.run, context.root),
+          references: [reference.id],
+        };
       });
-      groups.set(groupKey, group);
-    }
-    for (const { run, targets } of groups.values()) {
-      const selectedTests = uniqueSelectedTests(targets);
-      context.execution.register(
-        run.identity,
-        run.configuration,
-        async () => await executeNodeTestRun(run, selectedTests),
-      );
-    }
-  },
+    },
+    async execute({ declaration, selectedReferences }) {
+      const run = declaration.configuration;
+      const targets = selectedReferences.map((reference) => {
+        const target = getNodeTestTarget(reference.target);
+        return {
+          file: resolveTargetFile(run.testRoot, target.file),
+          name: target.name,
+        };
+      });
+      return await executeNodeTestRun(run, uniqueSelectedTests(targets));
+    },
+  } satisfies PluginExecution<RuntimeNodeTestReference, NodeRunConfiguration>,
   collect(
     reference: RuntimeNodeTestReference,
-    context: PluginExecutionContext,
-  ): PluginResult<JsonValue> {
+    context: PluginExecutionContext<NodeRunConfiguration>,
+  ): PluginResult {
     const target = getNodeTestTarget(reference.target);
     const run = context.execution.get(target.run.identity);
     if (run === undefined) {
@@ -411,11 +378,7 @@ const nodeTestImplementation = definePlugin({
         },
       };
     }
-    return factFromNodeRun(
-      reference,
-      run,
-      normalizeRun(target.run, context.root),
-    );
+    return factFromNodeRun(reference, run.record, run.declaration);
   },
   readReferenceInTest,
 });
@@ -428,8 +391,9 @@ export { beginExecution };
 function factFromNodeRun(
   reference: RuntimeNodeTestReference,
   run: Awaited<ReturnType<typeof executeNodeTestRun>>,
-  normalized: NormalizedNodeRun,
-): PluginResult<JsonValue> {
+  declaration: RunDeclaration<NodeRunConfiguration>,
+): PluginResult {
+  const normalized = declaration.configuration;
   if (run.lifecycle !== "complete" || run.errors.length > 0) {
     const detail = run.errors.map((error) => error.message).join("；");
     return {
@@ -452,7 +416,7 @@ function factFromNodeRun(
     if (!normalized.files.includes(targetFile)) {
       return nodeError(
         "test-not-executed",
-        `运行 ${normalized.identity} 未包含目标文件 ${target.file}。`,
+        `运行 ${declaration.identity} 未包含目标文件 ${target.file}。`,
       );
     }
     if (
@@ -520,25 +484,15 @@ function factFromNodeRun(
   return nodeError(code, test.message ?? `关联测试最终状态为 ${test.status}。`);
 }
 
-function normalizeRun(run: NodeTestRun, root: string): NormalizedNodeRun {
+function normalizeRun(run: NodeTestRun, root: string): NodeRunConfiguration {
   const testRoot = resolvePath(root, run.testRoot ?? ".");
-  const files = run.files.map((file) => resolvePath(testRoot, file));
-  const configuration: JsonValue = {
+  return {
     framework: nodeTestPluginId,
     root,
     testRoot,
-    files,
+    files: run.files.map((file) => resolvePath(testRoot, file)),
     observationKeys: [...run.observationKeys],
     ...(run.namePattern === undefined ? {} : { namePattern: run.namePattern }),
-  };
-  return {
-    identity: run.identity,
-    root,
-    testRoot,
-    files,
-    observationKeys: run.observationKeys,
-    ...(run.namePattern === undefined ? {} : { namePattern: run.namePattern }),
-    configuration,
   };
 }
 

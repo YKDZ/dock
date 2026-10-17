@@ -7,7 +7,9 @@ import {
   updateBaseline,
   type MaintenanceScope,
   type PluginContext,
-  type PluginExecutionIdentity,
+  type PluginExecution,
+  type RunDeclaration,
+  type PluginExecutionContext,
   type PluginResult,
   type Reference,
 } from "@dock/sdk";
@@ -25,16 +27,33 @@ const scopePlugin = definePlugin({
   fileInfo(reference: ScopeReference, context: PluginContext): string {
     return `${context.root}/${reference.target.path}`;
   },
-  validateReferences(
-    references: readonly ScopeReference[],
-  ): readonly PluginExecutionIdentity[] {
-    return references.map((reference) => ({
-      identity: `scope:${reference.target.path}`,
-      configuration: { path: reference.target.path },
-    }));
-  },
-  collect(_reference: ScopeReference): PluginResult<string> {
-    return { kind: "value", value: "scope fact" };
+  execution: {
+    declare(
+      references: readonly ScopeReference[],
+    ): readonly RunDeclaration<{ path: string }>[] {
+      return references.map((reference) => ({
+        identity: `scope:${reference.target.path}`,
+        configuration: { path: reference.target.path },
+        references: [reference.id],
+      }));
+    },
+    execute() {
+      return {
+        lifecycle: "complete",
+        commandAttempts: 1,
+        testExecutions: 0,
+        tests: [],
+        errors: [],
+      };
+    },
+  } satisfies PluginExecution<ScopeReference, { path: string }>,
+  collect(
+    reference: ScopeReference,
+    context: PluginExecutionContext<{ path: string }>,
+  ): PluginResult<string> {
+    const run = context.execution.get(`scope:${reference.target.path}`);
+    const path: string = run?.declaration.configuration.path ?? "";
+    return { kind: "value", value: path };
   },
 });
 

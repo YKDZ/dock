@@ -91,6 +91,8 @@ async function runConsumerTypechecks(consumer: string): Promise<void> {
   await copyFixture(consumer, "paths-negative.mts");
   await copyFixture(consumer, "scope-positive.mts");
   await copyFixture(consumer, "scope-negative.mts");
+  await copyFixture(consumer, "inspect-positive.mts");
+  await copyFixture(consumer, "inspect-negative.mts");
   await copyFile(
     join(fixtureDirectory, "secondary", "physical-author.mts"),
     join(consumer, "secondary", "physical-author.mts"),
@@ -171,11 +173,15 @@ async function runInstalledCli(
   ) as { readonly version: string };
   assert.equal(primaryPackage.version, secondaryPackage.version);
   await runConsumerTypechecks(consumer);
+  await copyFixture(consumer, "inspect-runtime.mjs");
+  await copyFixture(consumer, "execution-runtime.mjs");
 
   for (const [fixture, label] of [
     ["composition-consumer.mts", "拆分声明与插件派发"],
     ["external-plugin-consumer.mts", "外部插件采集与错误"],
     ["physical-multiversion.mts", "两份物理安装互操作"],
+    ["inspect-runtime.mjs", "统一解析与核心模型重放"],
+    ["execution-runtime.mjs", "运行声明与共享执行"],
   ] as const) {
     const installedRuntime = await run(
       "node",

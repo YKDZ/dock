@@ -1,8 +1,12 @@
+import { copyJsonValue, isJsonValue } from "@dock/core";
 import type {
   JsonValue,
   MemberDiscoveryCompleteness,
   TextRange,
 } from "@dock/core";
+
+import type { ExecutedRun, ExecutionView } from "./contracts.ts";
+import type { ResolvedOperation } from "./resolution.ts";
 
 /** 框架中一条测试用例的终态。 */
 export type ExecutionTestStatus =
@@ -89,83 +93,47 @@ export type ExecutionSummary = {
   readonly reads?: readonly ExecutionReadDiagnostic[];
 };
 
-export type ExecutionCallback = () =>
-  | ExecutionRunRecord
-  | Promise<ExecutionRunRecord>;
-
-/** 插件在准备阶段登记执行，在采集阶段读取同一次操作的记录。 */
-export interface ExecutionRegistry {
-  register(
-    identity: string,
-    configuration: JsonValue,
-    execute: ExecutionCallback,
-  ): void;
-  get(identity: string): ExecutionRunRecord | undefined;
-}
-
-export interface ExecutionSession extends ExecutionRegistry {
-  /** 完成冲突预检后启动各个唯一运行；每个维护操作只能调用一次。 */
+export interface ExecutionSession {
   run(): Promise<void>;
+  view(pluginId: string): ExecutionView;
   summary(): ExecutionSummary | undefined;
 }
 
-type Registration = {
-  readonly identity: string;
-  readonly encodedConfiguration: string;
-  readonly execute: ExecutionCallback;
-};
+type StoredRun = ExecutedRun & { readonly pluginId: string };
 
-type StoredRun = {
-  readonly record: ExecutionRunRecord;
-  readonly encodedConfiguration: string;
-};
-
-/** 创建仅属于一次 check 或 baseline update 的公开执行会话。 */
-export function createExecutionSession(): ExecutionSession {
-  const registrations: Registration[] = [];
+/** 执行会话只消费完整预检已确定的声明，不接受再次登记。 */
+export function createExecutionSession(
+  resolved: ResolvedOperation,
+): ExecutionSession {
   const runs = new Map<string, StoredRun>();
-  let phase: "registering" | "running" | "finished" = "registering";
+  let finished = false;
   let runPromise: Promise<void> | undefined;
+  const context = Object.freeze({ root: resolved.model.root });
+  const references = new Map(
+    resolved.runtime.references.map((reference) => [reference.id, reference]),
+  );
 
   return {
-    register(identity, configuration, execute): void {
-      if (phase !== "registering") {
-        throw new TypeError("执行登记只能在采集开始前完成。");
-      }
-      if (typeof identity !== "string" || identity.length === 0) {
-        throw new TypeError("执行身份必须是非空文本。");
-      }
-      if (!isJsonConfiguration(configuration)) {
-        throw new TypeError(`执行 ${identity} 的配置必须是有效 JSON 值。`);
-      }
-      if (typeof execute !== "function") {
-        throw new TypeError(`执行 ${identity} 必须提供运行函数。`);
-      }
-      registrations.push({
-        identity,
-        encodedConfiguration: canonicalJson(configuration),
-        execute,
-      });
-    },
-
-    get(identity): ExecutionRunRecord | undefined {
-      if (phase !== "finished") return undefined;
-      const stored = runs.get(identity);
-      return stored === undefined ? undefined : cloneRecord(stored.record);
-    },
-
     async run(): Promise<void> {
-      if (runPromise !== undefined) return await runPromise;
-      if (phase !== "registering") {
-        throw new TypeError("执行会话已经结束。");
-      }
-      phase = "running";
-      runPromise = runRegistered();
+      runPromise ??= runSelected();
       await runPromise;
     },
-
+    view(pluginId): ExecutionView {
+      return Object.freeze({
+        get(identity: string): ExecutedRun | undefined {
+          if (!finished) return undefined;
+          const stored = runs.get(identity);
+          return stored === undefined || stored.pluginId !== pluginId
+            ? undefined
+            : {
+                declaration: stored.declaration,
+                record: cloneRecord(stored.record),
+              };
+        },
+      });
+    },
     summary(): ExecutionSummary | undefined {
-      if (phase !== "finished" || runs.size === 0) return undefined;
+      if (!finished || runs.size === 0) return undefined;
       let commandAttempts = 0;
       let failedCommands = 0;
       let testExecutions = 0;
@@ -195,48 +163,42 @@ export function createExecutionSession(): ExecutionSession {
     },
   };
 
-  async function runRegistered(): Promise<void> {
-    const byIdentity = new Map<string, Registration[]>();
-    for (const registration of registrations) {
-      const group = byIdentity.get(registration.identity) ?? [];
-      group.push(registration);
-      byIdentity.set(registration.identity, group);
-    }
-
-    const pending: Registration[] = [];
-    for (const [identity, group] of byIdentity) {
-      const configurations = new Set(
-        group.map((registration) => registration.encodedConfiguration),
-      );
-      if (configurations.size > 1) {
-        runs.set(identity, {
-          encodedConfiguration: "",
-          record: incompleteRecord(
-            "execution-identity-conflict",
-            `执行身份 ${identity} 对应多个不同配置。`,
-          ),
-        });
-      } else {
-        pending.push(group[0]!);
-      }
-    }
-
-    // 此时所有身份和配置冲突都已判定，之后才可能启动任何执行回调。
+  async function runSelected(): Promise<void> {
     await Promise.all(
-      pending.map(async ({ identity, encodedConfiguration, execute }) => {
-        let record: ExecutionRunRecord;
-        try {
-          record = validateExecutionRunRecord(await execute());
-        } catch (error) {
-          record = incompleteRecord(
-            "execution-failed",
-            error instanceof Error ? error.message : String(error),
+      resolved.model.runs
+        .filter((run) => run.selectedReferences.length > 0)
+        .map(async (run) => {
+          const plugin = resolved.runtime.plugins.get(run.pluginId)!;
+          const declaration = Object.freeze({
+            identity: run.identity,
+            configuration: run.configuration,
+            references: run.references,
+          });
+          const selectedReferences = Object.freeze(
+            run.selectedReferences.map((id) => references.get(id)!),
           );
-        }
-        runs.set(identity, { encodedConfiguration, record });
-      }),
+          let record: ExecutionRunRecord;
+          try {
+            record = validateExecutionRunRecord(
+              await plugin.execution!.execute(
+                { declaration, selectedReferences },
+                context,
+              ),
+            );
+          } catch (error) {
+            record = incompleteRecord(
+              "execution-failed",
+              error instanceof Error ? error.message : String(error),
+            );
+          }
+          runs.set(run.identity, {
+            pluginId: run.pluginId,
+            declaration,
+            record,
+          });
+        }),
     );
-    phase = "finished";
+    finished = true;
   }
 }
 
@@ -432,7 +394,7 @@ function isObservationRecord(
 ): value is ExecutionObservationRecord {
   return (
     isRecord(value) &&
-    isJsonConfiguration(value) &&
+    isJsonValue(value) &&
     isPositiveCount(value.attempt) &&
     typeof value.key === "string" &&
     value.key.length > 0 &&
@@ -440,14 +402,14 @@ function isObservationRecord(
     Object.keys(value).every(
       (key) => key === "attempt" || key === "key" || key === "value",
     ) &&
-    isJsonConfiguration(value.value)
+    isJsonValue(value.value)
   );
 }
 
 function isReadRecord(value: unknown): value is ExecutionReadRecord {
   return (
     isRecord(value) &&
-    isJsonConfiguration(value) &&
+    isJsonValue(value) &&
     isPositiveCount(value.attempt) &&
     typeof value.referenceId === "string" &&
     value.referenceId.length > 0 &&
@@ -459,7 +421,7 @@ function isReadRecord(value: unknown): value is ExecutionReadRecord {
         key === "value" ||
         key === "range",
     ) &&
-    isJsonConfiguration(value.value) &&
+    isJsonValue(value.value) &&
     (!Object.hasOwn(value, "range") || isTextRange(value.range))
   );
 }
@@ -467,7 +429,7 @@ function isReadRecord(value: unknown): value is ExecutionReadRecord {
 function isTextRange(value: unknown): value is TextRange {
   return (
     isRecord(value) &&
-    isJsonConfiguration(value) &&
+    isJsonValue(value) &&
     typeof value.path === "string" &&
     Number.isSafeInteger(value.start) &&
     Number.isSafeInteger(value.end) &&
@@ -502,7 +464,7 @@ function cloneObservationRecord(
   return {
     attempt: record.attempt,
     key: record.key,
-    value: cloneJsonValue(record.value),
+    value: copyJsonValue(record.value),
   };
 }
 
@@ -510,21 +472,13 @@ function cloneReadRecord(record: ExecutionReadRecord): ExecutionReadRecord {
   return {
     attempt: record.attempt,
     referenceId: record.referenceId,
-    value: cloneJsonValue(record.value),
+    value: copyJsonValue(record.value),
     ...(record.range === undefined ? {} : { range: { ...record.range } }),
   };
 }
 
 function isPositiveCount(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === "number" && value > 0;
-}
-
-function cloneJsonValue(value: JsonValue): JsonValue {
-  if (value === null || typeof value !== "object") return value;
-  if (Array.isArray(value)) return value.map(cloneJsonValue);
-  return Object.fromEntries(
-    Object.entries(value).map(([key, entry]) => [key, cloneJsonValue(entry)]),
-  );
 }
 
 function isCommandResult(
@@ -541,67 +495,6 @@ function isCommandResult(
     !(value.exitCode !== null && value.signal !== null) &&
     (value.exitCode !== null || value.signal !== null)
   );
-}
-
-function canonicalJson(value: JsonValue): string {
-  if (value === null || typeof value !== "object") {
-    return JSON.stringify(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-  }
-  const entries = Object.entries(value).sort(([left], [right]) =>
-    left < right ? -1 : left > right ? 1 : 0,
-  );
-  return `{${entries
-    .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-    .join(",")}}`;
-}
-
-function isJsonConfiguration(
-  value: unknown,
-  active = new Set<object>(),
-): value is JsonValue {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean"
-  ) {
-    return true;
-  }
-  if (typeof value === "number") return Number.isFinite(value);
-  if (typeof value !== "object") return false;
-  if (active.has(value)) return false;
-  active.add(value);
-  let valid: boolean;
-  if (Array.isArray(value)) {
-    valid =
-      Object.getOwnPropertySymbols(value).length === 0 &&
-      Object.keys(value).length === value.length;
-    for (let index = 0; valid && index < value.length; index++) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
-      valid =
-        descriptor !== undefined &&
-        "value" in descriptor &&
-        isJsonConfiguration(descriptor.value, active);
-    }
-  } else {
-    const prototype = Object.getPrototypeOf(value) as unknown;
-    valid =
-      (prototype === Object.prototype || prototype === null) &&
-      Object.getOwnPropertySymbols(value).length === 0 &&
-      Object.getOwnPropertyNames(value).length === Object.keys(value).length;
-    for (const key of Object.keys(value)) {
-      if (!valid) break;
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      valid =
-        descriptor !== undefined &&
-        "value" in descriptor &&
-        isJsonConfiguration(descriptor.value, active);
-    }
-  }
-  active.delete(value);
-  return valid;
 }
 
 function isCount(value: unknown): value is number {

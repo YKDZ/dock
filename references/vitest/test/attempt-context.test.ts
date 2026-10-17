@@ -28,8 +28,8 @@ test("重复安装围绕钩子只记录同一测试的一次真实尝试", async
   const innermost = async () => {
     recordVitestObservation("value", "actual");
   };
-  const inner = async () => await handlers[1]!(innermost, context);
-  await handlers[0]!(inner, context);
+  const inner = async () => await handlers[1](innermost, context);
+  await handlers[0](inner, context);
 
   assert.equal(metadata.dockVitestAttemptCount, 1);
   assert.deepEqual(metadata.dockVitestAttempts, [
@@ -50,7 +50,7 @@ test("重复安装围绕钩子只记录同一测试的一次真实尝试", async
     signal: controller.signal,
     task: { id: "cancelled-test", meta: cancelledMetadata },
   } as never;
-  await handlers[0]!(async () => {
+  await handlers[0](async () => {
     controller.abort();
     assert.throws(
       () => recordVitestObservation("value", "cancelled"),

@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 
 type ProcessResult = {
@@ -26,6 +34,211 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
     process.platform === "win32" ? "dock.cmd" : "dock",
   );
   try {
+    const original = join(scenario, "portable-original");
+    const relocated = join(scenario, "nested", "portable-relocated");
+    const external = join(scenario, "external.md");
+    await mkdir(original);
+    await writeFile(external, "项目外的固定文件");
+    await writeFile(join(original, "guide.md"), "可随项目迁移的正文");
+    await writeFile(
+      join(original, "dock.config.mjs"),
+      configSource(
+        "guide.md",
+        "history/baseline.json",
+        undefined,
+        "guide-policy",
+        "guide",
+      ),
+    );
+    const initial = await runDock(
+      bin,
+      ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+      original,
+    );
+    assert.equal(initial.code, 0, initial.stdout + initial.stderr);
+    const savedBaseline = await readFile(
+      join(original, "history", "baseline.json"),
+    );
+    await writeFile(
+      join(original, "external.config.mjs"),
+      configSource(
+        external,
+        "history/external.baseline.json",
+        undefined,
+        "external-policy",
+        "external",
+      ),
+    );
+    const externalBaseline = await runDock(
+      bin,
+      ["baseline", "update", "--config", "external.config.mjs", "--json"],
+      original,
+    );
+    assert.equal(
+      externalBaseline.code,
+      0,
+      externalBaseline.stdout + externalBaseline.stderr,
+    );
+    await mkdir(join(original, "packages", "library"), { recursive: true });
+    await mkdir(join(original, "docs"));
+    await writeFile(join(original, "docs", "guide.md"), "同仓库的共享文档");
+    await writeFile(
+      join(original, "shared.config.mjs"),
+      configSource(
+        "../../docs/guide.md",
+        "../../shared.baseline.json",
+        "packages/library",
+        "shared-policy",
+        "shared-guide",
+      ),
+    );
+    const sharedBaseline = await runDock(
+      bin,
+      ["baseline", "update", "--config", "shared.config.mjs", "--json"],
+      original,
+    );
+    assert.equal(
+      sharedBaseline.code,
+      0,
+      sharedBaseline.stdout + sharedBaseline.stderr,
+    );
+    await cp(original, relocated, { recursive: true });
+    await rm(original, { recursive: true });
+    const externalUnchanged = await runDock(
+      bin,
+      [
+        "check",
+        "--config",
+        "external.config.mjs",
+        "--file",
+        external,
+        "--json",
+      ],
+      relocated,
+    );
+    assert.equal(
+      externalUnchanged.code,
+      0,
+      externalUnchanged.stdout + externalUnchanged.stderr,
+    );
+    assert.equal(readEnvelope(externalUnchanged.stdout).variant, "consistent");
+    const sharedUnchanged = await runDock(
+      bin,
+      [
+        "check",
+        "--config",
+        "shared.config.mjs",
+        "--file",
+        "../../docs/guide.md",
+        "--json",
+      ],
+      relocated,
+    );
+    assert.equal(
+      sharedUnchanged.code,
+      0,
+      sharedUnchanged.stdout + sharedUnchanged.stderr,
+    );
+    assert.equal(readEnvelope(sharedUnchanged.stdout).variant, "consistent");
+    await rename(
+      join(relocated, "docs", "guide.md"),
+      join(relocated, "docs", "renamed.md"),
+    );
+    await writeFile(
+      join(relocated, "shared.config.mjs"),
+      configSource(
+        "../../docs/renamed.md",
+        "../../shared.baseline.json",
+        "packages/library",
+        "shared-policy",
+        "shared-guide",
+      ),
+    );
+    const sharedHistorical = await runDock(
+      bin,
+      [
+        "check",
+        "--config",
+        "shared.config.mjs",
+        "--file",
+        "../../docs/guide.md",
+        "--json",
+      ],
+      relocated,
+    );
+    assert.equal(
+      sharedHistorical.code,
+      1,
+      sharedHistorical.stdout + sharedHistorical.stderr,
+    );
+    assert.equal(readEnvelope(sharedHistorical.stdout).variant, "changed");
+    assert.deepEqual(readReport(sharedHistorical.stdout).scope, [
+      "shared-policy",
+    ]);
+    const unchanged = await runDock(
+      bin,
+      ["check", "--config", "dock.config.mjs", "--file", "guide.md", "--json"],
+      relocated,
+    );
+    assert.equal(unchanged.code, 0, unchanged.stdout + unchanged.stderr);
+    assert.equal(readEnvelope(unchanged.stdout).variant, "consistent");
+    assert.deepEqual(
+      await readFile(join(relocated, "history", "baseline.json")),
+      savedBaseline,
+    );
+
+    await rename(join(relocated, "guide.md"), join(relocated, "renamed.md"));
+    await writeFile(
+      join(relocated, "dock.config.mjs"),
+      configSource(
+        "renamed.md",
+        "history/baseline.json",
+        undefined,
+        "guide-policy",
+        "guide",
+      ),
+    );
+    const historical = await runDock(
+      bin,
+      ["check", "--config", "dock.config.mjs", "--file", "guide.md", "--json"],
+      relocated,
+    );
+    assert.equal(historical.code, 1, historical.stdout + historical.stderr);
+    assert.equal(readEnvelope(historical.stdout).variant, "changed");
+    assert.equal(
+      findChangeKind(historical.stdout, "reference-definition"),
+      true,
+    );
+    assert.deepEqual(readReport(historical.stdout).scope, ["guide-policy"]);
+    const updated = await runDock(
+      bin,
+      [
+        "baseline",
+        "update",
+        "--config",
+        "dock.config.mjs",
+        "--file",
+        "guide.md",
+        "--json",
+      ],
+      relocated,
+    );
+    assert.equal(updated.code, 0, updated.stdout + updated.stderr);
+    const accepted = await runDock(
+      bin,
+      [
+        "check",
+        "--config",
+        "dock.config.mjs",
+        "--file",
+        "renamed.md",
+        "--json",
+      ],
+      relocated,
+    );
+    assert.equal(accepted.code, 0, accepted.stdout + accepted.stderr);
+    assert.equal(readEnvelope(accepted.stdout).variant, "consistent");
+
     for (const [name, alpha, beta] of [
       ["checkout-one", "第一包正文", "第一工具正文"],
       ["checkout-two", "第二包正文", "第二工具正文"],

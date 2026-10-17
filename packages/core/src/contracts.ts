@@ -1,11 +1,6 @@
-/** JSON 形事实允许适配器保留明确选择，同时不增加运行时依赖。 */
-export type JsonValue =
-  | null
-  | boolean
-  | number
-  | string
-  | JsonValue[]
-  | { [key: string]: JsonValue };
+import { isJsonValue, type JsonValue } from "./json-value.ts";
+
+export type { JsonValue } from "./json-value.ts";
 
 /** 当前文本位置用于解释结果，不参与事实比较。 */
 export type TextRange = { path: string; start: number; end: number };
@@ -143,14 +138,15 @@ export type BindingCheckResult =
       errors?: never;
     });
 
-export type CheckInput = {
+/** 核对前已经确定的声明、历史状态与检查范围。 */
+export type CheckContext = {
   references: ReferenceDefinition[];
   bindings: BindingDefinition[];
-  facts: ReferenceResult[];
   baseline?: Baseline;
   declarationCompleteness?: DeclarationCompleteness;
   scope?: readonly string[];
 };
+export type CheckInput = CheckContext & { facts: ReferenceResult[] };
 export type CheckReport = {
   declaration: {
     completeness: DeclarationCompleteness;
@@ -167,21 +163,6 @@ export type BaselineUpdateOutcome =
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-export function isJsonValue(value: unknown): value is JsonValue {
-  if (value === null || typeof value === "string" || typeof value === "boolean")
-    return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) {
-    for (let index = 0; index < value.length; index++) {
-      if (!Object.hasOwn(value, index) || !isJsonValue(value[index]))
-        return false;
-    }
-    return true;
-  }
-  if (!isRecord(value)) return false;
-  return Object.values(value).every(isJsonValue);
 }
 
 function assertMemberCollectionValue(

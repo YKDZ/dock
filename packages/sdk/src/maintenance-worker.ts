@@ -3,9 +3,8 @@ import { pathToFileURL } from "node:url";
 import { parentPort, workerData } from "node:worker_threads";
 
 import {
-  checkConfig,
   MaintenanceError,
-  updateConfig,
+  operateConfig,
   type Operation,
   type MaintenanceScope,
   type WorkerMessage,
@@ -51,10 +50,13 @@ async function run(): Promise<WorkerMessage> {
 
   const defaultRoot = dirname(input.configPath);
   try {
-    const result =
-      input.operation === "check"
-        ? await checkConfig(loaded.default, defaultRoot, input.scope)
-        : await updateConfig(loaded.default, defaultRoot, input.scope);
+    const result = await operateConfig(
+      input.operation,
+      loaded.default,
+      defaultRoot,
+      input.scope,
+      input.configPath,
+    );
     return { ok: true, result };
   } catch (error) {
     if (error instanceof MaintenanceError) throw error;

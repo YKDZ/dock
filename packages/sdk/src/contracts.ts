@@ -5,7 +5,7 @@ import type {
   TextRange,
 } from "@dock/core";
 
-import type { ExecutionRegistry } from "./execution.ts";
+import type { ExecutionRunRecord } from "./execution.ts";
 
 export type { JsonValue, TextRange } from "@dock/core";
 
@@ -56,15 +56,28 @@ export type PluginMemberResult<Value extends JsonValue = JsonValue> =
 
 export type PluginContext = { readonly root: string };
 
-/** 插件在完整配置预检中声明的执行身份及其规范化配置。 */
-export type PluginExecutionIdentity = {
+/** 完整预检确定的共享运行，配置与本次选中的引用分别表达。 */
+export type RunDeclaration<Configuration extends JsonValue = JsonValue> = {
   readonly identity: string;
-  readonly configuration: JsonValue;
+  readonly configuration: Configuration;
+  readonly references: readonly string[];
+};
+
+export type ExecutedRun<Configuration extends JsonValue = JsonValue> = {
+  readonly declaration: RunDeclaration<Configuration>;
+  readonly record: ExecutionRunRecord;
+};
+
+/** 宿主绑定当前插件，只提供本次已经完成的运行。 */
+export type ExecutionView<Configuration extends JsonValue = JsonValue> = {
+  readonly get: (identity: string) => ExecutedRun<Configuration> | undefined;
 };
 
 /** 采集插件可使用的执行会话；读取插件只获得 root。 */
-export type PluginExecutionContext = PluginContext & {
-  readonly execution: ExecutionRegistry;
+export type PluginExecutionContext<
+  Configuration extends JsonValue = JsonValue,
+> = PluginContext & {
+  readonly execution: ExecutionView<Configuration>;
 };
 
 export type PluginReadResult<Value extends JsonValue = JsonValue> = {
@@ -76,6 +89,27 @@ type BivariantHandler<Arguments extends unknown[], Result> = {
   bivarianceHack(...arguments_: Arguments): Result;
 }["bivarianceHack"];
 
+export type PluginExecution<
+  Ref extends Reference,
+  Configuration extends JsonValue = JsonValue,
+> = {
+  readonly declare: BivariantHandler<
+    [references: readonly Ref[], context: PluginContext],
+    | readonly RunDeclaration<Configuration>[]
+    | Promise<readonly RunDeclaration<Configuration>[]>
+  >;
+  readonly execute: BivariantHandler<
+    [
+      request: {
+        readonly declaration: RunDeclaration<Configuration>;
+        readonly selectedReferences: readonly Ref[];
+      },
+      context: PluginContext,
+    ],
+    ExecutionRunRecord | Promise<ExecutionRunRecord>
+  >;
+};
+
 /**
  * 引用插件公开契约。插件只定位并采集事实，关联判断和基线规则由 core 独占。
  */
@@ -83,12 +117,13 @@ export interface ReferencePlugin<
   PluginId extends string = string,
   Ref extends Reference<PluginId> = Reference<PluginId>,
   Value extends ReferenceValue<Ref> = ReferenceValue<Ref>,
+  Configuration extends JsonValue = JsonValue,
 > {
   readonly id: PluginId;
   /** 在任何引用开始采集前验证插件专属声明形状；不得读取外部目标。 */
   readonly validate: BivariantHandler<[reference: Ref], void>;
   readonly collect: BivariantHandler<
-    [reference: Ref, context: PluginExecutionContext],
+    [reference: Ref, context: PluginExecutionContext<Configuration>],
     PluginResult<Value> | Promise<PluginResult<Value>>
   >;
   /** 按插件公开语义提供引用的一个文件目标；不得读取文件内容。 */
@@ -96,18 +131,12 @@ export interface ReferencePlugin<
     [reference: Ref, context: PluginContext],
     string | URL
   >;
-  /** 完整配置的纯预检；返回的身份会与其他插件统一核对，不能启动执行。 */
+  /** 完整引用集合的纯校验，可不声明运行。 */
   readonly validateReferences?: BivariantHandler<
     [references: readonly Ref[], context: PluginContext],
-    | void
-    | readonly PluginExecutionIdentity[]
-    | Promise<void | readonly PluginExecutionIdentity[]>
-  >;
-  /** 在执行启动前一次准备该插件本次涉及的全部引用。 */
-  readonly prepare?: BivariantHandler<
-    [references: readonly Ref[], context: PluginExecutionContext],
     void | Promise<void>
   >;
+  readonly execution?: PluginExecution<Ref, Configuration>;
 }
 
 /** 具备稳定引用读取能力的插件；读取结果与引用声明保留相同值类型。 */
@@ -115,7 +144,8 @@ export interface ReadableReferencePlugin<
   PluginId extends string = string,
   Ref extends Reference<PluginId> = Reference<PluginId>,
   Value extends ReferenceValue<Ref> = ReferenceValue<Ref>,
-> extends ReferencePlugin<PluginId, Ref, Value> {
+  Configuration extends JsonValue = JsonValue,
+> extends ReferencePlugin<PluginId, Ref, Value, Configuration> {
   readonly read: BivariantHandler<
     [reference: Ref, context: PluginContext],
     PluginReadResult<Value> | Promise<PluginReadResult<Value>>
@@ -146,9 +176,7 @@ export type RegisteredReference<Plugins extends readonly ReferencePlugin[]> =
   PluginReference<Plugins[number]>;
 
 export type ReferenceValue<Ref extends Reference = Reference> =
-  Ref extends Reference<string, string, JsonValue, infer Value, JsonValue>
-    ? Value
-    : never;
+  Ref extends Reference<string, string, JsonValue, infer Value> ? Value : never;
 
 /** 静态身份都已收窄时要求插件 ID 与引用处理器 ID 精确一致。 */
 export type PluginIdentityMatches<

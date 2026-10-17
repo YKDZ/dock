@@ -1,8 +1,11 @@
+import { existsSync } from "node:fs";
 import { test } from "node:test";
 
 import { beginExecution } from "@dock/reference-node-test";
 
-test("主动中断本次 Node runner", () => {
+test("等待信号后结束", () => {
   beginExecution();
-  process.kill(process.ppid, "SIGTERM");
+  if (existsSync(new URL("../../interrupted.marker", import.meta.url))) {
+    process.kill(process.ppid, "SIGTERM");
+  }
 });

@@ -6,19 +6,19 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import type { ExecutionRunRecord } from "@dock/sdk";
-import type { JsonValue } from "@dock/sdk";
 
 import { mapVitestRun } from "./event-mapper.ts";
 import type { VitestProcessResult } from "./event-mapper.ts";
+import type { OverlayConfigOptions } from "./overlay-config.ts";
 
-export type NormalizedVitestRun = {
-  readonly identity: string;
+export type VitestRunConfiguration = {
+  readonly framework: string;
   readonly root: string;
   readonly testRoot: string;
-  readonly files: readonly string[];
-  readonly additionalTests: readonly SelectedVitestTest[];
+  readonly files: string[];
+  readonly additionalTests: SelectedVitestTest[];
   readonly configFile?: string;
-  readonly configuration: JsonValue;
+  readonly observationKeys: string[];
 };
 
 export type SelectedVitestTest = {
@@ -41,7 +41,7 @@ const diagnosticLimit = 16_384;
 
 /** 通过官方 Vitest CLI 单次运行，并只在完整 close 后接收收据。 */
 export async function executeVitestRun(
-  run: NormalizedVitestRun,
+  run: VitestRunConfiguration,
   selectedTests: readonly SelectedVitestTest[],
   selectedSuites: readonly SelectedVitestSuite[] = [],
 ): Promise<ExecutionRunRecord> {
@@ -135,104 +135,9 @@ function selectedNames(selectedTests: readonly SelectedVitestTest[]): string[] {
   return [...new Set(selectedTests.map((test) => test.name))];
 }
 
-function createOverlayConfig(options: {
-  readonly userConfigPath?: string;
-  readonly root: string;
-  readonly names: readonly string[];
-  readonly suitePaths: readonly (readonly string[])[];
-  readonly setupPath: string;
-  readonly reporterPath: string;
-}): string {
-  const userConfigUrl =
-    options.userConfigPath === undefined
-      ? undefined
-      : pathToFileURL(options.userConfigPath).href;
-  return `
-const userModule = ${userConfigUrl === undefined ? "undefined" : `await import(${JSON.stringify(userConfigUrl)})`};
-let userConfig = userModule?.default ?? {};
-if (typeof userConfig === "function") {
-  userConfig = await userConfig({ command: "serve", mode: "test" });
-}
-if (!userConfig || typeof userConfig !== "object" || Array.isArray(userConfig)) {
-  throw new TypeError("Vitest 配置必须导出单一配置对象。");
-}
-const userTest = userConfig.test ?? {};
-const setupFiles = Array.isArray(userTest.setupFiles)
-  ? userTest.setupFiles
-  : userTest.setupFiles === undefined ? [] : [userTest.setupFiles];
-const reporters = Array.isArray(userTest.reporters)
-  ? userTest.reporters
-  : userTest.reporters === undefined ? ["default"] : [userTest.reporters];
-const configuredPattern = userTest.testNamePattern;
-const selectedTargets = ${JSON.stringify(
-    options.names.map((name) => {
-      const filterName = name.replaceAll(" > ", " ");
-      const escapedName = escapeRegExp(name);
-      return {
-        name,
-        filterName,
-        patterns: [
-          ...new Set([
-            escapedName,
-            escapeRegExp(filterName),
-            escapedName.replaceAll(" > ", "(?: > | )"),
-          ]),
-        ],
-      };
-    }),
-  )};
-const selectedPatterns = [...new Set(selectedTargets.flatMap(({ patterns }) => patterns))];
-const suitePatterns = ${JSON.stringify(
-    options.suitePaths.flatMap((suitePath) =>
-      [`${suitePath.join(" > ")} > `, `${suitePath.join(" ")} `].map(
-        (prefix) => `^${escapeRegExp(prefix)}[\\s\\S]*$`,
-      ),
-    ),
-  )};
-const selectedPatternsForRun = [...new Set([...selectedPatterns, ...suitePatterns])];
-const configuredSource = configuredPattern === undefined
-  ? undefined
-  : configuredPattern instanceof RegExp
-    ? configuredPattern.source
-    : String(configuredPattern);
-// 用户正则只约束选择结果，不改变派生目标的大小写和锚点。
-const configuredFlags = configuredPattern instanceof RegExp
-  ? configuredPattern.flags.replace(/[gyd]/g, "")
-  : "";
-const configuredInlineFlags = configuredFlags.replace(/[^ims]/g, "");
-const configuredUnicodeFlags = configuredFlags.includes("v")
-  ? "v"
-  : configuredFlags.includes("u") ? "u" : "";
-const configuredExpression = configuredSource === undefined
-  ? ""
-  : configuredInlineFlags.length === 0
-    ? "(?:" + configuredSource + ")"
-    : "(?" + configuredInlineFlags + ":" + configuredSource + ")";
-const filterPattern = configuredSource === undefined
-  ? ""
-  : "(?=[^]*?" + configuredExpression + ")";
-const testNamePattern = new RegExp(
-  "^" + filterPattern + "(?:" + (selectedPatternsForRun.length === 0
-    ? "(?!)"
-    : selectedPatternsForRun.join("|")
-  ) + ")$",
-  configuredUnicodeFlags,
-);
-export default {
-  ...userConfig,
-  root: ${JSON.stringify(options.root)},
-  test: {
-    ...userTest,
-    watch: false,
-    dangerouslyIgnoreUnhandledErrors: false,
-    // 允许已发现的空原生 suite；声明文件和必需成员由目录映射单独验证。
-    passWithNoTests: true,
-    testNamePattern,
-    setupFiles: [...setupFiles, ${JSON.stringify(options.setupPath)}],
-    reporters: [...reporters, ${JSON.stringify(options.reporterPath)}],
-  },
-};
-`;
+function createOverlayConfig(options: OverlayConfigOptions): string {
+  const moduleUrl = pathToFileURL(internalFile("overlay-config")).href;
+  return `import { createOverlayConfig } from ${JSON.stringify(moduleUrl)};\nexport default await createOverlayConfig(${JSON.stringify(options)});\n`;
 }
 
 async function runProcess(
@@ -291,7 +196,7 @@ async function runProcess(
   });
 }
 
-function internalFile(name: "setup" | "reporter"): string {
+function internalFile(name: "setup" | "reporter" | "overlay-config"): string {
   const extension = import.meta.url.endsWith(".ts") ? ".ts" : ".js";
   return fileURLToPath(new URL(`./${name}${extension}`, import.meta.url));
 }
@@ -304,10 +209,6 @@ function incompleteRun(code: string, message: string): ExecutionRunRecord {
     tests: [],
     errors: [{ code, message }],
   };
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function errorMessage(error: unknown): string {

@@ -22,6 +22,7 @@ export type ScopeSelection = {
 
 type ScopeInput = {
   readonly root: string;
+  readonly baselineDirectory: string;
   readonly references: readonly NormalizedReference[];
   readonly bindings: readonly BindingDefinition[];
   readonly baseline: Baseline | undefined;
@@ -60,7 +61,7 @@ export function resolveScope(
   input: unknown,
   config: ScopeInput,
 ): ScopeSelection {
-  const selectors = assertScope(input);
+  const selectors = snapshotScope(input);
   const hasSelectors =
     selectors.binding.length > 0 ||
     selectors.reference.length > 0 ||
@@ -125,7 +126,10 @@ export function resolveScope(
       for (const referenceId of binding.definition.references) {
         const fact = binding.references[referenceId];
         if (fact === undefined) continue;
-        const location = historicalFileInfo(fact.definition);
+        const location = historicalFileInfo(
+          fact.definition,
+          config.baselineDirectory,
+        );
         if (location !== null && location === expected) matched.add(bindingId);
       }
     }
@@ -148,7 +152,7 @@ export function resolveScope(
   };
 }
 
-function assertScope(input: unknown): {
+export function snapshotScope(input: unknown): {
   readonly binding: readonly string[];
   readonly reference: readonly string[];
   readonly file: readonly string[];
@@ -196,7 +200,10 @@ function normalizeSelectorFile(file: string, root: string): string {
   }
 }
 
-function historicalFileInfo(definition: ReferenceDefinition): string | null {
+function historicalFileInfo(
+  definition: ReferenceDefinition,
+  baselineDirectory: string,
+): string | null {
   const target = definition.target;
   if (
     !isRecord(target) ||
@@ -225,7 +232,7 @@ function historicalFileInfo(definition: ReferenceDefinition): string | null {
       "历史定义没有有效的创建时文件目标快照。",
     );
   }
-  return fileInfo;
+  return normalizeFilePath(fileInfo, baselineDirectory);
 }
 
 function ownersByReference(

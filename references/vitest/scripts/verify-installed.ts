@@ -8,11 +8,15 @@ import {
   realpath,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+
+import type { ResolvedMaintenance } from "@dock/sdk";
 
 type ProcessResult = {
   readonly code: number | null;
@@ -28,6 +32,7 @@ type CliEnvelope = {
   readonly data?: {
     readonly code?: string;
     readonly report?: unknown;
+    readonly resolution?: ResolvedMaintenance;
   };
 };
 
@@ -119,16 +124,15 @@ async function main(): Promise<void> {
       fileTarball,
     ]);
   }
-  await verifyCrossFrameworkIdentityConflict([
-    coreTarball,
-    sdkTarball,
-    vitestTarball,
-    nodeTarball,
-    fileTarball,
-  ]);
-  process.stdout.write(
-    "Vitest 4.1.11 与 5.0.3 的安装类型、最终状态、完整关闭及跨框架身份冲突验收通过。\n",
-  );
+  await test("Node 与 Vitest：跨框架身份冲突", async () => {
+    await verifyCrossFrameworkIdentityConflict([
+      coreTarball,
+      sdkTarball,
+      vitestTarball,
+      nodeTarball,
+      fileTarball,
+    ]);
+  });
 }
 
 async function verifyCrossFrameworkIdentityConflict(
@@ -250,39 +254,179 @@ async function verifyVersion(
       `Vitest ${version} 正式制品干净安装失败（signal=${installation.signal}, timedOut=${installation.timedOut}）：\n${installation.stdout}\n${installation.stderr}`,
     );
 
-    const maintenanceRoot = join(consumer, "maintenance-root");
-    await mkdir(maintenanceRoot, { recursive: true });
-    await writeFile(join(maintenanceRoot, "business.data"), "ready\n");
-
-    await verifyInstalledTypes(consumer, version);
-    await verifyRuntimeInputs(consumer);
-    await verifyReadTypes(consumer, readTarballs, version);
-    const dock = join(
-      consumer,
-      "node_modules",
-      ".bin",
-      process.platform === "win32" ? "dock.cmd" : "dock",
-    );
-    const baselinePath = join(maintenanceRoot, "happy.baseline.json");
-    await verifyHappyRoundTrip(dock, consumer, baselinePath);
-    await verifyObservationAndReadRoundTrip(dock, consumer, version);
-    await verifyGroups(dock, consumer);
-    await verifySuiteFailure(dock, consumer);
-    await verifyAdditionalTests(dock, consumer);
-    await verifyStatusFailures(dock, consumer, baselinePath);
-    await verifyFilterAndIdentity(dock, consumer, baselinePath);
-    await verifyInstalledScope(dock, consumer);
-    await verifyConflictPreflight(dock, consumer, baselinePath);
-    await verifyLifecycleFailures(dock, consumer, baselinePath, version);
-    await verifyOperationLocalExecution(consumer);
-    await verifyOrdinaryVitest(consumer);
-    await verifyNoNodeDependency(consumer);
-    process.stdout.write(
-      `Vitest ${version} 安装状态、观察、读取与重试场景通过。\n`,
-    );
+    await installReadConsumer(consumer, readTarballs, version);
+    const scenarios: readonly [
+      string,
+      (dock: string, consumer: string) => Promise<void>,
+    ][] = [
+      [
+        "公开类型与读取类型",
+        async (_dock, consumer) => {
+          await verifyInstalledTypes(consumer, version);
+          await verifyReadTypes(consumer, version);
+        },
+      ],
+      ["无效输入", (_dock, consumer) => verifyRuntimeInputs(consumer)],
+      ["用户配置与声明查看", verifyUserConfig],
+      [
+        "基线往返",
+        (dock, consumer) =>
+          verifyHappyRoundTrip(
+            dock,
+            consumer,
+            join(consumer, "maintenance-root", "happy.baseline.json"),
+          ),
+      ],
+      [
+        "观察与读取",
+        (dock, consumer) =>
+          verifyObservationAndReadRoundTrip(dock, consumer, version),
+      ],
+      ["测试组", verifyGroups],
+      ["测试组失败", verifySuiteFailure],
+      ["附加测试", verifyAdditionalTests],
+      [
+        "状态失败",
+        (dock, consumer) =>
+          verifyStatusFailures(
+            dock,
+            consumer,
+            join(consumer, "maintenance-root", "happy.baseline.json"),
+          ),
+      ],
+      [
+        "名称筛选与身份",
+        (dock, consumer) =>
+          verifyFilterAndIdentity(
+            dock,
+            consumer,
+            join(consumer, "maintenance-root", "happy.baseline.json"),
+          ),
+      ],
+      ["范围筛选", verifyInstalledScope],
+      [
+        "冲突预检",
+        (dock, consumer) =>
+          verifyConflictPreflight(
+            dock,
+            consumer,
+            join(consumer, "maintenance-root", "happy.baseline.json"),
+          ),
+      ],
+      [
+        "运行中断与关闭失败",
+        (dock, consumer) =>
+          verifyLifecycleFailures(
+            dock,
+            consumer,
+            join(consumer, "maintenance-root", "happy.baseline.json"),
+            version,
+          ),
+      ],
+      [
+        "操作内执行共享",
+        (_dock, consumer) => verifyOperationLocalExecution(consumer),
+      ],
+      ["普通原生测试", (_dock, consumer) => verifyOrdinaryVitest(consumer)],
+      ["依赖边界", (_dock, consumer) => verifyNoNodeDependency(consumer)],
+    ];
+    for (const [index, [name, verify]] of scenarios.entries()) {
+      await test(`Vitest ${version}：${name}`, async () => {
+        const scenario = join(temporary, `scenario-${index}`);
+        await cp(fixtureDirectory, scenario, { recursive: true });
+        await symlink(
+          join(consumer, "node_modules"),
+          join(scenario, "node_modules"),
+          "dir",
+        );
+        await symlink(
+          join(consumer, "test-workspace", "node_modules"),
+          join(scenario, "test-workspace", "node_modules"),
+          "dir",
+        );
+        try {
+          const maintenanceRoot = join(scenario, "maintenance-root");
+          await mkdir(maintenanceRoot, { recursive: true });
+          await writeFile(join(maintenanceRoot, "business.data"), "ready\n");
+          const dock = join(
+            scenario,
+            "node_modules",
+            ".bin",
+            process.platform === "win32" ? "dock.cmd" : "dock",
+          );
+          await verify(dock, scenario);
+        } finally {
+          await rm(scenario, { recursive: true, force: true });
+        }
+      });
+    }
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+}
+
+async function verifyUserConfig(dock: string, consumer: string): Promise<void> {
+  const arguments_ = [
+    "--config",
+    "user-config.config.mts",
+    "--binding",
+    "用户配置状态",
+  ];
+  const viewed = await runDock(
+    dock,
+    ["inspect", ...arguments_, "--json"],
+    consumer,
+  );
+  assert.equal(viewed.code, 0, viewed.stderr);
+  const resolution = parseEnvelope(viewed.stdout).data?.resolution;
+  assert.ok(resolution);
+  assert.deepEqual(
+    resolution.runs.map((run) => ({
+      identity: run.identity,
+      references: run.references,
+      selectedReferences: run.selectedReferences,
+    })),
+    [
+      {
+        identity: "用户配置运行",
+        references: ["配置通过", "范围外测试"],
+        selectedReferences: ["配置通过"],
+      },
+    ],
+  );
+  const sdk = await run(
+    process.execPath,
+    [join(consumer, "user-config-runtime.mts")],
+    consumer,
+    60_000,
+  );
+  assert.equal(sdk.code, 0, sdk.stderr);
+  assert.deepEqual(JSON.parse(sdk.stdout), resolution);
+  const text = await runDock(dock, ["inspect", ...arguments_], consumer);
+  assert.equal(text.code, 0, text.stderr);
+  assert.match(text.stdout, /运行声明 用户配置运行/);
+  assert.match(text.stdout, /本次选中 配置通过/);
+  const maintenanceRoot = join(consumer, "maintenance-root");
+  await assert.rejects(access(join(maintenanceRoot, "config-evaluated.log")), {
+    code: "ENOENT",
+  });
+  const checked = await runDock(
+    dock,
+    ["check", ...arguments_, "--json"],
+    consumer,
+  );
+  assert.equal(checked.code, 1, checked.stderr);
+  const report = requireReport(parseEnvelope(checked.stdout));
+  assertBindingHasNoErrors(report, "用户配置状态");
+  assertExecutionSummary(report, 1, 1);
+  assert.match(
+    await readFile(join(maintenanceRoot, "config-evaluated.log"), "utf8"),
+    /serve\/test/,
+  );
+  assert.equal(
+    await readFile(join(maintenanceRoot, "user-reporter.log"), "utf8"),
+    "ended\n",
+  );
 }
 
 async function verifyInstalledScope(
@@ -371,7 +515,7 @@ async function verifyInstalledTypes(
   );
 }
 
-async function verifyReadTypes(
+async function installReadConsumer(
   consumer: string,
   tarballs: readonly string[],
   version: string,
@@ -400,7 +544,12 @@ async function verifyReadTypes(
     0,
     `Vitest ${version} 的读取消费安装失败（signal=${installation.signal}, timedOut=${installation.timedOut}）：\n${installation.stdout}\n${installation.stderr}`,
   );
+}
 
+async function verifyReadTypes(
+  consumer: string,
+  version: string,
+): Promise<void> {
   const compiler = join(
     packageDirectory,
     "node_modules",
@@ -1352,6 +1501,13 @@ async function verifyStatusFailures(
   consumer: string,
   baselinePath: string,
 ): Promise<void> {
+  const initial = await runDock(
+    dock,
+    ["baseline", "update", "--config", "happy.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(initial.code, 0, initial.stderr);
+  assert.equal(parseEnvelope(initial.stdout).variant, "updated");
   const baselineBytes = await readFile(baselinePath);
   const statuses = await runDock(
     dock,
@@ -1479,6 +1635,13 @@ async function verifyFilterAndIdentity(
   consumer: string,
   baselinePath: string,
 ): Promise<void> {
+  const initial = await runDock(
+    dock,
+    ["baseline", "update", "--config", "happy.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(initial.code, 0, initial.stderr);
+  assert.equal(parseEnvelope(initial.stdout).variant, "updated");
   const baselineBytes = await readFile(baselinePath);
   const filtered = await runDock(
     dock,
@@ -1521,6 +1684,13 @@ async function verifyConflictPreflight(
   baselinePath: string,
 ): Promise<void> {
   const marker = join(consumer, "maintenance-root", "conflict-started.marker");
+  const initial = await runDock(
+    dock,
+    ["baseline", "update", "--config", "happy.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(initial.code, 0, initial.stderr);
+  assert.equal(parseEnvelope(initial.stdout).variant, "updated");
   const baselineBytes = await readFile(baselinePath);
   const check = await runDock(
     dock,
@@ -1554,6 +1724,13 @@ async function verifyLifecycleFailures(
   baselinePath: string,
   version: (typeof versions)[number],
 ): Promise<void> {
+  const initial = await runDock(
+    dock,
+    ["baseline", "update", "--config", "happy.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(initial.code, 0, initial.stderr);
+  assert.equal(parseEnvelope(initial.stdout).variant, "updated");
   const baselineBytes = await readFile(baselinePath);
   for (const [config, bindingId, testExecutions, failedCommands] of [
     ["close-failure.config.mts", "收尾状态", 1, version === "5.0.3" ? 1 : 0],

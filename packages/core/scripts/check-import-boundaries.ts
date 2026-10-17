@@ -3,10 +3,11 @@ import { fileURLToPath } from "node:url";
 
 const sourceDirectory = fileURLToPath(new URL("../src/", import.meta.url));
 const allowedImports: Record<string, readonly string[]> = {
-  contracts: [],
-  check: ["contracts"],
+  "json-value": [],
+  contracts: ["json-value"],
+  check: ["contracts", "json-value"],
   "update-baseline": ["contracts", "check"],
-  index: ["contracts", "check", "update-baseline"],
+  index: ["contracts", "json-value", "check", "update-baseline"],
 };
 const importPattern =
   /\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']/gu;

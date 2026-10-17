@@ -69,22 +69,13 @@ export type MarkdownReferenceOptions = Pick<
 export type MarkdownReferenceBuilder<
   Selection extends JsonValue = MarkdownSelection,
 > = {
-  section(
-    heading: string | readonly string[],
-  ): MarkdownReferenceBuilder<MarkdownSelection>;
-  node(
-    selector: MarkdownNodeSelection,
-  ): MarkdownReferenceBuilder<MarkdownSelection>;
-  tableCell(
-    selector: MarkdownTableCellSelection,
-  ): MarkdownReferenceBuilder<MarkdownSelection>;
-  marker(id: string): MarkdownReferenceBuilder<MarkdownSelection>;
-  quote(text: string): MarkdownReferenceBuilder<MarkdownSelection>;
-  match(
-    pattern: string,
-    group?: number,
-  ): MarkdownReferenceBuilder<MarkdownSelection>;
-  region(name: string): MarkdownReferenceBuilder<MarkdownSelection>;
+  section(heading: string | readonly string[]): MarkdownReferenceBuilder;
+  node(selector: MarkdownNodeSelection): MarkdownReferenceBuilder;
+  tableCell(selector: MarkdownTableCellSelection): MarkdownReferenceBuilder;
+  marker(id: string): MarkdownReferenceBuilder;
+  quote(text: string): MarkdownReferenceBuilder;
+  match(pattern: string, group?: number): MarkdownReferenceBuilder;
+  region(name: string): MarkdownReferenceBuilder;
   reference<Id extends string>(
     id: Id,
     options?: MarkdownReferenceOptions,
@@ -197,7 +188,7 @@ function createBuilder<Selection extends JsonValue>(
   steps: MarkdownSelectionStep[],
 ): MarkdownReferenceBuilder<Selection> {
   return {
-    section(heading): MarkdownReferenceBuilder<MarkdownSelection> {
+    section(heading): MarkdownReferenceBuilder {
       const normalizedHeading: string | string[] =
         typeof heading === "string" ? heading : Array.from(heading);
       return createBuilder<MarkdownSelection>(target, [
@@ -205,37 +196,37 @@ function createBuilder<Selection extends JsonValue>(
         { kind: "section", heading: normalizedHeading },
       ]);
     },
-    node(selector): MarkdownReferenceBuilder<MarkdownSelection> {
+    node(selector): MarkdownReferenceBuilder {
       return createBuilder<MarkdownSelection>(target, [
         ...steps,
         { kind: "node", selector },
       ]);
     },
-    tableCell(selector): MarkdownReferenceBuilder<MarkdownSelection> {
+    tableCell(selector): MarkdownReferenceBuilder {
       return createBuilder<MarkdownSelection>(target, [
         ...steps,
         { kind: "tableCell", selector },
       ]);
     },
-    marker(id): MarkdownReferenceBuilder<MarkdownSelection> {
+    marker(id): MarkdownReferenceBuilder {
       return createBuilder<MarkdownSelection>(target, [
         ...steps,
         { kind: "marker", id },
       ]);
     },
-    quote(text): MarkdownReferenceBuilder<MarkdownSelection> {
+    quote(text): MarkdownReferenceBuilder {
       return createBuilder<MarkdownSelection>(target, [
         ...steps,
         { kind: "quote", text },
       ]);
     },
-    match(pattern, group): MarkdownReferenceBuilder<MarkdownSelection> {
+    match(pattern, group): MarkdownReferenceBuilder {
       return createBuilder<MarkdownSelection>(target, [
         ...steps,
         { kind: "match", pattern, ...(group === undefined ? {} : { group }) },
       ]);
     },
-    region(name): MarkdownReferenceBuilder<MarkdownSelection> {
+    region(name): MarkdownReferenceBuilder {
       return createBuilder<MarkdownSelection>(target, [
         ...steps,
         { kind: "region", name },

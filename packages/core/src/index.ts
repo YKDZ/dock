@@ -7,6 +7,7 @@ export type {
   BindingBaseline,
   BindingChange,
   BindingDefinition,
+  CheckContext,
   CheckInput,
   CheckReport,
   CollectionMemberChange,
@@ -21,6 +22,6 @@ export type {
   ReferenceResult,
   ReferenceMemberResult,
 } from "./contracts.ts";
-export { check } from "./check.ts";
-export { isJsonValue } from "./contracts.ts";
+export { check, resolveCheckScope } from "./check.ts";
+export { canonicalJson, copyJsonValue, isJsonValue } from "./json-value.ts";
 export { updateBaseline } from "./update-baseline.ts";

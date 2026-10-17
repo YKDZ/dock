@@ -4,12 +4,15 @@ import {
   access,
   copyFile,
   mkdtemp,
+  mkdir,
+  symlink,
   readFile,
   rm,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 type ProcessResult = {
@@ -68,14 +71,32 @@ async function main(): Promise<void> {
   const consumer = await mkdtemp(join(tmpdir(), "dock-markdown-consumer-"));
   try {
     await installConsumer(consumer, tarballs);
-    await copyFixtures(consumer);
-    await verifyInstalledTypes(consumer);
-    await verifyInstalledReads(consumer);
-    await verifyInstalledInlineScript(consumer);
-    await verifyInstalledEmptyCells(consumer);
-    await verifyInstalledCli(consumer);
-    await verifyInstalledScope(consumer);
-    process.stdout.write("Markdown 安装制品公开类型、读取与 CLI 验收通过。\n");
+    const scenarios: readonly [string, (consumer: string) => Promise<void>][] =
+      [
+        ["公开类型", verifyInstalledTypes],
+        ["引用读取", verifyInstalledReads],
+        ["段内脚本定位", verifyInstalledInlineScript],
+        ["空表格单元格", verifyInstalledEmptyCells],
+        ["基线往返与错误", verifyInstalledCli],
+        ["范围筛选", verifyInstalledScope],
+      ];
+    for (const [index, [name, verify]] of scenarios.entries()) {
+      await test(`Markdown：${name}`, async () => {
+        const scenario = join(consumer, `scenario-${index}`);
+        await mkdir(scenario);
+        await symlink(
+          join(consumer, "node_modules"),
+          join(scenario, "node_modules"),
+          "dir",
+        );
+        try {
+          await copyFixtures(scenario);
+          await verify(scenario);
+        } finally {
+          await rm(scenario, { recursive: true, force: true });
+        }
+      });
+    }
   } finally {
     await rm(consumer, { recursive: true, force: true });
   }
@@ -401,10 +422,7 @@ function assertInlineValue(
     source.indexOf(expected) + expected.length,
   );
   assert.equal(
-    source.slice(
-      runtime.selected.range.start as number,
-      runtime.selected.range.end as number,
-    ),
+    source.slice(runtime.selected.range.start, runtime.selected.range.end),
     expected,
   );
   assert.equal(runtime.collected.kind, "value");

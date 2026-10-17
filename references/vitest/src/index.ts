@@ -8,7 +8,8 @@ import type {
   JsonValue,
   PluginContext,
   PluginExecutionContext,
-  PluginExecutionIdentity,
+  PluginExecution,
+  RunDeclaration,
   PluginResult,
   Reference,
   ReferenceOptions,
@@ -21,7 +22,7 @@ import {
 } from "./attempt-context.ts";
 import { executeVitestRun } from "./native-runner.ts";
 import type {
-  NormalizedVitestRun,
+  VitestRunConfiguration,
   SelectedVitestSuite,
   SelectedVitestTest,
 } from "./native-runner.ts";
@@ -466,101 +467,65 @@ const vitestImplementation: VitestPlugin = definePlugin({
   },
   fileInfo(reference: VitestReference, context: PluginContext): string {
     const target = getVitestTarget(reference.target);
-    const run = normalizeRun(target.run, context.root);
-    return resolveTargetFile(run.testRoot, target.file);
+    return resolveTargetFile(
+      resolveTestRoot(target.run, context.root),
+      target.file,
+    );
   },
-  validateReferences(
-    references: readonly VitestReference[],
-    context: PluginContext,
-  ): readonly PluginExecutionIdentity[] {
-    const declarations = new Map<
-      string,
-      {
-        readonly declaration: PluginExecutionIdentity;
-        readonly encoded: string;
+  execution: {
+    declare(
+      references: readonly VitestReference[],
+      context: PluginContext,
+    ): readonly RunDeclaration<VitestRunConfiguration>[] {
+      return references.map((reference) => {
+        const target = getVitestTarget(reference.target);
+        const configuration = normalizeRun(target.run, context.root);
+        if (
+          target.kind === "vitest-suite" &&
+          !configuration.files.includes(
+            resolveTargetFile(configuration.testRoot, target.file),
+          )
+        ) {
+          throw new TypeError(
+            `Vitest 测试组文件 ${target.file} 不在运行 ${target.run.identity} 的 files 中。`,
+          );
+        }
+        return {
+          identity: target.run.identity,
+          configuration,
+          references: [reference.id],
+        };
+      });
+    },
+    async execute({ declaration, selectedReferences }) {
+      const run = declaration.configuration;
+      const targets: SelectedVitestTest[] = [...run.additionalTests];
+      const suites: SelectedVitestSuite[] = [];
+      for (const reference of selectedReferences) {
+        const target = getVitestTarget(reference.target);
+        if (target.kind === "vitest-suite") {
+          suites.push({
+            file: resolveTargetFile(run.testRoot, target.file),
+            suitePath: [...target.suitePath],
+          });
+        } else {
+          targets.push({
+            file: resolveTargetFile(run.testRoot, target.file),
+            name: target.name,
+          });
+        }
       }
-    >();
-    for (const reference of references) {
-      const target = getVitestTarget(reference.target);
-      const run = normalizeRun(target.run, context.root);
-      if (
-        target.kind === "vitest-suite" &&
-        !run.files.includes(resolveTargetFile(run.testRoot, target.file))
-      ) {
-        throw new TypeError(
-          `Vitest 测试组文件 ${target.file} 不在运行 ${run.identity} 的 files 中。`,
-        );
-      }
-      const encoded = JSON.stringify(run.configuration);
-      const prior = declarations.get(run.identity);
-      if (prior !== undefined && prior.encoded !== encoded) {
-        throw new TypeError(
-          `Vitest 运行身份 ${run.identity} 在完整配置中对应不同设置。`,
-        );
-      }
-      if (prior === undefined) {
-        declarations.set(run.identity, {
-          declaration: {
-            identity: run.identity,
-            configuration: run.configuration,
-          },
-          encoded,
-        });
-      }
-    }
-    return [...declarations.values()].map(({ declaration }) => declaration);
-  },
-  async prepare(
-    references: readonly VitestReference[],
-    context: PluginExecutionContext,
-  ): Promise<void> {
-    const groups = new Map<
-      string,
-      {
-        readonly run: NormalizedVitestRun;
-        readonly targets: SelectedVitestTest[];
-        readonly suites: SelectedVitestSuite[];
-      }
-    >();
-    for (const reference of references) {
-      const target = getVitestTarget(reference.target);
-      const run = normalizeRun(target.run, context.root);
-      const groupKey = `${run.identity}\0${JSON.stringify(run.configuration)}`;
-      const group = groups.get(groupKey) ?? {
+      return await executeVitestRun(
         run,
-        targets: [...run.additionalTests],
-        suites: [],
-      };
-      if (target.kind === "vitest-suite") {
-        group.suites.push({
-          file: resolveTargetFile(run.testRoot, target.file),
-          suitePath: [...target.suitePath],
-        });
-      } else {
-        group.targets.push({
-          file: resolveTargetFile(run.testRoot, target.file),
-          name: target.name,
-        });
-      }
-      groups.set(groupKey, group);
-    }
-    for (const { run, targets, suites } of groups.values()) {
-      context.execution.register(
-        run.identity,
-        run.configuration,
-        async () =>
-          await executeVitestRun(
-            run,
-            uniqueSelectedTests(targets),
-            uniqueSelectedSuites(suites),
-          ),
+        uniqueSelectedTests(targets),
+        uniqueSelectedSuites(suites),
       );
-    }
-  },
+    },
+  } satisfies PluginExecution<VitestReference, VitestRunConfiguration>,
   collect(
     reference: VitestReference,
-    context: PluginExecutionContext,
-  ): PluginResult<JsonValue> {
+    context: PluginExecutionContext<VitestRunConfiguration>,
+  ): PluginResult {
     const target = getVitestTarget(reference.target);
     const run = context.execution.get(target.run.identity);
     if (run === undefined) {
@@ -574,8 +539,8 @@ const vitestImplementation: VitestPlugin = definePlugin({
     }
     return factFromVitestRun(
       reference,
-      run,
-      resolveTestRoot(target.run, context.root),
+      run.record,
+      run.declaration.configuration.testRoot,
     );
   },
 });
@@ -583,7 +548,7 @@ const vitestImplementation: VitestPlugin = definePlugin({
 export const vitest = vitestImplementation;
 export { readReferenceInTest };
 
-function normalizeRun(run: VitestRun, root: string): NormalizedVitestRun {
+function normalizeRun(run: VitestRun, root: string): VitestRunConfiguration {
   const testRoot = resolvePath(root, run.testRoot ?? ".");
   const files = [
     ...new Set(run.files.map((file) => resolvePath(testRoot, file))),
@@ -601,23 +566,14 @@ function normalizeRun(run: VitestRun, root: string): NormalizedVitestRun {
     );
   }
   const configFile = resolveConfigFile(root, run.configFile, testRoot);
-  const configuration: JsonValue = {
+  return {
     framework: vitestPluginId,
     root,
     testRoot,
     files,
-    observationKeys: [...run.observationKeys],
-    ...(additionalTests.length === 0 ? {} : { additionalTests }),
-    ...(configFile === undefined ? {} : { configFile }),
-  };
-  return {
-    identity: run.identity,
-    root,
-    testRoot,
-    files,
     additionalTests,
+    observationKeys: [...run.observationKeys],
     ...(configFile === undefined ? {} : { configFile }),
-    configuration: configuration as NormalizedVitestRun["configuration"],
   };
 }
 
@@ -656,7 +612,7 @@ function factFromVitestRun(
   reference: VitestReference,
   run: ExecutionRunRecord,
   testRoot: string,
-): PluginResult<JsonValue> {
+): PluginResult {
   if (run.lifecycle !== "complete" || run.errors.length > 0) {
     const detail = run.errors.map((error) => error.message).join("；");
     return {
@@ -753,7 +709,7 @@ function factFromVitestSuite(
   target: VitestSuiteTarget,
   run: ExecutionRunRecord,
   testRoot: string,
-): PluginResult<JsonValue> {
+): PluginResult {
   const catalog = run.testCatalog;
   if (catalog === undefined) {
     return vitestError(
@@ -1093,7 +1049,7 @@ function assertTestSelection(
   }
 }
 
-function vitestError(code: string, message: string): PluginResult<JsonValue> {
+function vitestError(code: string, message: string): PluginResult {
   return { kind: "error", error: { code, message } };
 }
 

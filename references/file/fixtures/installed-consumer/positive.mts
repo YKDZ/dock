@@ -34,10 +34,10 @@ const fixturePlugin: ReferencePlugin<
     return reference.target.path;
   },
   validateReferences(references) {
-    return references.map((reference) => ({
-      identity: reference.id,
-      configuration: reference.target,
-    }));
+    for (const reference of references) {
+      if (reference.target.path.length === 0)
+        throw new TypeError("路径不能为空。");
+    }
   },
   collect(reference, context): PluginResult<string> {
     return {
@@ -65,10 +65,9 @@ const directPlugin = {
     return reference.target;
   },
   validateReferences(references: readonly DirectPluginReference[]) {
-    return references.map((reference) => ({
-      identity: reference.id,
-      configuration: { target: reference.target },
-    }));
+    for (const reference of references) {
+      if (reference.target.length === 0) throw new TypeError("目标不能为空。");
+    }
   },
 };
 const directDocument = createReference<

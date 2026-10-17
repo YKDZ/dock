@@ -1,0 +1,44 @@
+{
+  "extends": ["//"],
+  "tags": ["dock-reference"],
+  "tasks": {
+    "format:check": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "format:write": {
+      "dependsOn": ["lint:fix"],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "lint": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "lint:fix": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "cache": false,
+      "tags": ["work:repair"]
+    },
+    "typecheck": {
+      "dependsOn": ["^build"],
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "dock:check": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "dock:baseline": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputs": [],
+      "tags": ["work:on-demand"]
+    }
+  }
+}

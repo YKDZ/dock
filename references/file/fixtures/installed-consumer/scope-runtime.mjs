@@ -213,23 +213,27 @@ assert.deepEqual((await check(countedConfig, { file: ["one.txt"] })).scope, [
 assert.equal(counted.get("counted-ref-a"), 1);
 assert.equal(counted.has("counted-ref-b"), false);
 
-const identityCalls = { prepareA: 0, prepareB: 0, collectA: 0, collectB: 0 };
+const identityCalls = { executeA: 0, executeB: 0, collectA: 0, collectB: 0 };
 const identityPluginA = definePlugin({
   id: "fixture:identity-a",
   validate() {},
-  validateReferences() {
-    return [
-      {
-        identity: "shared-execution",
-        configuration: { framework: "fixture", root: "one" },
-      },
-    ];
-  },
   fileInfo(reference, context) {
     return resolve(context.root, reference.target.path);
   },
-  prepare() {
-    identityCalls.prepareA += 1;
+  execution: {
+    declare(references) {
+      return [
+        {
+          identity: "shared-execution",
+          configuration: { framework: "fixture", root: "one" },
+          references: references.map((reference) => reference.id),
+        },
+      ];
+    },
+    execute() {
+      identityCalls.executeA += 1;
+      throw new Error("冲突运行不能启动。");
+    },
   },
   collect() {
     identityCalls.collectA += 1;
@@ -239,19 +243,23 @@ const identityPluginA = definePlugin({
 const identityPluginB = definePlugin({
   id: "fixture:identity-b",
   validate() {},
-  validateReferences() {
-    return [
-      {
-        identity: "shared-execution",
-        configuration: { framework: "fixture", root: "two" },
-      },
-    ];
-  },
   fileInfo(reference, context) {
     return resolve(context.root, reference.target.path);
   },
-  prepare() {
-    identityCalls.prepareB += 1;
+  execution: {
+    declare(references) {
+      return [
+        {
+          identity: "shared-execution",
+          configuration: { framework: "fixture", root: "two" },
+          references: references.map((reference) => reference.id),
+        },
+      ];
+    },
+    execute() {
+      identityCalls.executeB += 1;
+      throw new Error("冲突运行不能启动。");
+    },
   },
   collect() {
     identityCalls.collectB += 1;
@@ -278,8 +286,8 @@ await assert.rejects(
   (error) => error.code === "execution-identity-conflict",
 );
 assert.deepEqual(identityCalls, {
-  prepareA: 0,
-  prepareB: 0,
+  executeA: 0,
+  executeB: 0,
   collectA: 0,
   collectB: 0,
 });

@@ -2,16 +2,17 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
   access,
-  copyFile,
   cp,
   mkdtemp,
   realpath,
   readFile,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { verifyInstalledScope } from "./verify-installed-scope.ts";
@@ -107,14 +108,16 @@ async function main(): Promise<void> {
         "--ignore-scripts",
         "--no-audit",
         "--no-fund",
+        "--prefer-offline",
         ...tarballs,
       ],
       consumer,
+      360_000,
     );
     assert.equal(
       installation.code,
       0,
-      `Node 正式制品干净安装失败：\n${installation.stdout}\n${installation.stderr}`,
+      `Node 正式制品干净安装失败（signal=${installation.signal}, timedOut=${installation.timedOut}）：\n${installation.stdout}\n${installation.stderr}`,
     );
 
     const secondaryInstallation = await run(
@@ -128,43 +131,78 @@ async function main(): Promise<void> {
         "--ignore-scripts",
         "--no-audit",
         "--no-fund",
+        "--prefer-offline",
         ...tarballs,
       ],
       consumer,
+      360_000,
     );
     assert.equal(
       secondaryInstallation.code,
       0,
-      `第二份 Node 正式制品干净安装失败：\n${secondaryInstallation.stdout}\n${secondaryInstallation.stderr}`,
+      `第二份 Node 正式制品干净安装失败（signal=${secondaryInstallation.signal}, timedOut=${secondaryInstallation.timedOut}）：\n${secondaryInstallation.stdout}\n${secondaryInstallation.stderr}`,
     );
     await verifyPhysicalCopies(consumer, secondary);
 
-    await verifyInstalledTypes(consumer);
-    await verifyRuntimeInputDiagnostics(consumer);
-    await verifyRuntimeObservationDiagnostics(consumer);
-    const bin = join(
-      consumer,
-      "node_modules",
-      ".bin",
-      process.platform === "win32" ? "dock.cmd" : "dock",
-    );
-    await verifyHappyRoundTrip(bin, consumer);
-    await verifyObservationAndReadScenarios(bin, consumer);
-    await verifyLoopObservedRegistrations(bin, consumer);
-    await verifyEffectiveRoot(bin, consumer);
-    await verifyOperationLocalExecution(consumer);
-    await verifyFailureIsolation(bin, consumer);
-    await verifyRunLifecycle(bin, consumer);
-    await verifyAfterEndFailure(bin, consumer);
-    await verifyInterruptedProcess(bin, consumer);
-    await verifyStatusesAndIdentity(bin, consumer);
-    await verifyConflictPreflight(bin, consumer);
-    await verifyOrdinaryNodeTest(consumer);
-    await verifyNoFrameworkDependency(consumer);
-    await verifyInstalledScope(consumer);
-    process.stdout.write(
-      "Node 观察值 17→19 漂移、alpha/beta 同源循环归属、双份安装与故障隔离验收通过。\n",
-    );
+    const scenarios: readonly [
+      string,
+      (bin: string, consumer: string) => Promise<void>,
+    ][] = [
+      ["公开类型", (_bin, consumer) => verifyInstalledTypes(consumer)],
+      [
+        "无效引用输入",
+        (_bin, consumer) => verifyRuntimeInputDiagnostics(consumer),
+      ],
+      [
+        "非法观察值",
+        (_bin, consumer) => verifyRuntimeObservationDiagnostics(consumer),
+      ],
+      ["基线往返", verifyHappyRoundTrip],
+      ["观察与读取", verifyObservationAndReadScenarios],
+      ["读取后失败", verifyReadFailureDiagnostics],
+      ["同源循环观察", verifyLoopObservedRegistrations],
+      ["根目录", verifyEffectiveRoot],
+      [
+        "操作内执行共享",
+        (_bin, consumer) => verifyOperationLocalExecution(consumer),
+      ],
+      ["失败隔离", verifyFailureIsolation],
+      ["运行结束与取消", verifyRunLifecycle],
+      ["结束后失败", verifyAfterEndFailure],
+      ["进程中断", verifyInterruptedProcess],
+      ["状态与身份", verifyStatusesAndIdentity],
+      ["冲突预检", verifyConflictPreflight],
+      ["普通原生测试", (_bin, consumer) => verifyOrdinaryNodeTest(consumer)],
+      ["依赖边界", (_bin, consumer) => verifyNoFrameworkDependency(consumer)],
+      ["范围筛选", (_bin, consumer) => verifyInstalledScope(consumer)],
+    ];
+    for (const [index, [name, verify]] of scenarios.entries()) {
+      await test(`Node：${name}`, async () => {
+        const scenario = join(temporary, `scenario-${index}`);
+        await cp(fixtureDirectory, scenario, { recursive: true });
+        await symlink(
+          join(consumer, "node_modules"),
+          join(scenario, "node_modules"),
+          "dir",
+        );
+        await symlink(
+          join(secondary, "node_modules"),
+          join(scenario, "secondary", "node_modules"),
+          "dir",
+        );
+        try {
+          const bin = join(
+            scenario,
+            "node_modules",
+            ".bin",
+            process.platform === "win32" ? "dock.cmd" : "dock",
+          );
+          await verify(bin, scenario);
+        } finally {
+          await rm(scenario, { recursive: true, force: true });
+        }
+      });
+    }
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
@@ -449,8 +487,6 @@ async function verifyObservationAndReadScenarios(
     access(join(consumer, "diagnostic-observations.baseline.json")),
     { code: "ENOENT" },
   );
-
-  await verifyReadFailureDiagnostics(bin, consumer);
 }
 
 async function verifyLoopObservedRegistrations(
@@ -498,6 +534,10 @@ async function verifyReadFailureDiagnostics(
   bin: string,
   consumer: string,
 ): Promise<void> {
+  await writeFile(
+    join(consumer, "read-business.txt"),
+    "😀—Reading: 温度 🧭：24\nAmount: 17\n",
+  );
   const configuration = "failed-read.config.mts";
   const marker = join(consumer, "failed-read.marker");
   const baselinePath = join(consumer, "failed-read.baseline.json");
@@ -703,7 +743,14 @@ async function verifyInterruptedProcess(
   consumer: string,
 ): Promise<void> {
   const baselinePath = join(consumer, "interrupted.baseline.json");
-  await copyFile(join(consumer, "dock.baseline.json"), baselinePath);
+  const initial = await runDock(
+    bin,
+    ["baseline", "update", "--config", "interrupted.config.mts", "--json"],
+    consumer,
+  );
+  assert.equal(initial.code, 0, initial.stderr);
+  assert.equal(parseEnvelope(initial.stdout).variant, "updated");
+  await writeFile(join(consumer, "interrupted.marker"), "interrupt\n");
   const baselineBytes = await readFile(baselinePath);
 
   const check = await runDock(
@@ -906,6 +953,7 @@ function run(
   command: string,
   arguments_: readonly string[],
   cwd: string,
+  timeoutMs = 30_000,
 ): Promise<ProcessResult> {
   return new Promise((resolveResult, rejectResult) => {
     const child = spawn(command, [...arguments_], { cwd });
@@ -915,7 +963,7 @@ function run(
     const timeout = setTimeout(() => {
       timedOut = true;
       child.kill("SIGKILL");
-    }, 30_000);
+    }, timeoutMs);
     child.stdout.setEncoding("utf8").on("data", (chunk: string) => {
       stdout += chunk;
     });

@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 
 import {
+  copyJsonValue,
   readReference,
   type Config,
   type ExecutionObservationRecord,
@@ -106,7 +107,7 @@ export function recordVitestObservation<Value extends JsonValue>(
   value: Value,
 ): Value {
   if (key.length === 0) throw new TypeError("观察键必须是非空文本。");
-  const cloned = cloneStrictJson(value, new Set());
+  const cloned = copyJsonValue(value);
   const active = currentAttempt("记录观察");
   active?.record.observations.push({
     attempt: active.record.attempt,
@@ -131,7 +132,7 @@ export async function readReferenceInTest<
     active.record.reads.push({
       attempt: active.record.attempt,
       referenceId: reference.id,
-      value: cloneStrictJson(result.value, new Set()),
+      value: copyJsonValue(result.value),
       ...(result.range === undefined
         ? {}
         : { range: cloneTextRange(result.range) }),
@@ -157,75 +158,6 @@ function assertCurrentAttempt(active: ActiveAttempt, operation: string): void {
     active.signal.aborted
   ) {
     throw new Error(`${operation} 的 Vitest 原生测试尝试已结束或取消。`);
-  }
-}
-
-function cloneStrictJson(value: unknown, active: Set<object>): JsonValue {
-  if (
-    value === null ||
-    typeof value === "string" ||
-    typeof value === "boolean"
-  ) {
-    return value;
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new TypeError("观察值包含非有限数。");
-    return value;
-  }
-  if (typeof value !== "object" || active.has(value)) {
-    throw new TypeError("观察值必须是无循环的 JSON 值。");
-  }
-
-  active.add(value);
-  try {
-    if (Array.isArray(value)) {
-      if (
-        Object.getPrototypeOf(value) !== Array.prototype ||
-        Object.getOwnPropertySymbols(value).length > 0 ||
-        Object.keys(value).length !== value.length ||
-        Object.getOwnPropertyNames(value).length !== value.length + 1
-      ) {
-        throw new TypeError("观察数组必须连续且不能包含额外属性。");
-      }
-      const result: JsonValue[] = [];
-      for (let index = 0; index < value.length; index += 1) {
-        const descriptor = Object.getOwnPropertyDescriptor(
-          value,
-          String(index),
-        );
-        if (descriptor === undefined || !("value" in descriptor)) {
-          throw new TypeError("观察数组不能包含空位或访问器属性。");
-        }
-        result.push(cloneStrictJson(descriptor.value, active));
-      }
-      return result;
-    }
-
-    const prototype = Object.getPrototypeOf(value) as unknown;
-    const keys = Object.keys(value);
-    if (
-      (prototype !== Object.prototype && prototype !== null) ||
-      Object.getOwnPropertySymbols(value).length > 0 ||
-      Object.getOwnPropertyNames(value).length !== keys.length
-    ) {
-      throw new TypeError("观察对象必须是没有额外属性的普通 JSON 对象。");
-    }
-    const result: Record<string, JsonValue> = {};
-    for (const key of keys) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (descriptor === undefined || !("value" in descriptor)) {
-        throw new TypeError("观察对象不能包含访问器属性。");
-      }
-      Object.defineProperty(result, key, {
-        configurable: true,
-        enumerable: true,
-        value: cloneStrictJson(descriptor.value, active),
-        writable: true,
-      });
-    }
-    return result;
-  } finally {
-    active.delete(value);
   }
 }
 

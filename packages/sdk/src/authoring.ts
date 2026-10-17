@@ -1,4 +1,4 @@
-import { isJsonValue, type JsonValue } from "@dock/core";
+import { canonicalJson, isJsonValue, type JsonValue } from "@dock/core";
 
 import type {
   Binding,
@@ -10,7 +10,10 @@ import type {
   ReferencePlugin,
   ReferenceValue,
   RegisteredReference,
+  RunDeclaration,
+  PluginExecutionContext,
 } from "./contracts.ts";
+import { ownReference } from "./owned-data.ts";
 
 export type {
   Binding,
@@ -61,20 +64,20 @@ type PluginReferenceArgument<
     : never
   : never;
 
-type PluginReferenceListArgument<Plugin> =
-  "validateReferences" extends keyof Plugin
-    ? Plugin["validateReferences"] extends (
-        ...arguments_: infer Arguments
-      ) => unknown
-      ? Arguments extends readonly [infer References, ...unknown[]]
-        ? References extends readonly (infer Ref)[]
-          ? Ref extends Reference
-            ? Ref
-            : never
+type PluginReferenceListArgument<
+  Plugin,
+  Method extends string = "validateReferences",
+> = Method extends keyof Plugin
+  ? Plugin[Method] extends (...arguments_: infer Arguments) => unknown
+    ? Arguments extends readonly [infer References, ...unknown[]]
+      ? References extends readonly (infer Ref)[]
+        ? Ref extends Reference
+          ? Ref
           : never
         : never
       : never
-    : never;
+    : never
+  : never;
 
 type PluginReferenceType<Plugin> = [
   PluginReferenceArgument<Plugin, "validate">,
@@ -141,6 +144,50 @@ type PluginHookReferenceContract<Plugin, Ref extends Reference> =
       : never
     : never;
 
+type DeclaredConfiguration<Execution> = Execution extends {
+  readonly declare: (...arguments_: never[]) => infer Result;
+}
+  ? Awaited<Result> extends readonly RunDeclaration<infer Configuration>[]
+    ? Configuration
+    : never
+  : never;
+
+type ExecutionContract<Plugin, Ref extends Reference> = Plugin extends {
+  readonly execution: infer Execution;
+}
+  ? Execution extends {
+      readonly execute: (...arguments_: infer Arguments) => unknown;
+    }
+    ? AcceptsPluginReference<
+        Ref,
+        PluginReferenceListArgument<Execution, "declare">
+      > extends true
+      ? [
+          {
+            readonly declaration: RunDeclaration<
+              DeclaredConfiguration<Execution>
+            >;
+            readonly selectedReferences: readonly Ref[];
+          },
+        ] extends [Arguments extends [] ? unknown : Arguments[0]]
+        ? Plugin extends {
+            readonly collect: (
+              ...arguments_: infer CollectArguments
+            ) => unknown;
+          }
+          ? CollectArguments extends [unknown, infer Context, ...unknown[]]
+            ? [
+                PluginExecutionContext<DeclaredConfiguration<Execution>>,
+              ] extends [Context]
+              ? unknown
+              : never
+            : unknown
+          : never
+        : never
+      : never
+    : never
+  : unknown;
+
 /** 新增的纯预检和文件定位钩子必须接受声明的同一引用类型。 */
 type PluginValueContractForReference<Plugin, Ref extends Reference> = [
   PluginHookReferenceContract<Plugin, Ref>,
@@ -167,7 +214,8 @@ type PluginValueContractForReference<Plugin, Ref extends Reference> = [
 type PluginValueContract<Plugin> =
   PluginReferenceType<Plugin> extends infer Ref extends Reference
     ? PluginIdentityMatches<PluginIdType<Plugin>, Ref> extends true
-      ? PluginValueContractForReference<Plugin, Ref>
+      ? PluginValueContractForReference<Plugin, Ref> &
+          ExecutionContract<Plugin, Ref>
       : never
     : never;
 
@@ -243,7 +291,33 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     if (plugins.has(candidate.id)) {
       throw new TypeError(`引用插件身份重复：${candidate.id}`);
     }
-    plugins.set(candidate.id, candidate);
+    const read = "read" in candidate ? candidate.read : undefined;
+    plugins.set(
+      candidate.id,
+      Object.freeze({
+        ...candidate,
+        id: candidate.id,
+        validate: candidate.validate.bind(candidate),
+        collect: candidate.collect.bind(candidate),
+        ...(candidate.fileInfo === undefined
+          ? {}
+          : { fileInfo: candidate.fileInfo.bind(candidate) }),
+        ...(candidate.validateReferences === undefined
+          ? {}
+          : {
+              validateReferences: candidate.validateReferences.bind(candidate),
+            }),
+        ...(typeof read === "function" ? { read: read.bind(candidate) } : {}),
+        ...(candidate.execution === undefined
+          ? {}
+          : {
+              execution: Object.freeze({
+                declare: candidate.execution.declare.bind(candidate.execution),
+                execute: candidate.execution.execute.bind(candidate.execution),
+              }),
+            }),
+      }),
+    );
   }
 
   if (!Array.isArray(config.bindings)) {
@@ -270,6 +344,11 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     }
   }
 
+  const root = config.root as string | undefined;
+  const baseline = config.baseline as string | undefined;
+  const sources = (
+    config.declarationSources as DeclarationSource[] | undefined
+  )?.map((source) => (source instanceof URL ? source.href : source));
   const bindings = new Map<string, Binding>();
   const references = new Map<string, NormalizedReference>();
   for (const candidate of config.bindings) {
@@ -293,7 +372,19 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
         `关联身份重复：${current.id}${formatDeclarationSources([priorBinding.declaredAt, current.declaredAt])}`,
       );
     }
-    bindings.set(current.id, current);
+    bindings.set(current.id, {
+      id: current.id,
+      references: [...current.references],
+      ...(current.note === undefined ? {} : { note: current.note }),
+      ...(current.declaredAt === undefined
+        ? {}
+        : {
+            declaredAt:
+              current.declaredAt instanceof URL
+                ? current.declaredAt.href
+                : current.declaredAt,
+          }),
+    });
 
     for (const reference of current.references) {
       assertReference(reference);
@@ -307,7 +398,7 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
         reference.id,
         prior === undefined
           ? {
-              ...reference,
+              ...ownReference(reference),
               declarationSources: declarationSources([reference.declaredAt]),
             }
           : {
@@ -321,6 +412,39 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     }
   }
 
+  for (const [id, reference] of references) {
+    references.set(
+      id,
+      Object.freeze({
+        ...reference,
+        declarationSources: Object.freeze(
+          reference.declarationSources.map((source) =>
+            source instanceof URL ? source.href : source,
+          ),
+        ),
+      }),
+    );
+  }
+  const normalizedConfig: Config = Object.freeze({
+    plugins: Object.freeze([...plugins.values()]),
+    bindings: Object.freeze(
+      [...bindings.values()].map((binding) =>
+        Object.freeze({
+          ...binding,
+          references: Object.freeze(
+            binding.references.map((reference) =>
+              references.get(reference.id)!,
+            ),
+          ),
+        }),
+      ),
+    ),
+    ...(root === undefined ? {} : { root }),
+    ...(baseline === undefined ? {} : { baseline }),
+    ...(sources === undefined
+      ? {}
+      : { declarationSources: Object.freeze(sources) }),
+  });
   for (const reference of references.values()) {
     const plugin = plugins.get(reference.pluginId);
     if (plugin === undefined) {
@@ -338,13 +462,16 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     }
   }
 
-  return { config: config as Config, references: [...references.values()] };
+  return {
+    config: normalizedConfig,
+    references: Object.freeze([...references.values()]),
+  };
 }
 
 function assertPlugin(value: unknown): asserts value is ReferencePlugin {
-  const prepare =
+  const execution =
     typeof value === "object" && value !== null
-      ? (value as { readonly prepare?: unknown }).prepare
+      ? (value as { readonly execution?: unknown }).execution
       : undefined;
   const fileInfo =
     typeof value === "object" && value !== null
@@ -362,13 +489,17 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     (value as { id: string }).id.length === 0 ||
     typeof (value as { collect?: unknown }).collect !== "function" ||
     typeof (value as { validate?: unknown }).validate !== "function" ||
-    (prepare !== undefined && typeof prepare !== "function") ||
+    (execution !== undefined &&
+      (typeof execution !== "object" ||
+        execution === null ||
+        typeof (execution as { declare?: unknown }).declare !== "function" ||
+        typeof (execution as { execute?: unknown }).execute !== "function")) ||
     (fileInfo !== undefined && typeof fileInfo !== "function") ||
     (validateReferences !== undefined &&
       typeof validateReferences !== "function")
   ) {
     throw new TypeError(
-      "引用插件必须提供非空 id、validate 和 collect 函数；fileInfo、validateReferences 与 prepare（若提供）必须是函数。",
+      "引用插件必须提供非空 id、validate 和 collect 函数；可选的文件定位与完整集合校验必须是函数，执行能力必须同时提供 declare 和 execute。",
     );
   }
 }
@@ -441,24 +572,10 @@ function sameReferenceDefinition(left: Reference, right: Reference): boolean {
   return (
     left.pluginId === right.pluginId &&
     canonicalJson(left.target) === canonicalJson(right.target) &&
-    canonicalJson(left.selection) === canonicalJson(right.selection)
+    (left.selection === undefined || right.selection === undefined
+      ? left.selection === right.selection
+      : canonicalJson(left.selection) === canonicalJson(right.selection))
   );
-}
-
-function canonicalJson(value: JsonValue | undefined): string {
-  if (value === undefined) return "undefined";
-  if (value === null) return "null";
-  if (typeof value === "string") return JSON.stringify(value);
-  if (typeof value === "number" || typeof value === "boolean") {
-    return String(value);
-  }
-  if (Array.isArray(value)) {
-    return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
-  }
-  return `{${Object.keys(value)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key]!)}`)
-    .join(",")}}`;
 }
 
 function declarationSources(

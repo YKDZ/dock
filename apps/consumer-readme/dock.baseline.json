@@ -1,0 +1,125 @@
+{
+  "version": 2,
+  "bindings": {
+    "readme-extension": {
+      "definition": {
+        "id": "readme-extension",
+        "references": ["readme-extension-guide", "readme-example"]
+      },
+      "references": {
+        "readme-example": {
+          "definition": {
+            "id": "readme-example",
+            "target": {
+              "pluginId": "@dock/reference-node-test",
+              "target": {
+                "kind": "node-test-status",
+                "run": {
+                  "identity": "README 示例",
+                  "files": ["apps/consumer-readme/scripts/readme.test.ts"],
+                  "observationKeys": []
+                },
+                "file": "apps/consumer-readme/scripts/readme.test.ts",
+                "name": "README 示例完成检查与基线更新"
+              },
+              "fileInfo": "scripts/readme.test.ts"
+            }
+          },
+          "value": {
+            "status": "passed"
+          }
+        },
+        "readme-extension-guide": {
+          "definition": {
+            "id": "readme-extension-guide",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "README.md",
+              "fileInfo": "../../README.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "section",
+                  "heading": "扩展"
+                }
+              ]
+            }
+          },
+          "value": "需要维护的资产类型可以按需扩展。只要能够取得可比较的内容或结果，就可以编写插件将其接入 Dock，再与已有引用组成关联，沿用相同的检查和基线更新流程。\n\n目前原生支持以下类型：\n\n- [文件](references/file/)：检查文件是否存在，选取全文或文本片段。\n- [Markdown 文档](references/markdown/)：选取章节、表格等结构化内容或标记范围。\n- [TypeScript 代码](references/typescript/)：按符号和声明路径选取代码。\n- [Node.js 测试](references/node-test/)：取得原生测试状态及测试中记录的结果。\n- [Vitest 测试](references/vitest/)：取得测试或测试组的状态及测试中记录的结果。\n\n例如，某个项目在 `package.json` 中声明 Node.js 版本要求：\n\n```json\n{ \"engines\": { \"node\": \">=22\" } }\n```\n\n安装说明 `install.md` 写着“需要 Node.js 22 或更高版本”。可以编写一个读取 `engines.node` 的插件，将版本要求与安装说明关联起来。下面的配置保存为 `dock.config.mjs`：\n\n```js\nimport { readFile } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\nimport { file } from \"@dock/reference-file\";\nimport {\n  binding,\n  createReference,\n  defineConfig,\n  definePlugin,\n} from \"@dock/sdk\";\n\nconst nodeEngine = definePlugin({\n  id: \"node-engine\",\n  validate({ target }) {\n    if (typeof target !== \"string\") {\n      throw new Error(\"请指定包清单的路径。\");\n    }\n  },\n  async collect({ target }, { root }) {\n    const data = JSON.parse(await readFile(resolve(root, target), \"utf8\"));\n    const value = data.engines?.node;\n    if (typeof value !== \"string\") {\n      throw new Error(\"请在包清单中用 engines.node 声明版本要求。\");\n    }\n    return { kind: \"value\", value };\n  },\n});\n\nconst engine = createReference(\"node-engine\", \"node-version\", \"package.json\");\nconst guide = file.from(\"install.md\").reference(\"install-guide\");\n\nexport default defineConfig({\n  plugins: [file, nodeEngine],\n  bindings: [binding(\"installation\", [guide, engine])],\n});\n```\n\n先保存基线：\n\n```sh\ndock baseline update --config dock.config.mjs\n```\n\n再把 `package.json` 中的 `engines.node` 改为 `\">=24\"`，运行检查：\n\n```sh\ndock check --config dock.config.mjs\n```\n\n检查会报告版本要求从 `>=22` 变为 `>=24`，并列出关联的安装说明，提醒你核对其中的版本要求。"
+        }
+      }
+    },
+    "readme-workflow": {
+      "definition": {
+        "id": "readme-workflow",
+        "references": ["readme-concepts", "readme-usage", "readme-example"]
+      },
+      "references": {
+        "readme-concepts": {
+          "definition": {
+            "id": "readme-concepts",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "README.md",
+              "fileInfo": "../../README.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "section",
+                  "heading": "核心思想"
+                }
+              ]
+            }
+          },
+          "value": "你可以将一个文件、一段文档、一个代码符号或测试中记录的结果定义为引用，再将需要共同核对的引用组成关联。首次接入时，将当前状态保存为基线，供后续检查比较。\n\n检查时，Dock 取得这些引用的当前内容或执行结果，与基线比较，并报告变化。维护者据此判断是否需要调整文档、代码或测试，确认后更新基线。"
+        },
+        "readme-example": {
+          "definition": {
+            "id": "readme-example",
+            "target": {
+              "pluginId": "@dock/reference-node-test",
+              "target": {
+                "kind": "node-test-status",
+                "run": {
+                  "identity": "README 示例",
+                  "files": ["apps/consumer-readme/scripts/readme.test.ts"],
+                  "observationKeys": []
+                },
+                "file": "apps/consumer-readme/scripts/readme.test.ts",
+                "name": "README 示例完成检查与基线更新"
+              },
+              "fileInfo": "scripts/readme.test.ts"
+            }
+          },
+          "value": {
+            "status": "passed"
+          }
+        },
+        "readme-usage": {
+          "definition": {
+            "id": "readme-usage",
+            "target": {
+              "pluginId": "@dock/reference-markdown",
+              "target": "README.md",
+              "fileInfo": "../../README.md"
+            },
+            "selection": {
+              "kind": "markdown",
+              "steps": [
+                {
+                  "kind": "section",
+                  "heading": "如何使用"
+                }
+              ]
+            }
+          },
+          "value": "先选出值得持续维护的内容，在配置中声明引用和关联，并选择所需插件。测试沿用原有的编写和运行方式。\n\n保存初始基线后，可以在日常开发或 CI 中执行检查：\n\n```sh\ndock check --config dock.config.ts\n```\n\n看到变化后，核对相关内容，完成必要修改，再保存新的基线：\n\n```sh\ndock baseline update --config dock.config.ts\n```\n\n从少量关键内容开始即可，后续按维护需要逐步增加关联。"
+        }
+      }
+    }
+  }
+}

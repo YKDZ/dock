@@ -45,12 +45,9 @@ export type FileReferenceLocation = {
 export type FileTextReferenceBuilder<
   Selection extends JsonValue = FileTextSelection,
 > = {
-  quote(text: string): FileTextReferenceBuilder<FileTextSelection>;
-  match(
-    pattern: string,
-    group?: number,
-  ): FileTextReferenceBuilder<FileTextSelection>;
-  region(name: string): FileTextReferenceBuilder<FileTextSelection>;
+  quote(text: string): FileTextReferenceBuilder;
+  match(pattern: string, group?: number): FileTextReferenceBuilder;
+  region(name: string): FileTextReferenceBuilder;
   reference<Id extends string>(
     id: Id,
     options?: FileReferenceOptions,
@@ -113,7 +110,7 @@ const implementation = definePlugin({
   async collect(
     reference: FileReference,
     context: PluginContext,
-  ): Promise<PluginResult<JsonValue>> {
+  ): Promise<PluginResult> {
     try {
       const result = await readFileReference(reference, context.root);
       return {
@@ -137,7 +134,7 @@ const implementation = definePlugin({
   async read(
     reference: FileReference,
     context: PluginContext,
-  ): Promise<PluginReadResult<JsonValue>> {
+  ): Promise<PluginReadResult> {
     return await readFileReference(reference, context.root);
   },
 });
@@ -219,25 +216,22 @@ function createFileBuilder(target: string): FileReferenceBuilder {
 function createTextBuilder(
   target: string,
   steps: readonly TextSelectionStep[],
-): FileTextReferenceBuilder<FileTextSelection> {
+): FileTextReferenceBuilder {
   const selection = {
     kind: "text",
     steps: [...steps],
   } satisfies FileTextSelection;
   return {
-    quote(text: string): FileTextReferenceBuilder<FileTextSelection> {
+    quote(text: string): FileTextReferenceBuilder {
       return createTextBuilder(target, [...steps, { kind: "quote", text }]);
     },
-    match(
-      pattern: string,
-      group?: number,
-    ): FileTextReferenceBuilder<FileTextSelection> {
+    match(pattern: string, group?: number): FileTextReferenceBuilder {
       return createTextBuilder(target, [
         ...steps,
         { kind: "match", pattern, ...(group === undefined ? {} : { group }) },
       ]);
     },
-    region(name: string): FileTextReferenceBuilder<FileTextSelection> {
+    region(name: string): FileTextReferenceBuilder {
       return createTextBuilder(target, [...steps, { kind: "region", name }]);
     },
     reference<Id extends string>(
@@ -301,7 +295,7 @@ class FileReferenceError extends Error {
 async function readFileReference(
   reference: FileReference,
   root: string,
-): Promise<PluginReadResult<JsonValue>> {
+): Promise<PluginReadResult> {
   let absolutePath: string;
   try {
     assertFileTarget(reference.target);

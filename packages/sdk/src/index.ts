@@ -1,8 +1,10 @@
+export { canonicalJson, copyJsonValue, isJsonValue } from "@dock/core";
 export type {
   Baseline,
   BindingChange,
   BindingCheckResult,
   CheckError,
+  CheckContext,
   ReferenceDefinition,
   ReferenceResult,
   TextRange,
@@ -14,7 +16,10 @@ export type {
   ConfigInput,
   DeclarationSource,
   PluginContext,
-  PluginExecutionIdentity,
+  RunDeclaration,
+  ExecutedRun,
+  ExecutionView,
+  PluginExecution,
   PluginExecutionContext,
   PluginMemberResult,
   PluginReadResult,
@@ -32,22 +37,24 @@ export {
   definePlugin,
 } from "./authoring.ts";
 export type { ReferenceOptions } from "./authoring.ts";
-export { check, MaintenanceError, updateBaseline } from "./maintenance.ts";
+export {
+  check,
+  inspect,
+  MaintenanceError,
+  updateBaseline,
+} from "./maintenance.ts";
+export type { ResolvedMaintenance, ResolvedRun } from "./resolution.ts";
 export type {
   BaselineUpdateOutcome,
   CheckReport,
   MaintenanceScope,
   MaintenanceConfig,
 } from "./maintenance.ts";
-export { createExecutionSession } from "./execution.ts";
 export type {
-  ExecutionCallback,
   ExecutionObservationRecord,
   ExecutionReadDiagnostic,
   ExecutionReadRecord,
-  ExecutionRegistry,
   ExecutionRunRecord,
-  ExecutionSession,
   ExecutionSummary,
   ExecutionTestCatalog,
   ExecutionTestRecord,

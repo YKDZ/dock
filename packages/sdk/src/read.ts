@@ -1,4 +1,9 @@
-import { isJsonValue, type JsonValue, type TextRange } from "@dock/core";
+import {
+  copyJsonValue,
+  isJsonValue,
+  type JsonValue,
+  type TextRange,
+} from "@dock/core";
 
 import type {
   Config,
@@ -9,7 +14,9 @@ import type {
   ReferencePlugin,
   ReferenceValue,
 } from "./contracts.ts";
-import { prepareConfig, MaintenanceError } from "./maintenance.ts";
+import { MaintenanceError } from "./errors.ts";
+import { ownReference } from "./owned-data.ts";
+import { prepareConfig } from "./resolution.ts";
 
 type RuntimePlugin = {
   readonly id?: unknown;
@@ -28,6 +35,7 @@ export async function readReference<
   reference: Ref,
 ): Promise<PluginReadResult<ReferenceValue<Ref>>> {
   assertReference(reference);
+  const ownedReference = ownReference(reference);
   const prepared = prepareConfig(config, process.cwd());
   const candidate = prepared.plugins.get(reference.pluginId) as
     | RuntimePlugin
@@ -48,9 +56,9 @@ export async function readReference<
   const reader = candidate.read as RuntimeReader;
   try {
     if (typeof candidate.validate === "function") {
-      candidate.validate(reference);
+      candidate.validate(ownedReference);
     }
-    const result = await reader(reference, { root: prepared.root });
+    const result = await reader(ownedReference, { root: prepared.root });
     return validateReadResult<ReferenceValue<Ref>>(reference.id, result);
   } catch (error) {
     if (error instanceof MaintenanceError) throw error;
@@ -100,8 +108,8 @@ function validateReadResult<Value extends JsonValue>(
   }
 
   return {
-    value: value.value as Value,
-    ...(value.range === undefined ? {} : { range: value.range }),
+    value: copyJsonValue(value.value) as Value,
+    ...(value.range === undefined ? {} : { range: { ...value.range } }),
   };
 }
 

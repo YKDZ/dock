@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { check, updateBaseline } from "@dock/core";
+import { check, isJsonValue, updateBaseline } from "@dock/core";
 import type {
   BindingCheckResult,
   BindingDefinition,
@@ -58,6 +58,21 @@ const facts: ReferenceResult[] = [
   { referenceId: "preview-port-file", value: "port=4173" },
   { referenceId: "preview-port-exists", value: true },
 ];
+
+void test("JSON 值接受普通和无原型对象，拒绝日期与映射对象", () => {
+  const value = { enabled: true, nested: [null, { count: 2 }] };
+  assert.equal(isJsonValue(value), true);
+  assert.equal(
+    isJsonValue(
+      Object.assign(Object.create(null) as Record<string, unknown>, value),
+    ),
+    true,
+  );
+  for (const value of [new Date("2026-01-01T00:00:00.000Z"), new Map()]) {
+    assert.equal(isJsonValue(value), false);
+    assert.equal(isJsonValue({ nested: [value] }), false);
+  }
+});
 
 void test("非空引用集合直接核对单个测试和无文档的测试组合", () => {
   const reportInput: CheckInput = {
@@ -725,7 +740,7 @@ void test("当前位置变化不制造差异；事实、引用定义和关联关
     baseline: updated.baseline,
   });
   assert.equal(moved.bindings[0]?.consistency, "consistent");
-  if ("current" in moved.bindings[0]!) {
+  if ("current" in moved.bindings[0]) {
     assert.equal(
       moved.bindings[0].current.references["preview-port-doc"]?.range?.start,
       521,

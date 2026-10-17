@@ -22,6 +22,8 @@
     "paths-negative.mts",
     "scope-positive.mts",
     "scope-negative.mts",
+    "inspect-positive.mts",
+    "inspect-negative.mts",
     "secondary/physical-author.mts"
   ]
 }

@@ -24,6 +24,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "devDependencies": {
+    "@dock/core": "workspace:*",
     "@dock/sdk": "workspace:*",
     "@dock/typescript-config": "workspace:*",
     "@types/node": "catalog:",
