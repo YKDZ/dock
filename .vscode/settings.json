@@ -9,5 +9,11 @@
   "editor.formatOnSaveMode": "file",
   "oxc.configPath": "./oxlint.config.ts",
   "oxc.enable": true,
-  "oxc.fmt.configPath": "./oxfmt.config.ts"
+  "oxc.fmt.configPath": "./oxfmt.config.ts",
+  "[typescript]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  },
+  "[json]": {
+    "editor.defaultFormatter": "oxc.oxc-vscode"
+  }
 }
