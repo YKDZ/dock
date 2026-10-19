@@ -33,13 +33,13 @@ if (args[0] === "view") {
     const name = separator > 0 ? spec.slice(0, separator) : spec;
     const tag = separator > 0 ? spec.slice(separator + 1) : "latest";
     const tags = state.tags[name];
-    if (tags?.[tag]) output(tags);
+    if (tags?.[tag]) output([tags]);
     else if (!tags || tag !== "latest") missing();
   } else {
     const separator = spec.lastIndexOf("@");
     const dist =
       state.versions[spec.slice(0, separator)]?.[spec.slice(separator + 1)];
-    if (dist) output(dist);
+    if (dist) output([dist]);
     else missing();
   }
 } else if (args[0] === "publish") {

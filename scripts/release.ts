@@ -44,8 +44,16 @@ function npmView(spec: string, field: string): unknown {
     ["view", spec, field, "--json", `--registry=${registry}`],
     { encoding: "utf8" },
   );
-  if (result.status === 0)
-    return result.stdout.trim() ? (JSON.parse(result.stdout) as unknown) : null;
+  if (result.status === 0) {
+    if (!result.stdout.trim()) return null;
+    const value: unknown = JSON.parse(result.stdout);
+    // 精确版本或标签只允许一个结果；npm 的 JSON 输出也可能用数组包装它。
+    if (Array.isArray(value)) {
+      assert.ok(value.length <= 1, `npm 查询返回多个结果：${spec} ${field}`);
+      return value[0] ?? null;
+    }
+    return value;
+  }
   let code: unknown;
   try {
     code = (JSON.parse(result.stdout) as { error?: { code?: unknown } }).error
@@ -256,6 +264,10 @@ async function publish(): Promise<void> {
       `--registry=${registry}`,
     ]);
     const published = remoteState(artifact.name, manifest.version);
+    assert.ok(
+      published.dist,
+      `${artifact.name} 已获 npm 接收，但注册表暂不可见；保留原制品，待本版本可查询后重跑，勿重新打包或立即重复发布。`,
+    );
     assert.equal(
       published.dist?.integrity,
       artifact.integrity,
