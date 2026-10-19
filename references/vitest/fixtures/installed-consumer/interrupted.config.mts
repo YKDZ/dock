@@ -1,5 +1,9 @@
-import { defineVitestRun, vitest, vitestStatus } from "@dock/reference-vitest";
-import { binding, defineConfig } from "@dock/sdk";
+import { binding, defineConfig } from "@ykdz/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@ykdz/dock-reference-vitest";
 
 const run = defineVitestRun("中断运行", {
   files: ["test/interrupted.test.mts"],

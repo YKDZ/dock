@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { typescript } from "@dock/reference-typescript";
-import { check, readReference } from "@dock/sdk";
+import { check, readReference } from "@ykdz/dock";
+import { typescript } from "@ykdz/dock-reference-typescript";
 
 import config, { expression } from "./dock.config.mjs";
 

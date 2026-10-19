@@ -1,4 +1,3 @@
-import { file, filePluginId } from "@dock/reference-file";
 import {
   binding,
   createReference,
@@ -9,7 +8,8 @@ import {
   type PluginReadResult,
   type PluginResult,
   type Reference,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file, filePluginId } from "@ykdz/dock-reference-file";
 
 // @ts-expect-error 文本选择只能由公开定位器构造，不能传入任意 JSON 选择。
 file.from("guide.md").reference("invalid", { selection: { start: 0 } });

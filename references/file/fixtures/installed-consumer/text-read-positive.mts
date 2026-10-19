@@ -1,4 +1,3 @@
-import { file, type FileReference } from "@dock/reference-file";
 import {
   binding,
   createReference,
@@ -10,7 +9,8 @@ import {
   type PluginResult,
   type Reference,
   type ReferenceValue,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file, type FileReference } from "@ykdz/dock-reference-file";
 
 const selected = file
   .from("guide.md")

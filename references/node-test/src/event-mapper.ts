@@ -7,7 +7,7 @@ import type {
   ExecutionTestRecord,
   ExecutionTestStatus,
   JsonValue,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 import {
   nodeObservationMessagePrefix,

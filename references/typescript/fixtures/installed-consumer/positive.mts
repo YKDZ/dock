@@ -1,10 +1,10 @@
-import { typescript } from "@dock/reference-typescript";
 import {
   binding,
   defineConfig,
   readReference,
   type PluginReadResult,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { typescript } from "@ykdz/dock-reference-typescript";
 
 const calculate = typescript
   .from("symbol-source.ts")

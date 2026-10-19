@@ -1,5 +1,5 @@
-import { file, type FileReference } from "@dock/reference-file";
-import { binding, defineConfig } from "@dock/sdk";
+import { binding, defineConfig } from "@ykdz/dock";
+import { file, type FileReference } from "@ykdz/dock-reference-file";
 
 const guide: FileReference = file.from("guide.md").reference("guide");
 

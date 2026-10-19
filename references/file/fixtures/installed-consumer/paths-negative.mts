@@ -1,4 +1,4 @@
-import { file } from "@dock/reference-file";
+import { file } from "@ykdz/dock-reference-file";
 
 // @ts-expect-error at 需要标准模块 URL。
 file.at(42);

@@ -1,5 +1,5 @@
-import { file } from "@dock/reference-file";
-import { binding, defineConfig } from "@dock/sdk";
+import { binding, defineConfig } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 
 export default defineConfig({
   plugins: [file],

@@ -3,7 +3,7 @@ import {
   isJsonValue,
   type JsonValue,
   type TextRange,
-} from "@dock/core";
+} from "@ykdz/dock-core";
 
 import type {
   Config,

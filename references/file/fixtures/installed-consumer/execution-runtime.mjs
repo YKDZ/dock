@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { check, inspect, updateBaseline } from "@dock/sdk";
+import { check, inspect, updateBaseline } from "@ykdz/dock";
 
 const directory = await mkdtemp(join(tmpdir(), "dock-execution-consumer-"));
 try {

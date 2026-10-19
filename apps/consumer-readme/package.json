@@ -12,11 +12,11 @@
     "dock:baseline": "dock baseline update --config dock.config.ts && oxfmt --write dock.baseline.json"
   },
   "devDependencies": {
-    "@dock/reference-file": "workspace:*",
-    "@dock/reference-markdown": "workspace:*",
-    "@dock/reference-node-test": "workspace:*",
-    "@dock/sdk": "workspace:*",
     "@types/node": "catalog:",
+    "@ykdz/dock": "workspace:*",
+    "@ykdz/dock-reference-file": "workspace:*",
+    "@ykdz/dock-reference-markdown": "workspace:*",
+    "@ykdz/dock-reference-node-test": "workspace:*",
     "dock": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

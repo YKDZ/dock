@@ -1,10 +1,10 @@
+import { binding, defineConfig } from "@ykdz/dock";
 import {
   defineVitestObservation,
   vitest,
   vitestObservation,
   defineVitestRun,
-} from "@dock/reference-vitest";
-import { binding, defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-vitest";
 
 const value = defineVitestObservation("multi-file-value", "");
 const run = defineVitestRun("多文件观察", {

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 
-import { beginExecution } from "@dock/reference-node-test";
+import { beginExecution } from "@ykdz/dock-reference-node-test";
 
 test("父级失败", () => {
   test("已进入回调的子测试", async () => {

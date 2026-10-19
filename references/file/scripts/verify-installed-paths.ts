@@ -343,7 +343,7 @@ async function writeDeclarations(workspace: string): Promise<void> {
   await writeFile(
     join(workspace, "shared", "declarations.mjs"),
     [
-      'import { file } from "@dock/reference-file";',
+      'import { file } from "@ykdz/dock-reference-file";',
       'export const guide = file.from("packages/alpha/guide.md").reference("guide", { declaredAt: "declared-before.mjs" });',
       'export const local = file.at(import.meta.url).from("../packages/alpha/local.md").reference("local");',
       'export const url = file.from(new URL("../packages/alpha/local.md", import.meta.url)).reference("url");',
@@ -353,8 +353,8 @@ async function writeDeclarations(workspace: string): Promise<void> {
 
 function defaultRootConfig(): string {
   return [
-    'import { file } from "@dock/reference-file";',
-    'import { binding, defineConfig } from "@dock/sdk";',
+    'import { file } from "@ykdz/dock-reference-file";',
+    'import { binding, defineConfig } from "@ykdz/dock";',
     'export default defineConfig({ plugins: [file], bindings: [binding("default-root-policy", [file.from("config/default.md").reference("default-root-reference")])] });',
   ].join("\n");
 }
@@ -371,8 +371,8 @@ function packageConfig(): string {
 
 function mainConfig(): string {
   return [
-    'import { file } from "@dock/reference-file";',
-    'import { binding, defineConfig } from "@dock/sdk";',
+    'import { file } from "@ykdz/dock-reference-file";',
+    'import { binding, defineConfig } from "@ykdz/dock";',
     'import { guide, local, url } from "../workspace/shared/declarations.mjs";',
     'export default defineConfig({ plugins: [file], root: "../workspace", baseline: "history/primary.json", bindings: [binding("documents", [guide, local, url])] });',
   ].join("\n");
@@ -390,8 +390,8 @@ function configSource(
     ? `[binding(${JSON.stringify(bindingId)}, [file.from(${JSON.stringify(target)}).reference(${JSON.stringify(referenceId)})])]`
     : "[]";
   return [
-    'import { file } from "@dock/reference-file";',
-    'import { binding, defineConfig } from "@dock/sdk";',
+    'import { file } from "@ykdz/dock-reference-file";',
+    'import { binding, defineConfig } from "@ykdz/dock";',
     `export default defineConfig({ plugins: [file],${root === undefined ? "" : ` root: ${JSON.stringify(root)},`}${baseline === undefined ? "" : ` baseline: ${JSON.stringify(baseline)},`} bindings: ${binding} });`,
   ].join("\n");
 }
@@ -741,7 +741,7 @@ async function verifyMaintainedModuleMove(
   await writeFile(
     join(movedDirectory, "declarations.mjs"),
     [
-      'import { file } from "@dock/reference-file";',
+      'import { file } from "@ykdz/dock-reference-file";',
       'export const guide = file.from("packages/alpha/guide.md").reference("guide", { declaredAt: "declared-after.mjs" });',
       'export const local = file.at(import.meta.url).from("../../packages/alpha/local.md").reference("local");',
       'export const url = file.from(new URL("../../packages/alpha/local.md", import.meta.url)).reference("url");',

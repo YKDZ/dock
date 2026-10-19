@@ -6,7 +6,7 @@ import {
   defineNodeTestObservation,
   nodeTest as secondaryNodeTest,
   beginExecution,
-} from "@dock/reference-node-test";
+} from "@ykdz/dock-reference-node-test";
 
 import {
   currentText,

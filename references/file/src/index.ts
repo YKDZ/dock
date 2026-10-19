@@ -12,12 +12,12 @@ import {
   type Reference,
   type ReferenceOptions,
   type ReadableReferencePlugin,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 import { selectTextRange, TextSelectionError } from "./text-selection.ts";
 import type { TextSelectionStep } from "./text-selection.ts";
 
-export const filePluginId = "@dock/reference-file" as const;
+export const filePluginId = "@ykdz/dock-reference-file" as const;
 
 export type FileTextSelection = {
   readonly kind: "text";

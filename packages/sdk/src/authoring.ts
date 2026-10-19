@@ -1,4 +1,4 @@
-import { canonicalJson, isJsonValue, type JsonValue } from "@dock/core";
+import { canonicalJson, isJsonValue, type JsonValue } from "@ykdz/dock-core";
 
 import type {
   Binding,
@@ -344,8 +344,8 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     }
   }
 
-  const root = config.root as string | undefined;
-  const baseline = config.baseline as string | undefined;
+  const root = config.root;
+  const baseline = config.baseline;
   const sources = (
     config.declarationSources as DeclarationSource[] | undefined
   )?.map((source) => (source instanceof URL ? source.href : source));

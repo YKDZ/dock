@@ -1,7 +1,7 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createReference, definePlugin, readReference } from "@dock/sdk";
+import { createReference, definePlugin, readReference } from "@ykdz/dock";
 import type {
   Config,
   JsonValue,
@@ -16,7 +16,7 @@ import type {
   ReferenceOptions,
   ReferencePlugin,
   ReferenceValue,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 import { executeNodeTestRun } from "./native-runner.ts";
 import {
@@ -31,7 +31,7 @@ import type {
   NodeRunConfiguration,
 } from "./types.ts";
 
-export const nodeTestPluginId = "@dock/reference-node-test" as const;
+export const nodeTestPluginId = "@ykdz/dock-reference-node-test" as const;
 
 export type NodeTestObservation<
   Key extends string = string,
@@ -165,12 +165,7 @@ export type NodeTestReference<Id extends string = string> =
   | NodeTestStatusReference<Id>
   | NodeTestObservationReference<Id>;
 
-type RuntimeNodeTestReference = Reference<
-  typeof nodeTestPluginId,
-  string,
-  JsonValue,
-  JsonValue
->;
+type RuntimeNodeTestReference = Reference<typeof nodeTestPluginId, string>;
 
 /** 声明稳定观察键；sample 只用于推导类型，不作为默认事实。 */
 export function defineNodeTestObservation<

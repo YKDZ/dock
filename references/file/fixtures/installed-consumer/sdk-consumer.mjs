@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
-import { file } from "@dock/reference-file";
 import {
   binding,
   check,
@@ -10,7 +9,8 @@ import {
   defineConfig,
   definePlugin,
   updateBaseline,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 
 const target = "sdk-guide.txt";
 const baseline = "dock.baseline.json";

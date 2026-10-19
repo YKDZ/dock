@@ -1,10 +1,10 @@
+import { defineConfig } from "@ykdz/dock";
 import {
   defineVitestRun,
   readReferenceInTest,
   vitest,
   vitestStatus,
-} from "@dock/reference-vitest";
-import { defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-vitest";
 
 const run = defineVitestRun("不可读取的测试状态", {
   files: ["test/stable.test.mts"],

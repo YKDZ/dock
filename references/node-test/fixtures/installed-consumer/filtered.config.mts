@@ -1,9 +1,9 @@
+import { binding, defineConfig } from "@ykdz/dock";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestStatus,
-} from "@dock/reference-node-test";
-import { binding, defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
 
 const run = defineNodeTestRun("名称筛选", {
   files: ["test/filtered.test.mts"],

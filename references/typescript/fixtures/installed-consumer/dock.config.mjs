@@ -1,5 +1,5 @@
-import { typescript } from "@dock/reference-typescript";
-import { binding, defineConfig } from "@dock/sdk";
+import { binding, defineConfig } from "@ykdz/dock";
+import { typescript } from "@ykdz/dock-reference-typescript";
 
 const declaration = typescript
   .from(process.env.DOCK_SYMBOL_TARGET ?? "symbol-source.ts")

@@ -1,6 +1,6 @@
-import { file } from "@dock/reference-file";
-import { markdown } from "@dock/reference-markdown";
-import { binding, defineConfig } from "@dock/sdk";
+import { binding, defineConfig } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
+import { markdown } from "@ykdz/dock-reference-markdown";
 
 const guideTarget = process.env.DOCK_MARKDOWN_TARGET ?? "guide.md";
 const sectionHeading =

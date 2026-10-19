@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { typescript } from "@dock/reference-typescript";
-import { binding, check, defineConfig, readReference } from "@dock/sdk";
+import { binding, check, defineConfig, readReference } from "@ykdz/dock";
+import { typescript } from "@ykdz/dock-reference-typescript";
 
 void test("符号选择后继续收窄原文，读取与采集返回相同 UTF-16 范围", async () => {
   const root = await mkdtemp(join(tmpdir(), "dock-typescript-reference-"));

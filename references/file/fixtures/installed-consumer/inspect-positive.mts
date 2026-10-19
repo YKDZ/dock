@@ -1,16 +1,16 @@
 import {
-  check,
-  updateBaseline,
-  type CheckContext,
-  type ReferenceResult,
-} from "@dock/core";
-import {
   inspect,
   type Config,
   type MaintenanceScope,
   type ResolvedMaintenance,
   type ResolvedRun,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import {
+  check,
+  updateBaseline,
+  type CheckContext,
+  type ReferenceResult,
+} from "@ykdz/dock-core";
 
 async function consume(config: Config, url: URL): Promise<void> {
   const scope: MaintenanceScope = { reference: ["guide"] };

@@ -1,10 +1,14 @@
+import { binding, defineConfig } from "@ykdz/dock";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestStatus,
-} from "@dock/reference-node-test";
-import { defineVitestRun, vitest, vitestStatus } from "@dock/reference-vitest";
-import { binding, defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@ykdz/dock-reference-vitest";
 
 const identity = "同一运行身份";
 const files = ["test/shared.test.mts"] as const;

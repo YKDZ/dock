@@ -4,7 +4,7 @@ import {
   definePlugin,
   type PluginResult,
   type Reference,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 export const physicalPluginId = "@fixture/physical" as const;
 export type PhysicalTarget = { readonly path: string };

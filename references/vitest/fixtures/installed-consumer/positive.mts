@@ -1,12 +1,12 @@
+import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
   vitest,
   vitestObservation,
   vitestStatus,
-} from "@dock/reference-vitest";
-import type { VitestTestSelection } from "@dock/reference-vitest";
-import { binding, defineConfig, type ReferenceValue } from "@dock/sdk";
+} from "@ykdz/dock-reference-vitest";
+import type { VitestTestSelection } from "@ykdz/dock-reference-vitest";
 
 const run = defineVitestRun("安装状态检查", {
   files: ["test/retry.test.mts"],

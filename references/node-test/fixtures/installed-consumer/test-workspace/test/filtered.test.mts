@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { beginExecution } from "@dock/reference-node-test";
+import { beginExecution } from "@ykdz/dock-reference-node-test";
 
 test("应被名称筛选排除", () => {
   beginExecution();

@@ -1,5 +1,9 @@
-import { defineVitestRun, vitest, vitestStatus } from "@dock/reference-vitest";
-import { binding, defineConfig } from "@dock/sdk";
+import { binding, defineConfig } from "@ykdz/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@ykdz/dock-reference-vitest";
 
 const run = defineVitestRun("成功与额外失败同次运行", {
   files: [

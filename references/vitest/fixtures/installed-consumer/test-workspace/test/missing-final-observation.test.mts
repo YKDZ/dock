@@ -1,9 +1,9 @@
-import { file } from "@dock/reference-file";
+import { defineConfig } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 import {
   defineVitestObservation,
   readReferenceInTest,
-} from "@dock/reference-vitest";
-import { defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-vitest";
 import { expect, test } from "vitest";
 
 const value = defineVitestObservation("retry-value", "sample");

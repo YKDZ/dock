@@ -1,10 +1,10 @@
-import { file } from "@dock/reference-file";
+import { binding, defineConfig } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
-} from "@dock/reference-node-test";
-import { binding, defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
 
 import { numericObservation } from "./observations.config.mts";
 

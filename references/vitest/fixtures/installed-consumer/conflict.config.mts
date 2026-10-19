@@ -1,5 +1,9 @@
-import { defineVitestRun, vitest, vitestStatus } from "@dock/reference-vitest";
-import { binding, defineConfig } from "@dock/sdk";
+import { binding, defineConfig } from "@ykdz/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@ykdz/dock-reference-vitest";
 
 const firstRun = defineVitestRun("冲突身份", {
   files: ["test/conflict-first.test.mts"],

@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import type { ExecutionRunRecord } from "@dock/sdk";
+import type { ExecutionRunRecord } from "@ykdz/dock";
 
 import { mapVitestRun } from "./event-mapper.ts";
 import type { VitestProcessResult } from "./event-mapper.ts";

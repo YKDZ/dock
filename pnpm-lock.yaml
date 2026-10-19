@@ -217,21 +217,21 @@ importers:
 
   apps/consumer-readme:
     devDependencies:
-      '@dock/reference-file':
-        specifier: workspace:*
-        version: link:../../references/file
-      '@dock/reference-markdown':
-        specifier: workspace:*
-        version: link:../../references/markdown
-      '@dock/reference-node-test':
-        specifier: workspace:*
-        version: link:../../references/node-test
-      '@dock/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/dock':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      '@ykdz/dock-reference-file':
+        specifier: workspace:*
+        version: link:../../references/file
+      '@ykdz/dock-reference-markdown':
+        specifier: workspace:*
+        version: link:../../references/markdown
+      '@ykdz/dock-reference-node-test':
+        specifier: workspace:*
+        version: link:../../references/node-test
       dock:
         specifier: workspace:*
         version: link:../..
@@ -271,12 +271,12 @@ importers:
 
   packages/sdk:
     dependencies:
-      '@dock/core':
-        specifier: workspace:*
-        version: link:../core
       '@ykdz/cli-contract':
         specifier: 0.3.0
         version: 0.3.0
+      '@ykdz/dock-core':
+        specifier: workspace:*
+        version: link:../core
       zod:
         specifier: ^4.6.5
         version: 4.6.7
@@ -308,18 +308,18 @@ importers:
 
   references/file:
     devDependencies:
-      '@dock/core':
-        specifier: workspace:*
-        version: link:../../packages/core
-      '@dock/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
       '@dock/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/dock':
+        specifier: workspace:*
+        version: link:../../packages/sdk
+      '@ykdz/dock-core':
+        specifier: workspace:*
+        version: link:../../packages/core
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -335,7 +335,7 @@ importers:
 
   references/markdown:
     dependencies:
-      '@dock/reference-file':
+      '@ykdz/dock-reference-file':
         specifier: workspace:*
         version: link:../file
       mdast-util-from-markdown:
@@ -351,15 +351,15 @@ importers:
         specifier: 8.0.0
         version: 8.0.0
     devDependencies:
-      '@dock/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
       '@dock/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/dock':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -375,15 +375,15 @@ importers:
 
   references/node-test:
     devDependencies:
-      '@dock/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
       '@dock/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/dock':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0
@@ -399,12 +399,12 @@ importers:
 
   references/typescript:
     dependencies:
-      '@dock/reference-file':
-        specifier: workspace:*
-        version: link:../file
-      '@dock/sdk':
+      '@ykdz/dock':
         specifier: workspace:*
         version: link:../../packages/sdk
+      '@ykdz/dock-reference-file':
+        specifier: workspace:*
+        version: link:../file
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -430,15 +430,15 @@ importers:
 
   references/vitest:
     devDependencies:
-      '@dock/sdk':
-        specifier: workspace:*
-        version: link:../../packages/sdk
       '@dock/typescript-config':
         specifier: workspace:*
         version: link:../../packages/typescript-config
       '@types/node':
         specifier: 'catalog:'
         version: 24.19.2
+      '@ykdz/dock':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       oxfmt:
         specifier: 'catalog:'
         version: 0.71.0

@@ -1,4 +1,4 @@
-import { typescript } from "@dock/reference-typescript";
+import { typescript } from "@ykdz/dock-reference-typescript";
 
 // @ts-expect-error 声明种类必须属于公开集合。
 typescript.from("symbol-source.ts").symbol("calculate", "enum");

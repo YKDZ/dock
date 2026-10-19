@@ -1,4 +1,4 @@
-import { binding } from "@dock/sdk";
+import { binding } from "@ykdz/dock";
 
 import { catalogReference } from "./external-plugin.mts";
 

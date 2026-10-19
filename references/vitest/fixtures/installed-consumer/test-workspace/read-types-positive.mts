@@ -1,14 +1,14 @@
-import { file } from "@dock/reference-file";
-import {
-  defineVitestObservation,
-  readReferenceInTest,
-  vitestObservation,
-} from "@dock/reference-vitest";
 import {
   defineConfig,
   type PluginReadResult,
   type ReferenceValue,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
+import {
+  defineVitestObservation,
+  readReferenceInTest,
+  vitestObservation,
+} from "@ykdz/dock-reference-vitest";
 
 import { sharedRun, sharedShape } from "../positive.mjs";
 

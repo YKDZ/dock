@@ -3,7 +3,6 @@ import { spawnSync } from "node:child_process";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 
-import { file } from "@dock/reference-file";
 import {
   binding,
   check,
@@ -11,7 +10,8 @@ import {
   defineConfig,
   definePlugin,
   updateBaseline,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 
 await writeFile("alpha.txt", "alpha one\n", "utf8");
 await writeFile("alpha-extra.txt", "alpha two\n", "utf8");
@@ -80,7 +80,7 @@ assert.equal(
 
 await writeFile(
   "scope-cli-config.mjs",
-  `import { file } from "@dock/reference-file";\nimport { binding, defineConfig } from "@dock/sdk";\nexport default defineConfig({ plugins: [file], bindings: [binding("alpha", [file.from("alpha-moved.txt").reference("alpha-reference"), file.from("alpha-extra.txt").reference("alpha-extra-reference")]), binding("beta", [file.from("beta.txt").reference("beta-reference")])] });\n`,
+  `import { file } from "@ykdz/dock-reference-file";\nimport { binding, defineConfig } from "@ykdz/dock";\nexport default defineConfig({ plugins: [file], bindings: [binding("alpha", [file.from("alpha-moved.txt").reference("alpha-reference"), file.from("alpha-extra.txt").reference("alpha-extra-reference")]), binding("beta", [file.from("beta.txt").reference("beta-reference")])] });\n`,
   "utf8",
 );
 const cli = resolve("../node_modules/.bin/dock");
@@ -413,7 +413,7 @@ await writeFile(
             definition: {
               id: "legacy-ref",
               target: {
-                pluginId: "@dock/reference-file",
+                pluginId: "@ykdz/dock-reference-file",
                 target: "legacy.txt",
               },
             },

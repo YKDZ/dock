@@ -7,7 +7,7 @@ import {
   type RunDeclaration,
   type PluginResult,
   type Reference,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 type ScopeReference = Reference<
   "fixture:scope-negative",

@@ -6,7 +6,7 @@ import {
   createReference,
   defineConfig,
   definePlugin,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 const reader = definePlugin({
   id: "@fixture/same-target-reader",

@@ -13,7 +13,7 @@ import {
   type BaselineUpdateIssue,
   type CheckReport as CoreCheckReport,
   type ReferenceResult,
-} from "@dock/core";
+} from "@ykdz/dock-core";
 
 import type { Config, PluginResult } from "./contracts.ts";
 import { MaintenanceError } from "./errors.ts";

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { canonicalJson, copyJsonValue, isJsonValue } from "@dock/core";
+import { canonicalJson, copyJsonValue, isJsonValue } from "@ykdz/dock-core";
 
 void test("可比较值拒绝特殊属性与循环，不调用访问器或转换", () => {
   let evaluated = false;

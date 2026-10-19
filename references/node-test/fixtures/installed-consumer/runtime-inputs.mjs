@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 
+import { binding, createReference, defineConfig } from "@ykdz/dock";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestPluginId,
   nodeTestStatus,
-} from "@dock/reference-node-test";
-import { binding, createReference, defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
 
 assert.throws(
   () => defineNodeTestRun("空文件", { files: [] }),

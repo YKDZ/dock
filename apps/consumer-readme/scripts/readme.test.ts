@@ -5,7 +5,7 @@ import { delimiter, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { nodeTest } from "@dock/reference-node-test";
+import { nodeTest } from "@ykdz/dock-reference-node-test";
 
 import config, { exampleTest, readme } from "../dock.config.ts";
 

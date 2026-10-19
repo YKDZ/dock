@@ -2,8 +2,6 @@ import { readFile } from "node:fs/promises";
 import { extname, isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { selectTextRange } from "@dock/reference-file";
-import type { TextSelectionStep } from "@dock/reference-file";
 import {
   createReference,
   definePlugin,
@@ -15,10 +13,12 @@ import {
   type ReferenceOptions,
   type ReadableReferencePlugin,
   type TextRange,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { selectTextRange } from "@ykdz/dock-reference-file";
+import type { TextSelectionStep } from "@ykdz/dock-reference-file";
 import * as ts from "typescript";
 
-export const typescriptPluginId = "@dock/reference-typescript" as const;
+export const typescriptPluginId = "@ykdz/dock-reference-typescript" as const;
 
 export type TypeScriptDeclarationKind =
   | "function"
@@ -632,4 +632,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export type { TextSelectionStep } from "@dock/reference-file";
+export type { TextSelectionStep } from "@ykdz/dock-reference-file";

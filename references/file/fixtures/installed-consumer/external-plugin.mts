@@ -4,7 +4,7 @@ import {
   type PluginResult,
   type Reference,
   type ReferenceOptions,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 export const catalogPluginId = "@fixture/catalog" as const;
 

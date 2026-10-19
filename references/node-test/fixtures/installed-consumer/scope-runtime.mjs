@@ -9,7 +9,7 @@ await copyFile(
 );
 await writeFile(
   "scope.config.mjs",
-  `import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@dock/reference-node-test";\nimport { binding, defineConfig } from "@dock/sdk";\nconst target = process.env.DOCK_NODE_SCOPE_TARGET ?? "test/happy.test.mts";\nconst run = defineNodeTestRun("scope-run", { files: [target, "test/ordinary.test.mts"], testRoot: "test-workspace" });\nconst happy = nodeTestStatus("scope-happy-ref", run, { file: target, name: "主要业务状态符合约定" });\nconst ordinaryRun = defineNodeTestRun("scope-run", { files: [target, "test/ordinary.test.mts"], testRoot: "test-workspace" });\nconst ordinary = nodeTestStatus("scope-ordinary-ref", ordinaryRun, { file: "test/ordinary.test.mts", name: "普通 Node 原生命令保持原有业务语义" });\nexport default defineConfig({ plugins: [nodeTest], baseline: "scope.baseline.json", bindings: [binding("scope-happy", [happy]), binding("scope-ordinary", [ordinary])] });\n`,
+  `import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock-reference-node-test";\nimport { binding, defineConfig } from "@ykdz/dock";\nconst target = process.env.DOCK_NODE_SCOPE_TARGET ?? "test/happy.test.mts";\nconst run = defineNodeTestRun("scope-run", { files: [target, "test/ordinary.test.mts"], testRoot: "test-workspace" });\nconst happy = nodeTestStatus("scope-happy-ref", run, { file: target, name: "主要业务状态符合约定" });\nconst ordinaryRun = defineNodeTestRun("scope-run", { files: [target, "test/ordinary.test.mts"], testRoot: "test-workspace" });\nconst ordinary = nodeTestStatus("scope-ordinary-ref", ordinaryRun, { file: "test/ordinary.test.mts", name: "普通 Node 原生命令保持原有业务语义" });\nexport default defineConfig({ plugins: [nodeTest], baseline: "scope.baseline.json", bindings: [binding("scope-happy", [happy]), binding("scope-ordinary", [ordinary])] });\n`,
   "utf8",
 );
 
@@ -116,7 +116,7 @@ assert.deepEqual(await readFile("scope.baseline.json"), nextBaselineBytes);
 
 await writeFile(
   "scope-conflict.config.mjs",
-  `import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@dock/reference-node-test";\nimport { binding, defineConfig } from "@dock/sdk";\nconst happyRun = defineNodeTestRun("shared-node-run", { files: ["test/happy.test.mts"], testRoot: "test-workspace" });\nconst ordinaryRun = defineNodeTestRun("shared-node-run", { files: ["test/ordinary.test.mts"], testRoot: "test-workspace" });\nexport default defineConfig({ plugins: [nodeTest], baseline: "scope.baseline.json", bindings: [binding("selected-conflict", [nodeTestStatus("conflict-happy", happyRun, { file: "test/happy.test.mts", name: "主要业务状态符合约定" })]), binding("unselected-conflict", [nodeTestStatus("conflict-ordinary", ordinaryRun, { file: "test/ordinary.test.mts", name: "普通 Node 原生命令保持原有业务语义" })])] });\n`,
+  `import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock-reference-node-test";\nimport { binding, defineConfig } from "@ykdz/dock";\nconst happyRun = defineNodeTestRun("shared-node-run", { files: ["test/happy.test.mts"], testRoot: "test-workspace" });\nconst ordinaryRun = defineNodeTestRun("shared-node-run", { files: ["test/ordinary.test.mts"], testRoot: "test-workspace" });\nexport default defineConfig({ plugins: [nodeTest], baseline: "scope.baseline.json", bindings: [binding("selected-conflict", [nodeTestStatus("conflict-happy", happyRun, { file: "test/happy.test.mts", name: "主要业务状态符合约定" })]), binding("unselected-conflict", [nodeTestStatus("conflict-ordinary", ordinaryRun, { file: "test/ordinary.test.mts", name: "普通 Node 原生命令保持原有业务语义" })])] });\n`,
   "utf8",
 );
 const preflight = invoke(bin, [

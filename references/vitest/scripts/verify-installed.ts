@@ -16,7 +16,7 @@ import { dirname, join, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import type { ResolvedMaintenance } from "@dock/sdk";
+import type { ResolvedMaintenance } from "@ykdz/dock";
 
 type ProcessResult = {
   readonly code: number | null;
@@ -576,10 +576,10 @@ async function verifyObservationAndReadRoundTrip(
   const testRoot = join(consumer, "test-workspace");
   const maintenanceRoot = join(consumer, "maintenance-root");
   const outerVitest = await realpath(
-    join(consumer, "node_modules", "@dock", "reference-vitest"),
+    join(consumer, "node_modules", "@ykdz", "dock-reference-vitest"),
   );
   const testVitest = await realpath(
-    join(testRoot, "node_modules", "@dock", "reference-vitest"),
+    join(testRoot, "node_modules", "@ykdz", "dock-reference-vitest"),
   );
   assert.notEqual(
     outerVitest,
@@ -591,14 +591,17 @@ async function verifyObservationAndReadRoundTrip(
       join(
         testRoot,
         "node_modules",
-        "@dock",
-        "reference-vitest",
+        "@ykdz",
+        "dock-reference-vitest",
         "package.json",
       ),
       "utf8",
     ),
   ) as { readonly version: string };
-  assert.equal(installedPackage.version, "0.0.0");
+  const sourcePackage = JSON.parse(
+    await readFile(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { readonly version: string };
+  assert.equal(installedPackage.version, sourcePackage.version);
 
   await writeFile(join(maintenanceRoot, "read-target.txt"), "value: ready\n");
   const multiFileBaseline = join(maintenanceRoot, "attempts.baseline.json");
@@ -1853,7 +1856,7 @@ async function verifyNoNodeDependency(consumer: string): Promise<void> {
   const names = new Set<string>();
   collectPackageNames(JSON.parse(listing.stdout) as unknown, names);
   assert.equal(
-    names.has("@dock/reference-node-test"),
+    names.has("@ykdz/dock-reference-node-test"),
     false,
     "Vitest 引用包不依赖 Node 测试适配包。",
   );

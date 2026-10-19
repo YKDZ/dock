@@ -11,7 +11,7 @@
           "definition": {
             "id": "readme-example",
             "target": {
-              "pluginId": "@dock/reference-node-test",
+              "pluginId": "@ykdz/dock-reference-node-test",
               "target": {
                 "kind": "node-test-status",
                 "run": {
@@ -33,7 +33,7 @@
           "definition": {
             "id": "readme-extension-guide",
             "target": {
-              "pluginId": "@dock/reference-markdown",
+              "pluginId": "@ykdz/dock-reference-markdown",
               "target": "README.md",
               "fileInfo": "../../README.md"
             },
@@ -47,7 +47,7 @@
               ]
             }
           },
-          "value": "需要维护的资产类型可以按需扩展。只要能够取得可比较的内容或结果，就可以编写插件将其接入 Dock，再与已有引用组成关联，沿用相同的检查和基线更新流程。\n\n目前原生支持以下类型：\n\n- [文件](references/file/)：检查文件是否存在，选取全文或文本片段。\n- [Markdown 文档](references/markdown/)：选取章节、表格等结构化内容或标记范围。\n- [TypeScript 代码](references/typescript/)：按符号和声明路径选取代码。\n- [Node.js 测试](references/node-test/)：取得原生测试状态及测试中记录的结果。\n- [Vitest 测试](references/vitest/)：取得测试或测试组的状态及测试中记录的结果。\n\n例如，某个项目在 `package.json` 中声明 Node.js 版本要求：\n\n```json\n{ \"engines\": { \"node\": \">=22\" } }\n```\n\n安装说明 `install.md` 写着“需要 Node.js 22 或更高版本”。可以编写一个读取 `engines.node` 的插件，将版本要求与安装说明关联起来。下面的配置保存为 `dock.config.mjs`：\n\n```js\nimport { readFile } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\nimport { file } from \"@dock/reference-file\";\nimport {\n  binding,\n  createReference,\n  defineConfig,\n  definePlugin,\n} from \"@dock/sdk\";\n\nconst nodeEngine = definePlugin({\n  id: \"node-engine\",\n  validate({ target }) {\n    if (typeof target !== \"string\") {\n      throw new Error(\"请指定包清单的路径。\");\n    }\n  },\n  async collect({ target }, { root }) {\n    const data = JSON.parse(await readFile(resolve(root, target), \"utf8\"));\n    const value = data.engines?.node;\n    if (typeof value !== \"string\") {\n      throw new Error(\"请在包清单中用 engines.node 声明版本要求。\");\n    }\n    return { kind: \"value\", value };\n  },\n});\n\nconst engine = createReference(\"node-engine\", \"node-version\", \"package.json\");\nconst guide = file.from(\"install.md\").reference(\"install-guide\");\n\nexport default defineConfig({\n  plugins: [file, nodeEngine],\n  bindings: [binding(\"installation\", [guide, engine])],\n});\n```\n\n先保存基线：\n\n```sh\ndock baseline update --config dock.config.mjs\n```\n\n再把 `package.json` 中的 `engines.node` 改为 `\">=24\"`，运行检查：\n\n```sh\ndock check --config dock.config.mjs\n```\n\n检查会报告版本要求从 `>=22` 变为 `>=24`，并列出关联的安装说明，提醒你核对其中的版本要求。"
+          "value": "需要维护的资产类型可以按需扩展。只要能够取得可比较的内容或结果，就可以编写插件将其接入 Dock，再与已有引用组成关联，沿用相同的检查和基线更新流程。\n\n目前原生支持以下类型：\n\n- [文件](references/file/)：检查文件是否存在，选取全文或文本片段。\n- [Markdown 文档](references/markdown/)：选取章节、表格等结构化内容或标记范围。\n- [TypeScript 代码](references/typescript/)：按符号和声明路径选取代码。\n- [Node.js 测试](references/node-test/)：取得原生测试状态及测试中记录的结果。\n- [Vitest 测试](references/vitest/)：取得测试或测试组的状态及测试中记录的结果。\n\n例如，某个项目在 `package.json` 中声明 Node.js 版本要求：\n\n```json\n{ \"engines\": { \"node\": \">=22\" } }\n```\n\n安装说明 `install.md` 写着“需要 Node.js 22 或更高版本”。可以编写一个读取 `engines.node` 的插件，将版本要求与安装说明关联起来。下面的配置保存为 `dock.config.mjs`：\n\n```js\nimport { readFile } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\nimport { file } from \"@ykdz/dock-reference-file\";\nimport {\n  binding,\n  createReference,\n  defineConfig,\n  definePlugin,\n} from \"@ykdz/dock\";\n\nconst nodeEngine = definePlugin({\n  id: \"node-engine\",\n  validate({ target }) {\n    if (typeof target !== \"string\") {\n      throw new Error(\"请指定包清单的路径。\");\n    }\n  },\n  async collect({ target }, { root }) {\n    const data = JSON.parse(await readFile(resolve(root, target), \"utf8\"));\n    const value = data.engines?.node;\n    if (typeof value !== \"string\") {\n      throw new Error(\"请在包清单中用 engines.node 声明版本要求。\");\n    }\n    return { kind: \"value\", value };\n  },\n});\n\nconst engine = createReference(\"node-engine\", \"node-version\", \"package.json\");\nconst guide = file.from(\"install.md\").reference(\"install-guide\");\n\nexport default defineConfig({\n  plugins: [file, nodeEngine],\n  bindings: [binding(\"installation\", [guide, engine])],\n});\n```\n\n先保存基线：\n\n```sh\ndock baseline update --config dock.config.mjs\n```\n\n再把 `package.json` 中的 `engines.node` 改为 `\">=24\"`，运行检查：\n\n```sh\ndock check --config dock.config.mjs\n```\n\n检查会报告版本要求从 `>=22` 变为 `>=24`，并列出关联的安装说明，提醒你核对其中的版本要求。"
         }
       }
     },
@@ -61,7 +61,7 @@
           "definition": {
             "id": "readme-concepts",
             "target": {
-              "pluginId": "@dock/reference-markdown",
+              "pluginId": "@ykdz/dock-reference-markdown",
               "target": "README.md",
               "fileInfo": "../../README.md"
             },
@@ -81,7 +81,7 @@
           "definition": {
             "id": "readme-example",
             "target": {
-              "pluginId": "@dock/reference-node-test",
+              "pluginId": "@ykdz/dock-reference-node-test",
               "target": {
                 "kind": "node-test-status",
                 "run": {
@@ -103,7 +103,7 @@
           "definition": {
             "id": "readme-usage",
             "target": {
-              "pluginId": "@dock/reference-markdown",
+              "pluginId": "@ykdz/dock-reference-markdown",
               "target": "README.md",
               "fileInfo": "../../README.md"
             },

@@ -1,4 +1,4 @@
-import type { TextRange } from "@dock/sdk";
+import type { TextRange } from "@ykdz/dock";
 
 export type TextSelectionStep =
   | { readonly kind: "quote"; readonly text: string }

@@ -1,4 +1,3 @@
-import { file } from "@dock/reference-file";
 import {
   binding,
   createReference,
@@ -8,7 +7,8 @@ import {
   type Reference,
   type ReferenceValue,
   type ReferencePlugin,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 
 import {
   catalogPlugin,

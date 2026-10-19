@@ -1,10 +1,10 @@
+import { binding, defineConfig } from "@ykdz/dock";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
-} from "@dock/reference-node-test";
-import { binding, defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
 
 export const amount = defineNodeTestObservation("amount", 0);
 const run = defineNodeTestRun("循环注册观察", {

@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { markdown } from "@dock/reference-markdown";
-import { readReference } from "@dock/sdk";
+import { readReference } from "@ykdz/dock";
+import { markdown } from "@ykdz/dock-reference-markdown";
 
 import config, {
   chapter,

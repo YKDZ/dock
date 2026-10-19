@@ -1,9 +1,9 @@
+import { type ReferenceOptions, type ReferenceValue } from "@ykdz/dock";
 import {
   file,
   type FileReference,
   type FileTextSelection,
-} from "@dock/reference-file";
-import { type ReferenceOptions, type ReferenceValue } from "@dock/sdk";
+} from "@ykdz/dock-reference-file";
 
 const localText = file
   .at(import.meta.url)

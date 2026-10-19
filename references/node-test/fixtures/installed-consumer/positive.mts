@@ -1,12 +1,12 @@
-import { file } from "@dock/reference-file";
+import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
   nodeTestStatus,
-} from "@dock/reference-node-test";
-import { binding, defineConfig, type ReferenceValue } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
 
 const run = defineNodeTestRun("状态检查", {
   files: ["test/happy.test.mts"],

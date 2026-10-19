@@ -1,4 +1,4 @@
-export { canonicalJson, copyJsonValue, isJsonValue } from "@dock/core";
+export { canonicalJson, copyJsonValue, isJsonValue } from "@ykdz/dock-core";
 export type {
   Baseline,
   BindingChange,
@@ -9,7 +9,7 @@ export type {
   ReferenceResult,
   TextRange,
   JsonValue,
-} from "@dock/core";
+} from "@ykdz/dock-core";
 export type {
   Binding,
   Config,

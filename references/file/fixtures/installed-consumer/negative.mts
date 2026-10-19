@@ -1,4 +1,3 @@
-import { file } from "@dock/reference-file";
 import {
   binding,
   createReference,
@@ -11,7 +10,8 @@ import {
   type PluginResult,
   type Reference,
   type ReferencePlugin,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 
 import { splitConfig } from "./composition.mjs";
 import { catalogReference } from "./external-plugin.mjs";

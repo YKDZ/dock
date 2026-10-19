@@ -1,5 +1,9 @@
-import { defineVitestRun, vitest, vitestStatus } from "@dock/reference-vitest";
-import { binding, defineConfig } from "@dock/sdk";
+import { binding, defineConfig } from "@ykdz/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@ykdz/dock-reference-vitest";
 
 const run = defineVitestRun("范围测试运行", {
   files: ["test/scope-old.test.mts", "test/scope-new.test.mts"],

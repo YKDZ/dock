@@ -5,7 +5,7 @@ import type {
   Baseline,
   BindingDefinition,
   ReferenceDefinition,
-} from "@dock/core";
+} from "@ykdz/dock-core";
 
 import type { NormalizedReference } from "./authoring.ts";
 

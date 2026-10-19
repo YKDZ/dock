@@ -5,7 +5,7 @@ import {
   type ExecutionReadRecord,
   type JsonValue,
   type TextRange,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 export const nodeObservationMessagePrefix = "dock:observation:";
 export const nodeReadMessagePrefix = "dock:read:";

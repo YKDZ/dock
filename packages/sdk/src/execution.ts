@@ -1,9 +1,9 @@
-import { copyJsonValue, isJsonValue } from "@dock/core";
+import { copyJsonValue, isJsonValue } from "@ykdz/dock-core";
 import type {
   JsonValue,
   MemberDiscoveryCompleteness,
   TextRange,
-} from "@dock/core";
+} from "@ykdz/dock-core";
 
 import type { ExecutedRun, ExecutionView } from "./contracts.ts";
 import type { ResolvedOperation } from "./resolution.ts";

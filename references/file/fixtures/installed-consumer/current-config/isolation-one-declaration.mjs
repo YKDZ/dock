@@ -1,4 +1,4 @@
-import { file } from "@dock/reference-file";
+import { file } from "@ykdz/dock-reference-file";
 
 export const isolationOneReference = file
   .from("isolation-one.txt")

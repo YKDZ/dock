@@ -1,12 +1,15 @@
-import { file } from "@dock/reference-file";
-import { markdown, type MarkdownReference } from "@dock/reference-markdown";
 import {
   binding,
   defineConfig,
   readReference,
   type PluginReadResult,
   type ReferenceValue,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
+import {
+  markdown,
+  type MarkdownReference,
+} from "@ykdz/dock-reference-markdown";
 
 const chapter = markdown
   .from("guide.md")

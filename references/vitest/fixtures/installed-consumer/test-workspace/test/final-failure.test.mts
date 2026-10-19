@@ -1,4 +1,4 @@
-import { defineVitestObservation } from "@dock/reference-vitest";
+import { defineVitestObservation } from "@ykdz/dock-reference-vitest";
 import { afterEach, test } from "vitest";
 
 const value = defineVitestObservation("earlier-value", "sample");

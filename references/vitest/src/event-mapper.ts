@@ -7,7 +7,7 @@ import type {
   ExecutionTestRecord,
   ExecutionTestStatus,
   ExecutionTestCatalog,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 type CandidateTest = {
   readonly id: string;

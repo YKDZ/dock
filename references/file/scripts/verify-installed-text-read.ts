@@ -136,8 +136,8 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
     await writeFile(
       join(directory, "dock.config.mjs"),
       [
-        'import { file } from "@dock/reference-file";',
-        'import { binding, defineConfig } from "@dock/sdk";',
+        'import { file } from "@ykdz/dock-reference-file";',
+        'import { binding, defineConfig } from "@ykdz/dock";',
         'const selected = file.from("guide.md").quote("missing current text").reference("runtime-port");',
         'export default defineConfig({ plugins: [file], bindings: [binding("runtime-policy", [selected])] });',
       ].join("\n"),
@@ -220,8 +220,8 @@ async function verifyInstalledExistence(
   await writeFile(
     configPath,
     [
-      'import { file } from "@dock/reference-file";',
-      'import { binding, defineConfig } from "@dock/sdk";',
+      'import { file } from "@ykdz/dock-reference-file";',
+      'import { binding, defineConfig } from "@ykdz/dock";',
       'const reference = file.from("guide.md").exists().reference("guide-exists");',
       'export default defineConfig({ plugins: [file], bindings: [binding("existence-policy", [reference])], baseline: "exists.baseline.json" });',
     ].join("\n"),
@@ -278,8 +278,8 @@ async function verifyInstalledAuthorSelection(
   await writeFile(
     join(consumer, "baseline-config.mjs"),
     [
-      'import { file } from "@dock/reference-file";',
-      'import { binding, defineConfig } from "@dock/sdk";',
+      'import { file } from "@ykdz/dock-reference-file";',
+      'import { binding, defineConfig } from "@ykdz/dock";',
       'const reference = file.from("guide.md").reference("guide");',
       'export default defineConfig({ plugins: [file], bindings: [binding("author-policy", [reference])] });',
     ].join("\n"),
@@ -297,8 +297,8 @@ async function verifyInstalledAuthorSelection(
   await writeFile(
     join(consumer, "invalid-selection.mjs"),
     [
-      'import { file } from "@dock/reference-file";',
-      'import { binding, defineConfig } from "@dock/sdk";',
+      'import { file } from "@ykdz/dock-reference-file";',
+      'import { binding, defineConfig } from "@ykdz/dock";',
       'const reference = file.from("guide.md").reference("guide", { selection: { kind: "unsupported" } });',
       'export default defineConfig({ plugins: [file], bindings: [binding("author-policy", [reference])] });',
     ].join("\n"),

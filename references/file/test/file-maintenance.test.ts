@@ -5,7 +5,6 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { file, filePluginId } from "@dock/reference-file";
 import {
   binding,
   check,
@@ -16,7 +15,8 @@ import {
   readReference,
   type Reference,
   updateBaseline,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file, filePluginId } from "@ykdz/dock-reference-file";
 
 void test("普通文件全文可经公开 SDK 建立、核对和更新基线", async () => {
   const root = await mkdtemp(join(tmpdir(), "dock-file-maintenance-"));
@@ -653,7 +653,7 @@ void test("配置路径维护使用新的模块图读取导入声明", async () 
     await writeFile(
       configPath,
       [
-        'import { binding, createReference, defineConfig, definePlugin } from "@dock/sdk";',
+        'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
         'import { target } from "./declarations.mjs";',
         'const fixture = definePlugin({ id: "fixture", validate() {}, collect(reference) { return { kind: "value", value: reference.target }; } });',
         'export default defineConfig({ plugins: [fixture], bindings: [binding("guide-policy", [createReference("fixture", "guide", target)])] });',

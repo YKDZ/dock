@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
 
-import { beginExecution } from "@dock/reference-node-test";
+import { beginExecution } from "@ykdz/dock-reference-node-test";
 
 test("选择的原生测试通过", () => {
   beginExecution();

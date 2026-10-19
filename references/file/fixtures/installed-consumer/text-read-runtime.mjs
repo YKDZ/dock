@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 
-import { file } from "@dock/reference-file";
 import {
   createReference,
   defineConfig,
   definePlugin,
   readReference,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 
 const expectedValue = process.argv[2];
 const expectedStart = Number(process.argv[3]);

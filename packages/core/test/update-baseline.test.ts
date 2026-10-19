@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { check, updateBaseline } from "@dock/core";
-import type { Baseline, CheckInput, JsonValue } from "@dock/core";
+import { check, updateBaseline } from "@ykdz/dock-core";
+import type { Baseline, CheckInput, JsonValue } from "@ykdz/dock-core";
 
 void test("直接建立基线并更新当前有效差异，无须先取得检查报告", () => {
   const input: CheckInput = {

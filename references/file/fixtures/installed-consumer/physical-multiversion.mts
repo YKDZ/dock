@@ -4,7 +4,7 @@ import {
   createReference,
   defineConfig,
   updateBaseline,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 import {
   makeBinding,

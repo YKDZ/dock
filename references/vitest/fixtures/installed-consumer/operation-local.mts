@@ -2,8 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { defineVitestRun, vitest, vitestStatus } from "@dock/reference-vitest";
-import { binding, check, defineConfig, updateBaseline } from "@dock/sdk";
+import { binding, check, defineConfig, updateBaseline } from "@ykdz/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@ykdz/dock-reference-vitest";
 
 const run = defineVitestRun("同进程连续维护", {
   files: ["test/operation-local.test.mts"],

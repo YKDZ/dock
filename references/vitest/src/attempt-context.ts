@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { readFileSync } from "node:fs";
 
 import {
   copyJsonValue,
@@ -11,7 +12,7 @@ import {
   type ReadableReferenceOf,
   type ReferencePlugin,
   type ReferenceValue,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 type AttemptRecord = {
   readonly attempt: number;
@@ -33,7 +34,12 @@ type AttemptBridge = {
 
 type TestMetadata = Record<string, unknown>;
 
-const bridgeKey = Symbol.for("@dock/reference-vitest/0.0.0/attempt-context");
+const { version } = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+) as { version: string };
+const bridgeKey = Symbol.for(
+  `@ykdz/dock-reference-vitest/${version}/attempt-context`,
+);
 
 const sharedGlobal = globalThis as typeof globalThis & {
   [bridgeKey]?: AttemptBridge;

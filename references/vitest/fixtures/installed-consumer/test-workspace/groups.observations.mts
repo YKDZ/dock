@@ -1,4 +1,4 @@
-import { defineVitestObservation } from "@dock/reference-vitest";
+import { defineVitestObservation } from "@ykdz/dock-reference-vitest";
 
 export const settings = defineVitestObservation("group-settings", {
   mode: "auto",

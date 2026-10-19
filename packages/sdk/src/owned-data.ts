@@ -1,4 +1,4 @@
-import { copyJsonValue, type JsonValue } from "@dock/core";
+import { copyJsonValue, type JsonValue } from "@ykdz/dock-core";
 
 import type { Reference } from "./contracts.ts";
 

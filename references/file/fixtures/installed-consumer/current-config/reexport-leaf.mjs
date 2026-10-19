@@ -1,4 +1,4 @@
-import { file } from "@dock/reference-file";
+import { file } from "@ykdz/dock-reference-file";
 
 export const reexportReference = file
   .from("same-a.txt")

@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+import { binding, check, defineConfig, updateBaseline } from "@ykdz/dock";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestStatus,
-} from "@dock/reference-node-test";
-import { binding, check, defineConfig, updateBaseline } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
 
 const run = defineNodeTestRun("同进程连续操作", {
   files: ["test/operation-local.test.mts"],

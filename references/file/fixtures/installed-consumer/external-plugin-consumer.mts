@@ -1,4 +1,4 @@
-import { binding, check, defineConfig, updateBaseline } from "@dock/sdk";
+import { binding, check, defineConfig, updateBaseline } from "@ykdz/dock";
 
 import { catalogPlugin, catalogReference } from "./external-plugin.mts";
 

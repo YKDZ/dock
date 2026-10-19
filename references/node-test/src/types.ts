@@ -1,4 +1,4 @@
-import type { JsonValue, ExecutionRunRecord } from "@dock/sdk";
+import type { JsonValue, ExecutionRunRecord } from "@ykdz/dock";
 
 export type NodeRunConfiguration = {
   readonly framework: string;

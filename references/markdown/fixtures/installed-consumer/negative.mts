@@ -1,6 +1,6 @@
-import { file } from "@dock/reference-file";
-import { markdown } from "@dock/reference-markdown";
-import { defineConfig, readReference } from "@dock/sdk";
+import { defineConfig, readReference } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
+import { markdown } from "@ykdz/dock-reference-markdown";
 
 const config = defineConfig({ plugins: [markdown], bindings: [] });
 const builder = markdown.from("guide.md");

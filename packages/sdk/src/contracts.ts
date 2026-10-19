@@ -3,11 +3,11 @@ import type {
   MemberDiscoveryCompleteness,
   ReferenceMemberResult,
   TextRange,
-} from "@dock/core";
+} from "@ykdz/dock-core";
 
 import type { ExecutionRunRecord } from "./execution.ts";
 
-export type { JsonValue, TextRange } from "@dock/core";
+export type { JsonValue, TextRange } from "@ykdz/dock-core";
 
 /** 显式记录的声明出处；它与引用目标和配置加载入口各自独立。 */
 export type DeclarationSource = string | URL;

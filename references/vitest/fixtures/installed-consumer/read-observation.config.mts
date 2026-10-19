@@ -1,10 +1,10 @@
+import { binding, defineConfig } from "@ykdz/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
   vitest,
   vitestObservation,
-} from "@dock/reference-vitest";
-import { binding, defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-vitest";
 
 const value = defineVitestObservation("business-value", "");
 const run = defineVitestRun("文件读取业务观察", {

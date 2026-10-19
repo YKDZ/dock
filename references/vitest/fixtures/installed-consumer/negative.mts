@@ -1,11 +1,11 @@
+import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
   vitest,
   vitestObservation,
   vitestStatus,
-} from "@dock/reference-vitest";
-import { binding, defineConfig, type ReferenceValue } from "@dock/sdk";
+} from "@ykdz/dock-reference-vitest";
 
 // @ts-expect-error 测试运行至少需要一个原生测试文件。
 defineVitestRun("空运行", { files: [] });

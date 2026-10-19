@@ -155,10 +155,10 @@ async function runInstalledCli(
   await mkdir(secondary, { recursive: true });
   await installConsumer(secondary, tarballs, "dock-secondary-consumer");
   const primarySdk = await realpath(
-    join(consumer, "node_modules", "@dock", "sdk"),
+    join(consumer, "node_modules", "@ykdz", "dock"),
   );
   const secondarySdk = await realpath(
-    join(secondary, "node_modules", "@dock", "sdk"),
+    join(secondary, "node_modules", "@ykdz", "dock"),
   );
   assert.notEqual(
     primarySdk,
@@ -223,10 +223,10 @@ async function runInstalledCli(
     "typescript-7",
     "vitest",
     "@vitest/runner",
-    "@dock/reference-markdown",
-    "@dock/reference-typescript",
-    "@dock/reference-node-test",
-    "@dock/reference-vitest",
+    "@ykdz/dock-reference-markdown",
+    "@ykdz/dock-reference-typescript",
+    "@ykdz/dock-reference-node-test",
+    "@ykdz/dock-reference-vitest",
     "remark",
     "markdown-it",
   ]) {
@@ -251,6 +251,15 @@ async function runInstalledCli(
     ".bin",
     process.platform === "win32" ? "dock.cmd" : "dock",
   );
+  const installedSdk = JSON.parse(
+    await readFile(
+      join(consumer, "node_modules", "@ykdz", "dock", "package.json"),
+      "utf8",
+    ),
+  ) as { readonly version: string };
+  const version = await runDock(bin, ["--version"], consumer);
+  assert.equal(version.code, 0, version.stderr);
+  assert.equal(version.stdout.trim(), installedSdk.version);
   const missingConfigOption = await runDock(bin, ["check"], consumer);
   assert.equal(missingConfigOption.code, 64, missingConfigOption.stderr);
   const missingConfigFile = await runDock(
@@ -299,7 +308,7 @@ async function runInstalledCli(
   await mkdir(emptyConfigDirectory);
   await writeFile(
     join(emptyConfigDirectory, "dock.config.mjs"),
-    'import { defineConfig } from "@dock/sdk";\nexport default defineConfig({ plugins: [], bindings: [] });\n',
+    'import { defineConfig } from "@ykdz/dock";\nexport default defineConfig({ plugins: [], bindings: [] });\n',
   );
   const emptyUpdate = await runDock(
     bin,
@@ -502,8 +511,8 @@ async function runInstalledCli(
   await writeFile(
     join(consumer, "unsupported-selection.mjs"),
     [
-      'import { file } from "@dock/reference-file";',
-      'export default { plugins: [file], bindings: [{ id: "selected-policy", references: [{ id: "selected", pluginId: "@dock/reference-file", target: "guide.md", selection: { start: 0 } }] }] };',
+      'import { file } from "@ykdz/dock-reference-file";',
+      'export default { plugins: [file], bindings: [{ id: "selected-policy", references: [{ id: "selected", pluginId: "@ykdz/dock-reference-file", target: "guide.md", selection: { start: 0 } }] }] };',
     ].join("\n"),
   );
   const unsupportedSelection = await runDock(
@@ -520,8 +529,8 @@ async function runInstalledCli(
   await writeFile(
     join(consumer, "invalid-builder-target.mjs"),
     [
-      'import { file } from "@dock/reference-file";',
-      'import { binding, defineConfig } from "@dock/sdk";',
+      'import { file } from "@ykdz/dock-reference-file";',
+      'import { binding, defineConfig } from "@ykdz/dock";',
       'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
       'const invalid = file.from(42).reference("invalid-target");',
       'export default defineConfig({ plugins: [file, unused], bindings: [binding("invalid-target-policy", [invalid])] });',
@@ -540,9 +549,9 @@ async function runInstalledCli(
   await writeFile(
     join(consumer, "invalid-raw-target.mjs"),
     [
-      'import { file } from "@dock/reference-file";',
+      'import { file } from "@ykdz/dock-reference-file";',
       'const unused = { id: "unused", validate() {}, collect() { throw new Error("不得采集"); } };',
-      'export default { plugins: [unused, file], bindings: [{ id: "invalid-target-policy", references: [{ id: "unused-reference", pluginId: "unused", target: "guide.md" }, { id: "invalid-target", pluginId: "@dock/reference-file", target: 42 }] }] };',
+      'export default { plugins: [unused, file], bindings: [{ id: "invalid-target-policy", references: [{ id: "unused-reference", pluginId: "unused", target: "guide.md" }, { id: "invalid-target", pluginId: "@ykdz/dock-reference-file", target: 42 }] }] };',
     ].join("\n"),
   );
   const invalidRawTarget = await runDock(
@@ -739,8 +748,8 @@ async function verifyBaselineFilesystemFailures(
   await writeFile(
     config,
     [
-      'import { file } from "@dock/reference-file";',
-      'import { binding, defineConfig } from "@dock/sdk";',
+      'import { file } from "@ykdz/dock-reference-file";',
+      'import { binding, defineConfig } from "@ykdz/dock";',
       'export default defineConfig({ plugins: [file], bindings: [binding("restricted-policy", [file.from("guide.txt").reference("restricted-guide")])] });',
     ].join("\n"),
   );

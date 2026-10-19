@@ -2,7 +2,7 @@ import { accessSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createReference, definePlugin } from "@dock/sdk";
+import { createReference, definePlugin } from "@ykdz/dock";
 import type {
   ExecutionRunRecord,
   JsonValue,
@@ -14,7 +14,7 @@ import type {
   Reference,
   ReferenceOptions,
   ReferencePlugin,
-} from "@dock/sdk";
+} from "@ykdz/dock";
 
 import {
   readReferenceInTest,
@@ -27,7 +27,7 @@ import type {
   SelectedVitestTest,
 } from "./native-runner.ts";
 
-export const vitestPluginId = "@dock/reference-vitest" as const;
+export const vitestPluginId = "@ykdz/dock-reference-vitest" as const;
 
 export type VitestObservation<
   Key extends string = string,

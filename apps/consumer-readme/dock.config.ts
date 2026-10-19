@@ -1,13 +1,13 @@
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { markdown } from "@dock/reference-markdown";
+import { binding, defineConfig } from "@ykdz/dock";
+import { markdown } from "@ykdz/dock-reference-markdown";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestStatus,
-} from "@dock/reference-node-test";
-import { binding, defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
 
 const root = dirname(fileURLToPath(import.meta.resolve("dock/README.md")));
 const consumer = dirname(fileURLToPath(import.meta.url));

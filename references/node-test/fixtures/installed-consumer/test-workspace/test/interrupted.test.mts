@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { test } from "node:test";
 
-import { beginExecution } from "@dock/reference-node-test";
+import { beginExecution } from "@ykdz/dock-reference-node-test";
 
 test("等待信号后结束", () => {
   beginExecution();

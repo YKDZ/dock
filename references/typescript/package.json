@@ -1,7 +1,17 @@
 {
-  "name": "@dock/reference-typescript",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@ykdz/dock-reference-typescript",
+  "version": "0.1.0-next.0",
+  "homepage": "https://github.com/YKDZ/dock",
+  "bugs": {
+    "url": "https://github.com/YKDZ/dock/issues"
+  },
+  "license": "MIT",
+  "author": "YKDZ",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YKDZ/dock.git",
+    "directory": "references/typescript"
+  },
   "files": [
     "dist"
   ],
@@ -13,9 +23,13 @@
       "default": "./dist/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.build.json --pretty false",
-    "pack": "mkdir -p .artifacts && pnpm pack --pack-destination .artifacts",
+    "pack": "mkdir -p .artifacts && pnpm pack --out .artifacts/package.tgz",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
@@ -24,8 +38,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
   },
   "dependencies": {
-    "@dock/reference-file": "workspace:*",
-    "@dock/sdk": "workspace:*",
+    "@ykdz/dock": "workspace:*",
+    "@ykdz/dock-reference-file": "workspace:*",
     "typescript": "5.9.3"
   },
   "devDependencies": {

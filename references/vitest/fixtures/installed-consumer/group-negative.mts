@@ -1,9 +1,9 @@
+import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
   vitestSuite,
-} from "@dock/reference-vitest";
-import { binding, defineConfig, type ReferenceValue } from "@dock/sdk";
+} from "@ykdz/dock-reference-vitest";
 
 const declared = defineVitestObservation("declared", { count: 0 });
 const run = defineVitestRun("组成员错误类型", {

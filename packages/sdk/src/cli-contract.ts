@@ -1,14 +1,17 @@
-import type {
-  BaselineUpdateIssue,
-  BindingCheckResult,
-  TextRange,
-} from "@dock/core";
+import { readFileSync } from "node:fs";
+
 import {
   defineCli,
   helpCapability,
   outputCapability,
+  versionCapability,
   text,
 } from "@ykdz/cli-contract";
+import type {
+  BaselineUpdateIssue,
+  BindingCheckResult,
+  TextRange,
+} from "@ykdz/dock-core";
 import { z } from "zod";
 
 import {
@@ -293,6 +296,16 @@ export const cli = define({
   output: outputCapability({
     defaultFormat: "text",
     compatibilityFlags: { "--json": "structured" },
+  }),
+  version: versionCapability({
+    value: text.line(
+      (
+        JSON.parse(
+          readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+        ) as { version: string }
+      ).version,
+    ),
+    description: "显示安装版本",
   }),
   usageFailureExitCode: 64,
   commands: {

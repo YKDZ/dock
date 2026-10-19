@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
-import type { ExecutionRunRecord } from "@dock/sdk";
+import type { ExecutionRunRecord } from "@ykdz/dock";
 
 import { collectNodeRun } from "./event-mapper.ts";
 import type {

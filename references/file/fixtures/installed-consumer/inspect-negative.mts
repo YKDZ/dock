@@ -1,5 +1,5 @@
-import { check, type CheckContext } from "@dock/core";
-import { inspect, type ResolvedMaintenance } from "@dock/sdk";
+import { inspect, type ResolvedMaintenance } from "@ykdz/dock";
+import { check, type CheckContext } from "@ykdz/dock-core";
 
 declare const resolution: ResolvedMaintenance;
 const context: CheckContext = { references: [], bindings: [] };

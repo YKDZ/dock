@@ -1,11 +1,11 @@
+import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
   nodeTestStatus,
-} from "@dock/reference-node-test";
-import { binding, defineConfig, type ReferenceValue } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
 
 // @ts-expect-error 至少需要一个原生测试文件。
 defineNodeTestRun("空运行", { files: [] });

@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { file } from "@dock/reference-file";
-import { defineConfig, readReference } from "@dock/sdk";
+import { defineConfig, readReference } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 
 import { markdown } from "../src/index.ts";
 

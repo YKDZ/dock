@@ -1,13 +1,13 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 
-import { markdown } from "@dock/reference-markdown";
 import {
   binding,
   check,
   defineConfig,
   readReference,
   updateBaseline,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { markdown } from "@ykdz/dock-reference-markdown";
 
 const cases = [
   {

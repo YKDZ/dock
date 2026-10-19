@@ -51,13 +51,13 @@
     },
     "//#check:install": {
       "dependsOn": [
-        "@dock/core#pack",
-        "@dock/sdk#pack",
-        "@dock/reference-file#pack",
-        "@dock/reference-markdown#pack",
-        "@dock/reference-node-test#pack",
-        "@dock/reference-vitest#pack",
-        "@dock/reference-typescript#pack"
+        "@ykdz/dock-core#pack",
+        "@ykdz/dock#pack",
+        "@ykdz/dock-reference-file#pack",
+        "@ykdz/dock-reference-markdown#pack",
+        "@ykdz/dock-reference-node-test#pack",
+        "@ykdz/dock-reference-vitest#pack",
+        "@ykdz/dock-reference-typescript#pack"
       ],
       "cache": false,
       "outputs": [],
@@ -87,6 +87,26 @@
       "tags": ["work:repair"]
     },
     "//#typecheck": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#release:verify": {
+      "cache": false,
+      "tags": ["work:release"]
+    },
+    "//#release:publish": {
+      "cache": false,
+      "tags": ["work:release"]
+    },
+    "//#release:registry": {
+      "cache": false,
+      "tags": ["work:release"]
+    },
+    "//#release:github": {
+      "cache": false,
+      "tags": ["work:release"]
+    },
+    "//#test:release": {
       "outputs": [],
       "tags": ["quality:light"]
     }

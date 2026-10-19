@@ -11,11 +11,11 @@ import {
 import { join, relative } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { check, inspect, updateBaseline } from "@ykdz/dock";
 import {
   check as checkCore,
   updateBaseline as updateBaselineCore,
-} from "@dock/core";
-import { check, inspect, updateBaseline } from "@dock/sdk";
+} from "@ykdz/dock-core";
 
 const consumer = process.cwd();
 const directory = await mkdtemp(join(consumer, "inspect-consumer-"));
@@ -82,8 +82,8 @@ try {
     `
 import { appendFile } from "node:fs/promises";
 import { join } from "node:path";
-import { file } from "@dock/reference-file";
-import { binding, createReference, defineConfig, definePlugin } from "@dock/sdk";
+import { file } from "@ykdz/dock-reference-file";
+import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";
 
 const tag = definePlugin({
   id: "fixture:inspect-tag",
@@ -147,7 +147,7 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
   assert.equal(initial.baselinePath, baselinePath);
   assert.deepEqual(
     new Set(initial.plugins),
-    new Set(["@dock/reference-file", "fixture:inspect-tag"]),
+    new Set(["@ykdz/dock-reference-file", "fixture:inspect-tag"]),
   );
   assert.equal(initial.context.declarationCompleteness, "complete");
   assert.deepEqual(initial.context.scope, [
@@ -380,7 +380,7 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
   await writeFile(
     conflictPath,
     [
-      'import { file } from "@dock/reference-file";',
+      'import { file } from "@ykdz/dock-reference-file";',
       "export default { plugins: [file], bindings: [",
       '{ id: "first", references: [file.from("first.txt").reference("same")] },',
       '{ id: "second", references: [file.from("second.txt").reference("same")] },',

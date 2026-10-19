@@ -10,7 +10,7 @@ import {
   type BindingDefinition,
   type CheckContext,
   type ReferenceDefinition,
-} from "@dock/core";
+} from "@ykdz/dock-core";
 
 import { normalizeConfig, type NormalizedReference } from "./authoring.ts";
 import type { Config, DeclarationSource, RunDeclaration } from "./contracts.ts";

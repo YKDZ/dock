@@ -2,8 +2,6 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { selectTextRange } from "@dock/reference-file";
-import type { TextSelectionStep } from "@dock/reference-file";
 import {
   createReference,
   definePlugin,
@@ -15,13 +13,15 @@ import {
   type ReferenceOptions,
   type ReadableReferencePlugin,
   type TextRange,
-} from "@dock/sdk";
+} from "@ykdz/dock";
+import { selectTextRange } from "@ykdz/dock-reference-file";
+import type { TextSelectionStep } from "@ykdz/dock-reference-file";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { parseFragment } from "parse5";
 
-export const markdownPluginId = "@dock/reference-markdown" as const;
+export const markdownPluginId = "@ykdz/dock-reference-markdown" as const;
 
 export type MarkdownNodeType =
   | "paragraph"

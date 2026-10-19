@@ -1,4 +1,4 @@
-import { defineVitestObservation } from "@dock/reference-vitest";
+import { defineVitestObservation } from "@ykdz/dock-reference-vitest";
 import { expect, test } from "vitest";
 
 const value = defineVitestObservation("multi-file-value", "");

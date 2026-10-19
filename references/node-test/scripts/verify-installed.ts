@@ -212,7 +212,7 @@ async function verifyPhysicalCopies(
   consumer: string,
   secondary: string,
 ): Promise<void> {
-  for (const packageName of ["@dock/sdk", "@dock/reference-node-test"]) {
+  for (const packageName of ["@ykdz/dock", "@ykdz/dock-reference-node-test"]) {
     const first = join(consumer, "node_modules", packageName);
     const second = join(secondary, "node_modules", packageName);
     const [firstPath, secondPath] = await Promise.all([
@@ -935,7 +935,7 @@ async function verifyNoFrameworkDependency(consumer: string): Promise<void> {
   for (const dependency of [
     "vitest",
     "@vitest/runner",
-    "@dock/reference-vitest",
+    "@ykdz/dock-reference-vitest",
   ]) {
     assert.equal(names.has(dependency), false, `Node 包不能依赖 ${dependency}`);
   }

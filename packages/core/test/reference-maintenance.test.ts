@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { check, updateBaseline } from "@dock/core";
+import { check, updateBaseline } from "@ykdz/dock-core";
 import type {
   BindingDefinition,
   CheckInput,
   ReferenceDefinition,
   ReferenceResult,
-} from "@dock/core";
+} from "@ykdz/dock-core";
 
 const references: ReferenceDefinition[] = [
   {

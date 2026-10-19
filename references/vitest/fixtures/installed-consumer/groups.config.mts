@@ -1,5 +1,9 @@
-import { defineVitestRun, vitest, vitestSuite } from "@dock/reference-vitest";
-import { binding, defineConfig } from "@dock/sdk";
+import { binding, defineConfig } from "@ykdz/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestSuite,
+} from "@ykdz/dock-reference-vitest";
 
 import { settings, steps } from "./test-workspace/groups.observations.mts";
 

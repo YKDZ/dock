@@ -1,5 +1,5 @@
-import { file } from "@dock/reference-file";
-import { binding, check, defineConfig } from "@dock/sdk";
+import { binding, check, defineConfig } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 
 import { splitConfig } from "./composition.mts";
 import { catalogPlugin, catalogReference } from "./external-plugin.mts";

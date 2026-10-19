@@ -1,12 +1,12 @@
-import { file } from "@dock/reference-file";
+import { binding, defineConfig } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
   nodeTestStatus,
-} from "@dock/reference-node-test";
-import { binding, defineConfig } from "@dock/sdk";
+} from "@ykdz/dock-reference-node-test";
 
 export const currentText = file
   .at(import.meta.url)
