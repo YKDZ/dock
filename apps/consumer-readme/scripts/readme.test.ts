@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { delimiter, join, resolve } from "node:path";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -46,6 +53,21 @@ await test(exampleTest.name, async () => {
 
   // 临时项目沿用当前消费者已安装的依赖，配置按正常包名解析。
   const project = await mkdtemp(join(consumer, ".dock-readme-"));
+  // 工作区和安装消费者都通过公开入口运行构建后的同一 CLI，命令仍取自 README。
+  const bin = join(project, "bin");
+  await mkdir(bin);
+  const launcher = join(
+    bin,
+    process.platform === "win32" ? "dock.cmd" : "dock",
+  );
+  const node = process.execPath;
+  await writeFile(
+    launcher,
+    process.platform === "win32"
+      ? `@echo off\r\n"${node}" --input-type=module -e "import '@ykdz/dock/cli'" -- dock %*\r\n`
+      : `#!/bin/sh\nexec '${node.replaceAll("'", "'\\''")}' --input-type=module -e 'import "@ykdz/dock/cli"' -- dock "$@"\n`,
+  );
+  await chmod(launcher, 0o755);
   function runDock(command: string) {
     const result = spawnSync(command, {
       shell: true,
@@ -53,7 +75,7 @@ await test(exampleTest.name, async () => {
       encoding: "utf8",
       env: {
         ...process.env,
-        PATH: `${resolve(consumer, "node_modules/.bin")}${delimiter}${process.env.PATH ?? ""}`,
+        PATH: `${bin}${delimiter}${process.env.PATH ?? ""}`,
       },
       timeout: 30_000,
     });

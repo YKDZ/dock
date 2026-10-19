@@ -25,10 +25,7 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
-    "./cli": {
-      "source": "./src/cli.ts",
-      "default": "./dist/cli.js"
-    }
+    "./cli": "./dist/cli.js"
   },
   "publishConfig": {
     "access": "public",
