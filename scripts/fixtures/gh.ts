@@ -40,7 +40,7 @@ if (args[0] === "api") {
           ? { object: { type: "commit", sha: state.tag } }
           : undefined
         : endpoint.includes("/releases?")
-          ? [[...(state.release ? [state.release] : [])]]
+          ? [state.release ? [state.release] : []]
           : state.release?.draft
             ? undefined
             : state.release;
