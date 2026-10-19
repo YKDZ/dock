@@ -372,7 +372,27 @@ async function githubRelease(): Promise<void> {
   } else {
     assert.match(ref.stderr, /HTTP 404/u, `读取标签失败：${ref.stderr}`);
   }
-  let release = api(`releases/tags/${tag}`);
+  type ExistingRelease = {
+    tag_name: string;
+    name: string;
+    body: string;
+    prerelease: boolean;
+    draft: boolean;
+    target_commitish: string;
+    assets: { name: string }[];
+  };
+  const findRelease = (): ExistingRelease | undefined => {
+    const pages = JSON.parse(
+      captured("gh", [
+        "api",
+        "--paginate",
+        "--slurp",
+        `repos/${repository}/releases?per_page=100`,
+      ]).toString(),
+    ) as ExistingRelease[][];
+    return pages.flat().find((release) => release.tag_name === tag);
+  };
+  let release = findRelease();
   const notes = await readFile(join(directory, "CHANGELOG.md"), "utf8");
   const files = [
     "manifest.json",
@@ -381,12 +401,7 @@ async function githubRelease(): Promise<void> {
     "CHANGELOG.md",
     ...manifest.packages.map(({ file }) => file),
   ];
-  if (release.status !== 0) {
-    assert.match(
-      release.stderr,
-      /HTTP 404/u,
-      `读取 Release 失败：${release.stderr}`,
-    );
+  if (!release) {
     // 显式建立草稿，避免 gh 的带附件快捷路径在失败时自动删除草稿。
     visible("gh", [
       "release",
@@ -403,18 +418,11 @@ async function githubRelease(): Promise<void> {
       join(directory, "CHANGELOG.md"),
       ...(manifest.version.includes("-") ? ["--prerelease"] : []),
     ]);
-    release = api(`releases/tags/${tag}`);
-    assert.equal(release.status, 0, `无法读取本批草稿：${release.stderr}`);
+    release = findRelease();
+    assert.ok(release, "无法读取本批草稿");
   }
   {
-    const existing = JSON.parse(release.stdout) as {
-      name: string;
-      body: string;
-      prerelease: boolean;
-      draft: boolean;
-      target_commitish: string;
-      assets: { name: string }[];
-    };
+    const existing = release;
     assert.equal(existing.name, tag, "Release 标题冲突");
     assert.equal(existing.body, notes, "Release 说明冲突");
     assert.equal(

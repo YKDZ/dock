@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 type Release = {
+  tag_name: string;
   name: string;
   body: string;
   prerelease: boolean;
@@ -38,7 +39,11 @@ if (args[0] === "api") {
         ? state.tag
           ? { object: { type: "commit", sha: state.tag } }
           : undefined
-        : state.release;
+        : endpoint.includes("/releases?")
+          ? [[...(state.release ? [state.release] : [])]]
+          : state.release?.draft
+            ? undefined
+            : state.release;
   if (result) process.stdout.write(JSON.stringify(result));
   else {
     process.stderr.write("gh: Not Found (HTTP 404)\n");
@@ -48,6 +53,7 @@ if (args[0] === "api") {
   // 当前测试目录即边界提供的原制品，保持原字节。
 } else if (args[1] === "create") {
   state.release = {
+    tag_name: args[2]!,
     name: value("--title"),
     body: readFileSync(value("--notes-file"), "utf8"),
     prerelease: args.includes("--prerelease"),
