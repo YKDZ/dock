@@ -110,5 +110,6 @@
       "outputs": [],
       "tags": ["quality:light"]
     }
-  }
+  },
+  "globalDependencies": ["LICENSE"]
 }

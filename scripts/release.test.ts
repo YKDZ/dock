@@ -49,11 +49,19 @@ type GithubState = {
     name: string;
     body: string;
     prerelease: boolean;
+    draft: boolean;
     target_commitish: string;
     assets: { name: string }[];
   };
   assets: Record<string, string>;
   failCreateAfterWrite?: boolean;
+  failUploadAt?: number;
+  runArtifacts?: { name: string; expired: boolean }[];
+  runJobs?: {
+    name: string;
+    started_at: string | null;
+    conclusion: string | null;
+  }[];
 };
 
 async function batch(version: string) {
@@ -135,7 +143,7 @@ async function batch(version: string) {
   };
   await writeFile(npmFile, JSON.stringify(state));
   await writeFile(githubFile, JSON.stringify({ calls: [], assets: {} }));
-  const run = (command: string) =>
+  const run = (command: string, environment: Record<string, string> = {}) =>
     spawnSync(
       process.execPath,
       [resolve("scripts/release.ts"), command, directory],
@@ -143,6 +151,7 @@ async function batch(version: string) {
         encoding: "utf8",
         env: {
           ...process.env,
+          ...environment,
           PATH: `${bin}:${process.env.PATH}`,
           DOCK_RELEASE_TEST_STATE: npmFile,
           DOCK_RELEASE_TEST_GITHUB: githubFile,
@@ -189,6 +198,7 @@ for (const version of ["0.1.0-next.0", "0.1.0"]) {
         for (const name of names) state.tags[name] = { next: "0.1.0-next.0" };
       await context.setNpm(state);
       for (const command of [
+        "verify",
         "publish",
         "registry",
         "release",
@@ -368,8 +378,137 @@ void test("GitHub 标签、发布说明与附件冲突时不覆盖", async () =>
     assert.notEqual(context.run("release").status, 0);
     const after = await context.github();
     assert.equal(after.calls.filter((args) => args[1] === "create").length, 1);
-    assert.equal(after.calls.filter((args) => args[1] === "upload").length, 0);
+    assert.equal(after.calls.filter((args) => args[1] === "upload").length, 11);
   } finally {
     await context.close();
   }
 });
+
+void test("附件上传中断后保留草稿和原附件，补齐后公开", async () => {
+  const context = await batch("0.1.0");
+  try {
+    assert.equal(context.run("publish").status, 0);
+    assert.equal(context.run("registry").status, 0);
+    await context.setGithub({ ...(await context.github()), failUploadAt: 3 });
+    assert.notEqual(context.run("release").status, 0);
+    const partial = await context.github();
+    assert.equal(partial.release?.draft, true);
+    assert.equal(partial.release.assets.length, 3);
+    const resumed = context.run("release");
+    assert.equal(resumed.status, 0, resumed.stderr);
+    const completed = await context.github();
+    assert.equal(completed.release?.draft, false);
+    assert.equal(completed.release.assets.length, 11);
+    for (const [name, bytes] of Object.entries(partial.assets))
+      assert.equal(completed.assets[name], bytes);
+    assert.equal(
+      completed.calls.filter((args) => args[1] === "create").length,
+      1,
+    );
+  } finally {
+    await context.close();
+  }
+});
+
+for (const scenario of [
+  "before-handoff",
+  "lost-after-publish",
+  "expired",
+  "original",
+] as const) {
+  void test(`工作流恢复依据外部事实：${scenario}`, async () => {
+    const context = await batch("0.1.0");
+    try {
+      const github = await context.github();
+      github.runArtifacts =
+        scenario === "original" || scenario === "expired"
+          ? [{ name: "verified-release", expired: scenario === "expired" }]
+          : [];
+      github.runJobs = [
+        { name: "verify", started_at: "2026-10-19", conclusion: "failure" },
+        {
+          name: "publish",
+          started_at: scenario === "lost-after-publish" ? "2026-10-19" : null,
+          conclusion: scenario === "lost-after-publish" ? "failure" : "skipped",
+        },
+      ];
+      await context.setGithub(github);
+      const output = join(context.directory, "output.txt");
+      const result = context.run("restore", {
+        GITHUB_RUN_ID: "123",
+        GITHUB_RUN_ATTEMPT: "2",
+        GITHUB_OUTPUT: output,
+      });
+      if (scenario === "before-handoff" || scenario === "original") {
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(
+          await readFile(output, "utf8"),
+          `restored=${scenario === "original"}\n`,
+        );
+      } else {
+        assert.notEqual(result.status, 0);
+        assert.match(result.stderr, /原验收制品/u);
+      }
+      assert.equal((await context.npm()).calls.length, 0);
+      assert.equal(
+        (await context.github()).calls.filter(
+          (args) => args[0] !== "api" && args[0] !== "run",
+        ).length,
+        0,
+      );
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+for (const field of ["name", "version", "dependency"] as const) {
+  void test(`压缩包与批次不符时拒绝发布：${field}`, async () => {
+    const context = await batch("0.1.0");
+    try {
+      const source = join(context.directory, "source-1", "package");
+      const metadata = JSON.parse(
+        await readFile(join(source, "package.json"), "utf8"),
+      ) as {
+        name: string;
+        version: string;
+        dependencies: Record<string, string>;
+      };
+      if (field === "name") metadata.name = "@other/dock";
+      if (field === "version") metadata.version = "0.2.0";
+      if (field === "dependency") metadata.dependencies[names[0]!] = "^0.1.0";
+      await writeFile(join(source, "package.json"), JSON.stringify(metadata));
+      const artifact = context.packages[1]!;
+      assert.equal(
+        spawnSync("tar", [
+          "-czf",
+          join(context.directory, artifact.file),
+          "-C",
+          join(source, ".."),
+          "package",
+        ]).status,
+        0,
+      );
+      const manifest = JSON.parse(
+        await readFile(join(context.directory, "manifest.json"), "utf8"),
+      ) as { packages: { integrity: string }[] };
+      manifest.packages[1]!.integrity = sha(
+        await readFile(join(context.directory, artifact.file)),
+      );
+      const bytes = Buffer.from(JSON.stringify(manifest));
+      await writeFile(join(context.directory, "manifest.json"), bytes);
+      const acceptance = JSON.parse(
+        await readFile(join(context.directory, "accepted.json"), "utf8"),
+      ) as { manifest: string };
+      acceptance.manifest = sha(bytes);
+      await writeFile(
+        join(context.directory, "accepted.json"),
+        JSON.stringify(acceptance),
+      );
+      assert.notEqual(context.run("publish").status, 0);
+      assert.equal((await context.npm()).calls.length, 0);
+    } finally {
+      await context.close();
+    }
+  });
+}

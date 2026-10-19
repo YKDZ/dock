@@ -5,15 +5,16 @@ import { collectArtifacts, packageNames } from "./release-artifacts.ts";
 
 const directory = resolve(".artifacts/candidate");
 const manifest = await collectArtifacts(directory);
-const consumers: [string, number[]][] = [
-  [packageNames[2], [0, 1, 2]],
-  [packageNames[3], [0, 1, 2, 3]],
-  [packageNames[4], [0, 1, 4, 2]],
-  [packageNames[5], [0, 1, 2, 5]],
-  [packageNames[6], [0, 1, 6, 4, 2]],
-  ["@dock/consumer-readme", [0, 1, 2, 3, 4]],
+const [core, sdk, file, markdown, nodeTest, typescript, vitest] = packageNames;
+const consumers: [string, readonly string[]][] = [
+  [file, [core, sdk, file]],
+  [markdown, [core, sdk, file, markdown]],
+  [nodeTest, [core, sdk, nodeTest, file]],
+  [typescript, [core, sdk, file, typescript]],
+  [vitest, [core, sdk, vitest, nodeTest, file]],
+  ["@dock/consumer-readme", [core, sdk, file, markdown, nodeTest]],
 ];
-for (const [name, indexes] of consumers) {
+for (const [name, dependencies] of consumers) {
   const result = spawnSync(
     "pnpm",
     [
@@ -23,8 +24,11 @@ for (const [name, indexes] of consumers) {
       "node",
       "--conditions=source",
       "scripts/verify-installed.ts",
-      ...indexes.map((index) =>
-        resolve(directory, manifest.packages[index]!.file),
+      ...dependencies.map((dependency) =>
+        resolve(
+          directory,
+          manifest.packages.find(({ name }) => name === dependency)!.file,
+        ),
       ),
     ],
     { stdio: "inherit" },

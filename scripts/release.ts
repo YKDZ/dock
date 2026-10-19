@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   access,
+  appendFile,
   copyFile,
   mkdir,
   mkdtemp,
@@ -99,16 +100,10 @@ async function verify(): Promise<void> {
   // 重跑只能继续使用原交接，不能重新准备一批相同版本的文件。
   try {
     await access(join(directory, "accepted.json"));
-    await accepted();
-    return;
-  } catch (error) {
-    try {
-      await access(join(directory, "accepted.json"));
-    } catch {
-      return prepare();
-    }
-    throw error;
+  } catch {
+    return prepare();
   }
+  await accepted();
 }
 
 async function prepare(): Promise<void> {
@@ -119,15 +114,12 @@ async function prepare(): Promise<void> {
     "",
     "验收需要已提交且干净的工作区",
   );
-  visible("pnpm", ["check:full"]);
-  const candidate = resolve(".artifacts/candidate");
-  const manifest = await validateArtifacts(candidate, commit);
-  for (const file of [
-    "manifest.json",
-    ...manifest.packages.map(({ file }) => file),
-  ]) {
-    await copyFile(join(candidate, file), join(directory, file));
-  }
+  assert.equal(
+    captured("npm", ["--version"]).toString().trim(),
+    "12.2.1",
+    "发布准备使用 npm 12.2.1",
+  );
+  let sourceVersion: string | undefined;
   for (const name of packageNames) {
     const source = JSON.parse(
       captured("pnpm", [
@@ -138,8 +130,24 @@ async function prepare(): Promise<void> {
         "package.json",
       ]).toString(),
     ) as { version: string };
-    assert.equal(source.version, manifest.version, "源码与制品版本不一致");
+    sourceVersion ??= source.version;
+    assert.equal(source.version, sourceVersion, "七包源码版本不一致");
+    assert.equal(
+      npmView(`${name}@${source.version}`, "dist"),
+      null,
+      `${name}@${source.version} 已有外部发布；必须恢复原验收制品，不能重新打包`,
+    );
   }
+  visible("pnpm", ["check:full"]);
+  const candidate = resolve(".artifacts/candidate");
+  const manifest = await validateArtifacts(candidate, commit);
+  for (const file of [
+    "manifest.json",
+    ...manifest.packages.map(({ file }) => file),
+  ]) {
+    await copyFile(join(candidate, file), join(directory, file));
+  }
+  assert.equal(manifest.version, sourceVersion, "源码与制品版本不一致");
   const notes = await readFile("CHANGELOG.md");
   assert.ok(
     notes.toString().includes(`## ${manifest.version}\n`),
@@ -364,7 +372,7 @@ async function githubRelease(): Promise<void> {
   } else {
     assert.match(ref.stderr, /HTTP 404/u, `读取标签失败：${ref.stderr}`);
   }
-  const release = api(`releases/tags/${tag}`);
+  let release = api(`releases/tags/${tag}`);
   const notes = await readFile(join(directory, "CHANGELOG.md"), "utf8");
   const files = [
     "manifest.json",
@@ -373,7 +381,32 @@ async function githubRelease(): Promise<void> {
     "CHANGELOG.md",
     ...manifest.packages.map(({ file }) => file),
   ];
-  if (release.status === 0) {
+  if (release.status !== 0) {
+    assert.match(
+      release.stderr,
+      /HTTP 404/u,
+      `读取 Release 失败：${release.stderr}`,
+    );
+    // 显式建立草稿，避免 gh 的带附件快捷路径在失败时自动删除草稿。
+    visible("gh", [
+      "release",
+      "create",
+      tag,
+      "--draft",
+      "--repo",
+      repository,
+      "--target",
+      commit,
+      "--title",
+      tag,
+      "--notes-file",
+      join(directory, "CHANGELOG.md"),
+      ...(manifest.version.includes("-") ? ["--prerelease"] : []),
+    ]);
+    release = api(`releases/tags/${tag}`);
+    assert.equal(release.status, 0, `无法读取本批草稿：${release.stderr}`);
+  }
+  {
     const existing = JSON.parse(release.stdout) as {
       name: string;
       body: string;
@@ -389,7 +422,6 @@ async function githubRelease(): Promise<void> {
       manifest.version.includes("-"),
       "Release 类型冲突",
     );
-    assert.equal(existing.draft, false, "Release 草稿状态冲突");
     assert.equal(existing.target_commitish, commit, "Release 提交冲突");
     const expected = new Set(files);
     for (const asset of existing.assets)
@@ -428,33 +460,92 @@ async function githubRelease(): Promise<void> {
         ]);
       }
     }
-  } else {
-    assert.match(
-      release.stderr,
-      /HTTP 404/u,
-      `读取 Release 失败：${release.stderr}`,
-    );
-    visible("gh", [
-      "release",
-      "create",
-      tag,
-      ...files.map((file) => join(directory, file)),
-      "--repo",
-      repository,
-      "--target",
-      commit,
-      "--title",
-      tag,
-      "--notes-file",
-      join(directory, "CHANGELOG.md"),
-      ...(manifest.version.includes("-") ? ["--prerelease"] : []),
-    ]);
+    if (existing.draft) {
+      visible("gh", [
+        "release",
+        "edit",
+        tag,
+        "--draft=false",
+        "--repo",
+        repository,
+      ]);
+    }
   }
+}
+
+async function restore(): Promise<void> {
+  const run = process.env.GITHUB_RUN_ID;
+  const output = process.env.GITHUB_OUTPUT;
+  assert.ok(run && output, "restore 仅用于 GitHub 当前运行");
+  let restored = false;
+  if (process.env.GITHUB_RUN_ATTEMPT !== "1") {
+    const pages = JSON.parse(
+      captured("gh", [
+        "api",
+        "--paginate",
+        "--slurp",
+        `repos/${repository}/actions/runs/${run}/artifacts?per_page=100`,
+      ]).toString(),
+    ) as { artifacts: { name: string; expired: boolean }[] }[];
+    const artifact = pages
+      .flatMap((page) => page.artifacts)
+      .find(({ name }) => name === "verified-release");
+    if (artifact) {
+      assert.equal(
+        artifact.expired,
+        false,
+        "原验收制品已过期；停止发布，不能重新打包恢复",
+      );
+      visible("gh", [
+        "run",
+        "download",
+        run,
+        "--repo",
+        repository,
+        "--name",
+        "verified-release",
+        "--dir",
+        directory,
+      ]);
+      await accepted();
+      restored = true;
+    } else {
+      const attempts = JSON.parse(
+        captured("gh", [
+          "api",
+          "--paginate",
+          "--slurp",
+          `repos/${repository}/actions/runs/${run}/jobs?filter=all&per_page=100`,
+        ]).toString(),
+      ) as {
+        jobs: {
+          name: string;
+          started_at: string | null;
+          conclusion: string | null;
+        }[];
+      }[];
+      assert.ok(
+        !attempts
+          .flatMap((page) => page.jobs)
+          .some(
+            (job) =>
+              job.name === "publish" &&
+              job.started_at &&
+              job.conclusion !== "skipped",
+          ),
+        "发布曾经开始但原验收制品缺失；必须恢复原文件，不能重新打包",
+      );
+    }
+  }
+  await appendFile(output, `restored=${restored}\n`);
 }
 
 try {
   await mkdir(directory, { recursive: true });
   switch (process.argv[2]) {
+    case "restore":
+      await restore();
+      break;
     case "verify":
       await verify();
       break;
@@ -469,7 +560,7 @@ try {
       break;
     default:
       throw new Error(
-        "用法：release.ts verify|publish|registry|release [原制品目录]",
+        "用法：release.ts verify|publish|registry|release|restore [原制品目录]",
       );
   }
 } catch (error) {
