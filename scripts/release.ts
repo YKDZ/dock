@@ -156,9 +156,24 @@ async function prepare(): Promise<void> {
   await copyFile("CHANGELOG.md", join(directory, "CHANGELOG.md"));
   const registryBefore: Record<string, string | null> = {};
   for (const name of packageNames) {
-    const tags = npmView(name, "dist-tags") as Record<string, string> | null;
+    const tags = npmView(
+      `${name}@${distTag(manifest.version)}`,
+      "dist-tags",
+    ) as Record<string, string> | null;
     registryBefore[name] = tags?.[distTag(manifest.version)] ?? null;
   }
+  assert.equal(
+    captured("git", ["status", "--porcelain", "--untracked-files=normal"])
+      .toString()
+      .trim(),
+    "",
+    "验收期间工作区发生变化，请重新准备",
+  );
+  assert.equal(
+    captured("git", ["rev-parse", "HEAD"]).toString().trim(),
+    commit,
+    "验收期间提交发生变化，请重新准备",
+  );
   const acceptance: Acceptance = {
     commit,
     manifest: integrity(await readFile(join(directory, "manifest.json"))),
@@ -179,7 +194,10 @@ function remoteState(
   const dist = npmView(`${name}@${version}`, "dist") as {
     integrity?: string;
   } | null;
-  const tags = npmView(name, "dist-tags") as Record<string, string> | null;
+  const tags = npmView(`${name}@${distTag(version)}`, "dist-tags") as Record<
+    string,
+    string
+  > | null;
   return { dist, tag: tags?.[distTag(version)] ?? null };
 }
 

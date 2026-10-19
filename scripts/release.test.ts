@@ -512,3 +512,20 @@ for (const field of ["name", "version", "dependency"] as const) {
     }
   });
 }
+
+void test("已有 latest 的包可以首次发布 next，不修改既有 latest", async () => {
+  const context = await batch("0.2.0-next.0");
+  try {
+    const state = await context.npm();
+    for (const name of names) state.tags[name] = { latest: "0.1.0" };
+    await context.setNpm(state);
+    const result = context.run("publish");
+    assert.equal(result.status, 0, result.stderr);
+    for (const tags of Object.values((await context.npm()).tags)) {
+      assert.equal(tags.latest, "0.1.0");
+      assert.equal(tags.next, "0.2.0-next.0");
+    }
+  } finally {
+    await context.close();
+  }
+});

@@ -29,8 +29,12 @@ const missing = () => {
 if (args[0] === "view") {
   const spec = args[1]!;
   if (args[2] === "dist-tags") {
-    if (state.tags[spec]) output(state.tags[spec]);
-    else missing();
+    const separator = spec.lastIndexOf("@");
+    const name = separator > 0 ? spec.slice(0, separator) : spec;
+    const tag = separator > 0 ? spec.slice(separator + 1) : "latest";
+    const tags = state.tags[name];
+    if (tags?.[tag]) output(tags);
+    else if (!tags || tag !== "latest") missing();
   } else {
     const separator = spec.lastIndexOf("@");
     const dist =
