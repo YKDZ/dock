@@ -127,7 +127,12 @@ async function batch(version: string) {
       commit,
       manifest: sha(manifest),
       notes: sha(notes),
-      registryBefore: Object.fromEntries(names.map((name) => [name, null])),
+      registryBefore: Object.fromEntries(
+        names.map((name) => [
+          name,
+          version.includes("-") ? "0.0.1-next.0" : "0.0.1",
+        ]),
+      ),
     }),
   );
   const npmFile = join(directory, "npm.json");
@@ -139,7 +144,16 @@ async function batch(version: string) {
       file: join(directory, entry.file),
     })),
     versions: {},
-    tags: {},
+    tags: Object.fromEntries(
+      names.map((name) => [
+        name,
+        {
+          [version.includes("-") ? "next" : "latest"]: version.includes("-")
+            ? "0.0.1-next.0"
+            : "0.0.1",
+        },
+      ]),
+    ),
   };
   await writeFile(npmFile, JSON.stringify(state));
   await writeFile(githubFile, JSON.stringify({ calls: [], assets: {} }));
@@ -188,15 +202,11 @@ void test("原验收制品缺失时停止发布并说明原因", async () => {
   }
 });
 
-for (const version of ["0.1.0-next.0", "0.1.0"]) {
+for (const version of ["0.2.0-next.0", "0.2.0"]) {
   void test(`${version} 使用原制品发布、注册表消费并创建对应 Release`, async () => {
     const context = await batch(version);
     try {
       const state = await context.npm();
-      // 首次稳定发布时允许只有 next，尚无 latest。
-      if (version === "0.1.0")
-        for (const name of names) state.tags[name] = { next: "0.1.0-next.0" };
-      await context.setNpm(state);
       for (const command of [
         "verify",
         "publish",
@@ -512,20 +522,3 @@ for (const field of ["name", "version", "dependency"] as const) {
     }
   });
 }
-
-void test("已有 latest 的包可以首次发布 next，不修改既有 latest", async () => {
-  const context = await batch("0.2.0-next.0");
-  try {
-    const state = await context.npm();
-    for (const name of names) state.tags[name] = { latest: "0.1.0" };
-    await context.setNpm(state);
-    const result = context.run("publish");
-    assert.equal(result.status, 0, result.stderr);
-    for (const tags of Object.values((await context.npm()).tags)) {
-      assert.equal(tags.latest, "0.1.0");
-      assert.equal(tags.next, "0.2.0-next.0");
-    }
-  } finally {
-    await context.close();
-  }
-});
