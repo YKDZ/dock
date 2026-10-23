@@ -1,7 +1,8 @@
 import {
   createReference,
   definePlugin,
-  type PluginResult,
+  type PluginBatchResult,
+  type PluginRequest,
   type Reference,
   type ReferenceOptions,
 } from "@ykdz/dock";
@@ -59,19 +60,26 @@ export const catalogPlugin = definePlugin({
       throw new TypeError(`无效目录引用：${reference.id}`);
     }
   },
-  collect(reference: CatalogReference): PluginResult<CatalogValue> {
-    if (reference.target.path === "broken") {
-      return {
-        kind: "error",
-        error: { code: "catalog-missing", message: "目录不存在。" },
-      };
-    }
+  collect(
+    request: PluginRequest<CatalogReference>,
+  ): PluginBatchResult<CatalogValue> {
     return {
-      kind: "value",
-      value: {
-        title: reference.selection?.field ?? reference.target.path,
-        entries: [reference.target.path],
-      },
+      results: request.selectedReferences.map((reference) =>
+        reference.target.path === "broken"
+          ? {
+              referenceId: reference.id,
+              kind: "error",
+              error: { code: "catalog-missing", message: "目录不存在。" },
+            }
+          : {
+              referenceId: reference.id,
+              kind: "value",
+              value: {
+                title: reference.selection?.field ?? reference.target.path,
+                entries: [reference.target.path],
+              },
+            },
+      ),
     };
   },
 });

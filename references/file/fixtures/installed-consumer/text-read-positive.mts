@@ -4,9 +4,10 @@ import {
   defineConfig,
   definePlugin,
   readReference,
+  type PluginBatchResult,
   type PluginContext,
   type PluginReadResult,
-  type PluginResult,
+  type PluginRequest,
   type Reference,
   type ReferenceValue,
 } from "@ykdz/dock";
@@ -54,11 +55,17 @@ const readable = definePlugin({
     void reference;
   },
   collect(
-    reference: PluginReference,
+    request: PluginRequest<PluginReference>,
     context: PluginContext,
-  ): PluginResult<number> {
+  ): PluginBatchResult<number> {
     void context;
-    return { kind: "value", value: reference.target.length };
+    return {
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: reference.target.length,
+      })),
+    };
   },
   read(
     reference: PluginReference,

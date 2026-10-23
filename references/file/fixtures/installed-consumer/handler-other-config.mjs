@@ -15,10 +15,18 @@ const reader = definePlugin({
       throw new TypeError("目标必须是路径文本。");
     }
   },
-  async collect(reference, context) {
+  async collect(request, context) {
     return {
-      kind: "value",
-      value: await readFile(resolve(context.root, reference.target), "utf8"),
+      results: await Promise.all(
+        request.selectedReferences.map(async (reference) => ({
+          referenceId: reference.id,
+          kind: "value",
+          value: await readFile(
+            resolve(context.root, reference.target),
+            "utf8",
+          ),
+        })),
+      ),
     };
   },
 });

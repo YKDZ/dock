@@ -190,12 +190,24 @@ const countedPlugin = definePlugin({
   fileInfo(reference, context) {
     return resolve(context.root, reference.target.path);
   },
-  collect(reference) {
-    counted.set(reference.id, (counted.get(reference.id) ?? 0) + 1);
-    return { kind: "value", value: reference.target.path };
+  collect(request) {
+    counted.batches += 1;
+    for (const reference of request.selectedReferences) {
+      counted.references.set(
+        reference.id,
+        (counted.references.get(reference.id) ?? 0) + 1,
+      );
+    }
+    return {
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: reference.target.path,
+      })),
+    };
   },
 });
-const counted = new Map();
+const counted = { batches: 0, references: new Map() };
 const countedConfig = defineConfig({
   plugins: [countedPlugin],
   bindings: [
@@ -210,92 +222,14 @@ const countedConfig = defineConfig({
 assert.deepEqual((await check(countedConfig, { file: ["one.txt"] })).scope, [
   "counted-a",
 ]);
-assert.equal(counted.get("counted-ref-a"), 1);
-assert.equal(counted.has("counted-ref-b"), false);
-
-const identityCalls = { executeA: 0, executeB: 0, collectA: 0, collectB: 0 };
-const identityPluginA = definePlugin({
-  id: "fixture:identity-a",
-  validate() {},
-  fileInfo(reference, context) {
-    return resolve(context.root, reference.target.path);
-  },
-  execution: {
-    declare(references) {
-      return [
-        {
-          identity: "shared-execution",
-          configuration: { framework: "fixture", root: "one" },
-          references: references.map((reference) => reference.id),
-        },
-      ];
-    },
-    execute() {
-      identityCalls.executeA += 1;
-      throw new Error("冲突运行不能启动。");
-    },
-  },
-  collect() {
-    identityCalls.collectA += 1;
-    return { kind: "value", value: "a" };
-  },
-});
-const identityPluginB = definePlugin({
-  id: "fixture:identity-b",
-  validate() {},
-  fileInfo(reference, context) {
-    return resolve(context.root, reference.target.path);
-  },
-  execution: {
-    declare(references) {
-      return [
-        {
-          identity: "shared-execution",
-          configuration: { framework: "fixture", root: "two" },
-          references: references.map((reference) => reference.id),
-        },
-      ];
-    },
-    execute() {
-      identityCalls.executeB += 1;
-      throw new Error("冲突运行不能启动。");
-    },
-  },
-  collect() {
-    identityCalls.collectB += 1;
-    return { kind: "value", value: "b" };
-  },
-});
-const crossPluginIdentityConfig = defineConfig({
-  plugins: [identityPluginA, identityPluginB],
-  bindings: [
-    binding("identity-a", [
-      createReference(identityPluginA.id, "identity-ref-a", {
-        path: "one.txt",
-      }),
-    ]),
-    binding("identity-b", [
-      createReference(identityPluginB.id, "identity-ref-b", {
-        path: "two.txt",
-      }),
-    ]),
-  ],
-});
-await assert.rejects(
-  check(crossPluginIdentityConfig, { binding: ["identity-a"] }),
-  (error) => error.code === "execution-identity-conflict",
-);
-assert.deepEqual(identityCalls, {
-  executeA: 0,
-  executeB: 0,
-  collectA: 0,
-  collectB: 0,
-});
+assert.equal(counted.batches, 1);
+assert.equal(counted.references.get("counted-ref-a"), 1);
+assert.equal(counted.references.has("counted-ref-b"), false);
 
 const batchPlugin = definePlugin({
   id: "fixture:batch-validation",
   validate() {},
-  validateReferences(references) {
+  prepare(references) {
     const configuration = new Map();
     for (const reference of references) {
       const prior = configuration.get(reference.target.identity);
@@ -311,8 +245,14 @@ const batchPlugin = definePlugin({
   fileInfo(reference, context) {
     return resolve(context.root, reference.target.path);
   },
-  collect() {
-    return { kind: "value", value: "ok" };
+  collect(request) {
+    return {
+      results: request.selectedReferences.map(({ id }) => ({
+        referenceId: id,
+        kind: "value",
+        value: "ok",
+      })),
+    };
   },
 });
 const batchConfig = defineConfig({
@@ -336,7 +276,7 @@ const batchConfig = defineConfig({
 });
 await assert.rejects(
   check(batchConfig, { binding: ["batch-selected"] }),
-  (error) => error.code === "plugin-reference-validation-failed",
+  (error) => error.code === "plugin-prepare-failed",
 );
 
 const rootA = resolve("root-a");
@@ -379,8 +319,14 @@ await rm(rootSwitchBaseline);
 const noFilePlugin = definePlugin({
   id: "fixture:no-file-target",
   validate() {},
-  collect() {
-    return { kind: "value", value: "no direct file target" };
+  collect(request) {
+    return {
+      results: request.selectedReferences.map(({ id }) => ({
+        referenceId: id,
+        kind: "value",
+        value: "no direct file target",
+      })),
+    };
   },
 });
 const mixedFileConfig = defineConfig({

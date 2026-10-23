@@ -394,3 +394,50 @@ void test("操作在异步预检前复制引用输入与插件准备结果", asy
     "before",
   );
 });
+
+void test("成员同时含事实与错误时保留采集失败并拒绝基线更新", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-member-error-batch-"));
+  const plugin = definePlugin({
+    id: "fixture-plugin",
+    validate(_reference: FixtureReference): void {},
+    collect(
+      request: PluginRequest<FixtureReference>,
+    ): PluginBatchResult<string> {
+      return {
+        results: request.selectedReferences.map((reference) => ({
+          referenceId: reference.id,
+          kind: "collection",
+          collection: {
+            completeness: "complete",
+            members: [
+              {
+                id: "member",
+                value: 1,
+                error: { code: "member-failed", message: "成员采集失败" },
+              },
+            ],
+          },
+        })) as unknown as PluginBatchResult<string>["results"],
+      };
+    },
+  });
+  const config = defineConfig({
+    root,
+    plugins: [plugin],
+    bindings: [binding("member-policy", [fixtureReference("member-set")])],
+  });
+
+  try {
+    const outcome = await updateBaseline(config);
+    assert.equal(outcome.status, "rejected");
+    assert.ok("errors" in (outcome.report.bindings[0] ?? {}));
+    const bindingResult = outcome.report.bindings[0];
+    assert.ok(bindingResult && "errors" in bindingResult);
+    assert.equal(bindingResult.errors[0]?.code, "member-failed");
+    await assert.rejects(readFile(join(root, "dock.baseline.json"), "utf8"), {
+      code: "ENOENT",
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -40,7 +40,7 @@ const readable = definePlugin({
   validate() {},
   collect() {
     collected += 1;
-    return { kind: "value", value: "collected" };
+    return { results: [] };
   },
   read(reference) {
     return { value: reference.target };
@@ -60,7 +60,7 @@ const unreadable = definePlugin({
   id: "fixture:unreadable",
   validate() {},
   collect() {
-    return { kind: "value", value: "collect-only" };
+    return { results: [] };
   },
 });
 const unreadableConfig = defineConfig({ plugins: [unreadable], bindings: [] });
@@ -84,7 +84,7 @@ const invalidReader = definePlugin({
   id: "fixture:invalid-reader",
   validate() {},
   collect() {
-    return { kind: "value", value: "unused" };
+    return { results: [] };
   },
   read() {
     return { value: undefined };
