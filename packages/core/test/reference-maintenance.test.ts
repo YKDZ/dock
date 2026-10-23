@@ -274,6 +274,7 @@ void test("取消跟踪说明与输入基线双向独立", () => {
   assert.equal(Object.hasOwn(outcome.baseline.bindings, binding.id), false);
 
   const removal = outcome.report.bindings[0]!;
+  assert.ok("untracked" in removal && removal.untracked === true);
   if (!("untracked" in removal) || removal.untracked !== true) return;
   const before = removal.changes[0].before;
   const oldDefinition = baseline.bindings[binding.id]!.definition;
@@ -305,6 +306,7 @@ void test("更新所得基线与当前输入和报告双向独立", () => {
   if (outcome.status !== "updated") return;
 
   const report = outcome.report.bindings[0]!;
+  assert.ok("current" in report);
   if (!("current" in report)) return;
   const reportedReference = report.current.references["doc-paragraph"]!;
   const reportedOutput = report.current.references["ordered-output"]!;
@@ -314,6 +316,7 @@ void test("更新所得基线与当前输入和报告双向独立", () => {
 
   (currentReferences[0]!.target as { path: string }).path = "input.json";
   const inputOutput = currentFacts[3]!;
+  assert.ok("value" in inputOutput);
   if (!("value" in inputOutput)) return;
   (inputOutput.value as string[])[0] = "input";
   assert.equal(
