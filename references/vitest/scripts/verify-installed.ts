@@ -125,7 +125,7 @@ const fixtureDirectory = join(
 const versions = ["4.1.11", "5.0.3"] as const;
 
 async function main(): Promise<void> {
-  // Internal mode for the standalone Vitest acceptance before Node migration.
+  // 通过内部参数执行 Vitest 单框架验收步骤。
   const vitestOnly = process.argv[2] === "--vitest-only";
   const artifacts = process.argv.slice(vitestOnly ? 3 : 2);
   assert.equal(
