@@ -6,9 +6,10 @@ import {
   createReference,
   definePlugin,
   type JsonValue,
+  type PluginBatchResult,
   type PluginContext,
+  type PluginRequest,
   type PluginReadResult,
-  type PluginResult,
   type Reference,
   type ReferenceOptions,
   type ReadableReferencePlugin,
@@ -108,28 +109,36 @@ const implementation = definePlugin({
     }
   },
   async collect(
-    reference: FileReference,
+    request: PluginRequest<FileReference>,
     context: PluginContext,
-  ): Promise<PluginResult> {
-    try {
-      const result = await readFileReference(reference, context.root);
-      return {
-        kind: "value",
-        value: result.value,
-        ...(result.range === undefined ? {} : { range: result.range }),
-      };
-    } catch (error) {
-      const range =
-        error instanceof FileReferenceError ? error.range : undefined;
-      return {
-        kind: "error",
-        error: {
-          code: fileReferenceErrorCode(error),
-          message: error instanceof Error ? error.message : String(error),
-        },
-        ...(range === undefined ? {} : { range }),
-      };
-    }
+  ): Promise<PluginBatchResult> {
+    return {
+      results: await Promise.all(
+        request.selectedReferences.map(async (reference) => {
+          try {
+            const result = await readFileReference(reference, context.root);
+            return {
+              referenceId: reference.id,
+              kind: "value" as const,
+              value: result.value,
+              ...(result.range === undefined ? {} : { range: result.range }),
+            };
+          } catch (error) {
+            const range =
+              error instanceof FileReferenceError ? error.range : undefined;
+            return {
+              referenceId: reference.id,
+              kind: "error" as const,
+              error: {
+                code: fileReferenceErrorCode(error),
+                message: error instanceof Error ? error.message : String(error),
+              },
+              ...(range === undefined ? {} : { range }),
+            };
+          }
+        }),
+      ),
+    };
   },
   async read(
     reference: FileReference,

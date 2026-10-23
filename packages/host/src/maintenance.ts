@@ -12,20 +12,20 @@ import {
   type Baseline,
   type BaselineUpdateIssue,
   type CheckReport as CoreCheckReport,
+  type JsonValue,
+  type ReferenceMemberResult,
   type ReferenceResult,
+  type TextRange,
 } from "@ykdz/dock-core";
 
-import type { Config, PluginResult } from "./contracts.ts";
+import type { Config, PluginRequest } from "./contracts.ts";
 import { MaintenanceError } from "./errors.ts";
-import {
-  createExecutionSession,
-  type ExecutionSession,
-  type ExecutionSummary,
-} from "./execution.ts";
+import { ownPluginInformation } from "./owned-data.ts";
 import {
   resolveMaintenance,
   type ResolvedMaintenance,
   type ResolvedOperation,
+  type ResolvedPluginRuntime,
 } from "./resolution.ts";
 import type { MaintenanceScope } from "./scope.ts";
 
@@ -35,7 +35,16 @@ export type MaintenanceConfig = Config | string | URL;
 export type Operation = "inspect" | "check" | "updateBaseline";
 export type { MaintenanceScope } from "./scope.ts";
 export type CheckReport = CoreCheckReport & {
-  readonly execution?: ExecutionSummary;
+  readonly pluginDiagnostics: readonly {
+    readonly pluginId: string;
+    readonly data: JsonValue;
+    readonly text: readonly string[];
+  }[];
+  readonly pluginErrors: readonly {
+    readonly pluginId: string;
+    readonly code: string;
+    readonly message: string;
+  }[];
 };
 export type BaselineUpdateOutcome =
   | {
@@ -102,13 +111,12 @@ export async function operateConfig<Kind extends Operation>(
     configPath,
   );
   if (operation === "inspect") return resolved.model as OperationResult[Kind];
-  const session = await prepareExecution(resolved);
-  const facts = await collect(resolved, session);
-  const input = { ...resolved.model.context, facts };
+  const collection = await collect(resolved);
+  const input = { ...resolved.model.context, facts: collection.facts };
   if (operation === "check") {
-    return withExecutionSummary(
+    return withPluginInformation(
       checkCore(input),
-      session,
+      collection,
     ) as OperationResult[Kind];
   }
   const outcome = updateBaselineCore(input);
@@ -117,95 +125,281 @@ export async function operateConfig<Kind extends Operation>(
   }
   return {
     ...outcome,
-    report: withExecutionSummary(outcome.report, session),
+    report: withPluginInformation(outcome.report, collection),
   } as OperationResult[Kind];
 }
 
-async function prepareExecution(
-  resolved: ResolvedOperation,
-): Promise<ExecutionSession> {
-  const session = createExecutionSession(resolved);
-  await session.run();
-  return session;
-}
+type PluginError = {
+  readonly pluginId: string;
+  readonly code: string;
+  readonly message: string;
+};
 
-async function collect(
-  resolved: ResolvedOperation,
-  session: ExecutionSession,
-): Promise<ReferenceResult[]> {
-  return await Promise.all(
-    resolved.runtime.references.map(async (reference) => {
-      const plugin = resolved.runtime.plugins.get(reference.pluginId);
-      if (plugin === undefined) {
-        return {
-          referenceId: reference.id,
-          error: {
-            code: "plugin-not-registered",
-            message: `引用 ${reference.id} 的插件未登记：${reference.pluginId}`,
-          },
-        } satisfies ReferenceResult;
-      }
-      try {
-        return toReferenceResult(
-          reference.id,
-          await plugin.collect(
-            reference,
-            Object.freeze({
-              root: resolved.model.root,
-              execution: session.view(plugin.id),
-            }),
-          ),
-        );
-      } catch (error) {
-        return {
-          referenceId: reference.id,
-          error: {
-            code: "plugin-failed",
-            message: errorMessage(error),
-          },
-        } satisfies ReferenceResult;
-      }
-    }),
+type PluginCollection = {
+  readonly facts: ReferenceResult[];
+  readonly diagnostics: readonly {
+    readonly pluginId: string;
+    readonly data: JsonValue;
+    readonly text: readonly string[];
+  }[];
+  readonly errors: readonly PluginError[];
+};
+
+async function collect(resolved: ResolvedOperation): Promise<PluginCollection> {
+  const context = Object.freeze({ root: resolved.model.root });
+  const batches = await Promise.all(
+    resolved.runtime.collectors
+      .filter(({ selectedReferences }) => selectedReferences.length > 0)
+      .map(async (plugin) => {
+        try {
+          const request: PluginRequest = Object.freeze({
+            references: plugin.references,
+            selectedReferences: plugin.selectedReferences,
+            ...(plugin.prepared === undefined
+              ? {}
+              : { prepared: plugin.prepared }),
+          });
+          const value = await plugin.plugin.collect(request, context);
+          return acceptPluginBatch(plugin, value);
+        } catch (error) {
+          return failedPluginBatch(plugin, error);
+        }
+      }),
   );
+  return {
+    facts: batches.flatMap(({ facts }) => facts),
+    diagnostics: batches.flatMap(({ diagnostics }) => diagnostics),
+    errors: batches.flatMap(({ errors }) => errors),
+  };
 }
 
-function withExecutionSummary(
+type AcceptedBatch = {
+  readonly facts: ReferenceResult[];
+  readonly diagnostics: PluginCollection["diagnostics"];
+  readonly errors: PluginError[];
+};
+
+function acceptPluginBatch(
+  plugin: ResolvedPluginRuntime,
+  value: unknown,
+): AcceptedBatch {
+  const shell = readBatchShell(value);
+  if (shell === undefined) {
+    return failedPluginBatch(
+      plugin,
+      "无效批量结果外壳",
+      "invalid-plugin-batch-result",
+    );
+  }
+
+  const errors: PluginError[] = [];
+  const diagnostics: PluginCollection["diagnostics"][number][] = [];
+  if (shell.diagnostics !== undefined) {
+    try {
+      const information = ownPluginInformation(shell.diagnostics);
+      diagnostics.push({ pluginId: plugin.plugin.id, ...information });
+    } catch (error) {
+      errors.push({
+        pluginId: plugin.plugin.id,
+        code: "invalid-plugin-diagnostics",
+        message: `插件 ${plugin.plugin.id} 的诊断格式无效：${errorMessage(error)}`,
+      });
+    }
+  }
+
+  const selectedIds = new Set(plugin.selectedReferences.map(({ id }) => id));
+  const byReference = new Map<string, unknown[]>();
+  const facts: ReferenceResult[] = [];
+  for (const entry of shell.results) {
+    const id = resultReferenceId(entry);
+    if (id === undefined) {
+      errors.push({
+        pluginId: plugin.plugin.id,
+        code: "unattributed-plugin-result",
+        message: `插件 ${plugin.plugin.id} 返回了没有有效引用身份的结果。`,
+      });
+      continue;
+    }
+    if (!selectedIds.has(id)) {
+      errors.push({
+        pluginId: plugin.plugin.id,
+        code: "unexpected-plugin-result",
+        message: `插件 ${plugin.plugin.id} 返回了本次未选中的引用结果：${id}。`,
+      });
+      continue;
+    }
+    const results = byReference.get(id) ?? [];
+    results.push(entry);
+    byReference.set(id, results);
+  }
+
+  for (const reference of plugin.selectedReferences) {
+    const matches = byReference.get(reference.id) ?? [];
+    if (matches.length === 0) {
+      facts.push(
+        pluginFailure(
+          reference.id,
+          "missing-plugin-result",
+          `插件 ${plugin.plugin.id} 未返回引用 ${reference.id} 的结果。`,
+        ),
+      );
+      continue;
+    }
+    if (matches.length > 1) {
+      facts.push(
+        pluginFailure(
+          reference.id,
+          "duplicate-plugin-result",
+          `插件 ${plugin.plugin.id} 对引用 ${reference.id} 返回了多个结果。`,
+        ),
+      );
+      continue;
+    }
+    try {
+      facts.push(toReferenceResult(reference.id, matches[0]));
+    } catch {
+      facts.push(invalidPluginResult(reference.id));
+    }
+  }
+  return { facts, diagnostics, errors };
+}
+
+function failedPluginBatch(
+  plugin: ResolvedPluginRuntime,
+  error: unknown,
+  code = "plugin-failed",
+): AcceptedBatch {
+  const message = errorMessage(error);
+  return {
+    facts: plugin.selectedReferences.map((reference) =>
+      pluginFailure(
+        reference.id,
+        code,
+        `插件 ${plugin.plugin.id} 批量采集失败：${message}`,
+      ),
+    ),
+    diagnostics: [],
+    errors: [],
+  };
+}
+
+function withPluginInformation(
   report: CoreCheckReport,
-  session: ExecutionSession,
+  collection: PluginCollection,
 ): CheckReport {
-  const execution = session.summary();
-  return execution === undefined ? report : { ...report, execution };
+  return {
+    ...report,
+    pluginDiagnostics: collection.diagnostics,
+    pluginErrors: collection.errors,
+  };
 }
 
-function toReferenceResult(id: string, result: PluginResult): ReferenceResult {
-  if (typeof result !== "object" || result === null) {
+type BatchShell = {
+  readonly results: readonly unknown[];
+  readonly diagnostics?: unknown;
+};
+
+function readBatchShell(value: unknown): BatchShell | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const results = ownDataProperty(value, "results");
+  if (results.status !== "value") return undefined;
+  const entries = denseArrayValues(results.value);
+  if (entries === undefined) return undefined;
+  const diagnostics = ownDataProperty(value, "diagnostics");
+  if (diagnostics.status === "accessor") {
+    return { results: entries, diagnostics: invalidInformation() };
+  }
+  if (diagnostics.status === "value" && diagnostics.value !== undefined) {
+    return { results: entries, diagnostics: diagnostics.value };
+  }
+  return { results: entries };
+}
+
+function invalidInformation(): unknown {
+  return Object.freeze({ invalid: true });
+}
+
+function resultReferenceId(value: unknown): string | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const id = ownDataProperty(value, "referenceId");
+  return id.status === "value" && isNonEmptyString(id.value)
+    ? id.value
+    : undefined;
+}
+
+function toReferenceResult(id: string, value: unknown): ReferenceResult {
+  if (!isPlainRecord(value)) return invalidPluginResult(id);
+  const kind = ownDataProperty(value, "kind");
+  const rangeProperty = ownDataProperty(value, "range");
+  if (kind.status !== "value" || rangeProperty.status === "accessor") {
     return invalidPluginResult(id);
   }
-  const range = "range" in result ? result.range : undefined;
-  if (result.kind === "error") {
+  const range =
+    rangeProperty.status === "value" && rangeProperty.value !== undefined
+      ? copyTextRange(rangeProperty.value)
+      : undefined;
+  if (rangeProperty.status === "value" && range === undefined) {
+    return invalidPluginResult(id);
+  }
+  if (kind.value === "error") {
+    const error = ownDataProperty(value, "error");
+    if (error.status !== "value" || !isPlainRecord(error.value)) {
+      return invalidPluginResult(id);
+    }
+    const code = ownDataProperty(error.value, "code");
+    const message = ownDataProperty(error.value, "message");
+    if (
+      code.status !== "value" ||
+      !isNonEmptyString(code.value) ||
+      message.status !== "value" ||
+      typeof message.value !== "string"
+    ) {
+      return invalidPluginResult(id);
+    }
     return {
       referenceId: id,
-      error: result.error,
+      error: { code: code.value, message: message.value },
       ...(range === undefined ? {} : { range }),
     };
   }
-  if (result.kind === "value" && isJsonValue(result.value)) {
+  if (kind.value === "value") {
+    const fact = ownDataProperty(value, "value");
+    if (fact.status !== "value" || !isJsonValue(fact.value)) {
+      return invalidPluginResult(id);
+    }
     return {
       referenceId: id,
-      value: copyJsonValue(result.value),
+      value: copyJsonValue(fact.value),
       ...(range === undefined ? {} : { range }),
     };
   }
-  if (result.kind === "collection") {
+  if (kind.value === "collection") {
+    const collection = ownDataProperty(value, "collection");
+    if (collection.status !== "value" || !isPlainRecord(collection.value)) {
+      return invalidPluginResult(id);
+    }
+    const completeness = ownDataProperty(collection.value, "completeness");
+    const members = ownDataProperty(collection.value, "members");
+    if (
+      completeness.status !== "value" ||
+      (completeness.value !== "complete" && completeness.value !== "partial") ||
+      members.status !== "value"
+    ) {
+      return invalidPluginResult(id);
+    }
+    const memberValues = denseArrayValues(members.value);
+    if (memberValues === undefined) return invalidPluginResult(id);
+    const parsedMembers: ReferenceMemberResult[] = [];
+    for (const member of memberValues) {
+      const parsed = toMemberResult(member);
+      if (parsed === undefined) return invalidPluginResult(id);
+      parsedMembers.push(parsed);
+    }
     return {
       referenceId: id,
       collection: {
-        completeness: result.collection.completeness,
-        members: result.collection.members.map((member) =>
-          "value" in member && isJsonValue(member.value)
-            ? { ...member, value: copyJsonValue(member.value) }
-            : { ...member },
-        ),
+        completeness: completeness.value,
+        members: parsedMembers,
       },
       ...(range === undefined ? {} : { range }),
     };
@@ -213,14 +407,127 @@ function toReferenceResult(id: string, result: PluginResult): ReferenceResult {
   return invalidPluginResult(id);
 }
 
+function toMemberResult(value: unknown):
+  | { readonly id: string; readonly value: JsonValue }
+  | {
+      readonly id: string;
+      readonly error: { readonly code: string; readonly message: string };
+    }
+  | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const id = ownDataProperty(value, "id");
+  if (id.status !== "value" || !isNonEmptyString(id.value)) return undefined;
+  const fact = ownDataProperty(value, "value");
+  if (fact.status === "value" && isJsonValue(fact.value)) {
+    return { id: id.value, value: copyJsonValue(fact.value) };
+  }
+  const error = ownDataProperty(value, "error");
+  if (error.status !== "value" || !isPlainRecord(error.value)) return undefined;
+  const code = ownDataProperty(error.value, "code");
+  const message = ownDataProperty(error.value, "message");
+  if (
+    code.status !== "value" ||
+    !isNonEmptyString(code.value) ||
+    message.status !== "value" ||
+    typeof message.value !== "string"
+  ) {
+    return undefined;
+  }
+  return { id: id.value, error: { code: code.value, message: message.value } };
+}
+
+function copyTextRange(value: unknown): TextRange | undefined {
+  if (!isPlainRecord(value)) return undefined;
+  const path = ownDataProperty(value, "path");
+  const start = ownDataProperty(value, "start");
+  const end = ownDataProperty(value, "end");
+  if (
+    path.status !== "value" ||
+    typeof path.value !== "string" ||
+    start.status !== "value" ||
+    typeof start.value !== "number" ||
+    !Number.isInteger(start.value) ||
+    start.value < 0 ||
+    end.status !== "value" ||
+    typeof end.value !== "number" ||
+    !Number.isInteger(end.value) ||
+    end.value < start.value ||
+    Object.getOwnPropertyNames(value).length !== 3
+  ) {
+    return undefined;
+  }
+  return { path: path.value, start: start.value, end: end.value };
+}
+
+function pluginFailure(
+  id: string,
+  code: string,
+  message: string,
+): ReferenceResult {
+  return { referenceId: id, error: { code, message } };
+}
+
 function invalidPluginResult(id: string): ReferenceResult {
-  return {
-    referenceId: id,
-    error: {
-      code: "invalid-plugin-result",
-      message: `插件对引用 ${id} 返回了无效采集结果。`,
-    },
-  };
+  return pluginFailure(
+    id,
+    "invalid-plugin-result",
+    `插件对引用 ${id} 返回了无效采集结果。`,
+  );
+}
+
+type OwnProperty =
+  | { readonly status: "missing" | "accessor" }
+  | { readonly status: "value"; readonly value: unknown };
+
+function ownDataProperty(value: object, key: string): OwnProperty {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) return { status: "missing" };
+  if (!descriptor.enumerable || !("value" in descriptor)) {
+    return { status: "accessor" };
+  }
+  return { status: "value", value: descriptor.value };
+}
+
+function denseArrayValues(value: unknown): unknown[] | undefined {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype ||
+    Object.getOwnPropertySymbols(value).length > 0 ||
+    Object.getOwnPropertyNames(value).length !== value.length + 1
+  ) {
+    return undefined;
+  }
+  const entries: unknown[] = [];
+  for (let index = 0; index < value.length; index += 1) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+    if (
+      descriptor === undefined ||
+      !descriptor.enumerable ||
+      !("value" in descriptor)
+    ) {
+      return undefined;
+    }
+    entries.push(descriptor.value);
+  }
+  return entries;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    (Object.getPrototypeOf(value) === Object.prototype ||
+      Object.getPrototypeOf(value) === null)
+  );
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function writeBaseline(path: string, baseline: Baseline): Promise<void> {
@@ -343,7 +650,3 @@ function runConfigWorker<T>(
 export type WorkerMessage =
   | { readonly ok: true; readonly result: unknown }
   | { readonly ok: false; readonly code: string; readonly message: string };
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}

@@ -10,8 +10,6 @@ import type {
   ReferencePlugin,
   ReferenceValue,
   RegisteredReference,
-  RunDeclaration,
-  PluginExecutionContext,
 } from "./contracts.ts";
 import { ownReference } from "./owned-data.ts";
 
@@ -53,7 +51,7 @@ export function createReference<
 
 type PluginReferenceArgument<
   Plugin,
-  Method extends "validate" | "collect" | "read" | "fileInfo",
+  Method extends "validate" | "read" | "fileInfo",
 > = Method extends keyof Plugin
   ? Plugin[Method] extends (...arguments_: infer Arguments) => unknown
     ? Arguments extends readonly [infer Ref, ...unknown[]]
@@ -66,7 +64,7 @@ type PluginReferenceArgument<
 
 type PluginReferenceListArgument<
   Plugin,
-  Method extends string = "validateReferences",
+  Method extends string = "prepare",
 > = Method extends keyof Plugin
   ? Plugin[Method] extends (...arguments_: infer Arguments) => unknown
     ? Arguments extends readonly [infer References, ...unknown[]]
@@ -82,10 +80,30 @@ type PluginReferenceListArgument<
 type PluginReferenceType<Plugin> = [
   PluginReferenceArgument<Plugin, "validate">,
 ] extends [never]
-  ? [PluginReferenceArgument<Plugin, "collect">] extends [never]
+  ? [PluginRequestReference<Plugin, "collect">] extends [never]
     ? Reference
-    : PluginReferenceArgument<Plugin, "collect">
+    : PluginRequestReference<Plugin, "collect">
   : PluginReferenceArgument<Plugin, "validate">;
+
+type PluginRequestArgument<
+  Plugin,
+  Method extends "collect" | "describe",
+> = Method extends keyof Plugin
+  ? Plugin[Method] extends (...arguments_: infer Arguments) => unknown
+    ? Arguments extends readonly [infer Request, ...unknown[]]
+      ? Request
+      : never
+    : never
+  : never;
+
+type PluginRequestReference<Plugin, Method extends "collect" | "describe"> =
+  PluginRequestArgument<Plugin, Method> extends {
+    readonly references: readonly (infer Ref)[];
+  }
+    ? Ref extends Reference
+      ? Ref
+      : never
+    : never;
 
 type PluginSuccessValue<Result> = Result extends {
   readonly kind: "value";
@@ -106,7 +124,11 @@ type PluginSuccessValue<Result> = Result extends {
 type PluginCollectedValue<Plugin> = Plugin extends {
   readonly collect: (...arguments_: never[]) => infer Result;
 }
-  ? PluginSuccessValue<Awaited<Result>>
+  ? Awaited<Result> extends {
+      readonly results: readonly (infer Entry)[];
+    }
+    ? PluginSuccessValue<Entry>
+    : never
   : never;
 
 type PluginReadValue<Plugin> = Plugin extends {
@@ -131,62 +153,77 @@ type AcceptsPluginReference<Ref extends Reference, Accepted> = [
     ? true
     : false;
 
+type RequestAcceptsReference<Ref extends Reference, Request> = Request extends {
+  readonly references: readonly (infer Accepted)[];
+}
+  ? AcceptsPluginReference<Ref, Accepted>
+  : [Request] extends [never]
+    ? true
+    : false;
+
+type PluginPreparedValue<Plugin> = Plugin extends {
+  readonly prepare: (...arguments_: never[]) => infer Result;
+}
+  ? Exclude<Awaited<Result>, undefined>
+  : never;
+
+type PreparedValueAcceptedByRequest<Prepared, Request> = [Prepared] extends [
+  never,
+]
+  ? true
+  : Request extends { readonly prepared?: infer Accepted }
+    ? [Prepared] extends [Exclude<Accepted, undefined>]
+      ? true
+      : false
+    : [Request] extends [never]
+      ? true
+      : false;
+
 type PluginHookReferenceContract<Plugin, Ref extends Reference> =
   AcceptsPluginReference<
     Ref,
-    PluginReferenceArgument<Plugin, "fileInfo">
+    PluginReferenceArgument<Plugin, "validate">
   > extends true
     ? AcceptsPluginReference<
         Ref,
-        PluginReferenceListArgument<Plugin>
+        PluginReferenceArgument<Plugin, "fileInfo">
+      > extends true
+      ? AcceptsPluginReference<
+          Ref,
+          PluginReferenceArgument<Plugin, "read">
+        > extends true
+        ? AcceptsPluginReference<
+            Ref,
+            PluginReferenceListArgument<Plugin>
+          > extends true
+          ? RequestAcceptsReference<
+              Ref,
+              PluginRequestArgument<Plugin, "collect">
+            > extends true
+            ? RequestAcceptsReference<
+                Ref,
+                PluginRequestArgument<Plugin, "describe">
+              > extends true
+              ? unknown
+              : never
+            : never
+          : never
+        : never
+      : never
+    : never;
+
+type PluginPreparedContract<Plugin> =
+  PreparedValueAcceptedByRequest<
+    PluginPreparedValue<Plugin>,
+    PluginRequestArgument<Plugin, "collect">
+  > extends true
+    ? PreparedValueAcceptedByRequest<
+        PluginPreparedValue<Plugin>,
+        PluginRequestArgument<Plugin, "describe">
       > extends true
       ? unknown
       : never
     : never;
-
-type DeclaredConfiguration<Execution> = Execution extends {
-  readonly declare: (...arguments_: never[]) => infer Result;
-}
-  ? Awaited<Result> extends readonly RunDeclaration<infer Configuration>[]
-    ? Configuration
-    : never
-  : never;
-
-type ExecutionContract<Plugin, Ref extends Reference> = Plugin extends {
-  readonly execution: infer Execution;
-}
-  ? Execution extends {
-      readonly execute: (...arguments_: infer Arguments) => unknown;
-    }
-    ? AcceptsPluginReference<
-        Ref,
-        PluginReferenceListArgument<Execution, "declare">
-      > extends true
-      ? [
-          {
-            readonly declaration: RunDeclaration<
-              DeclaredConfiguration<Execution>
-            >;
-            readonly selectedReferences: readonly Ref[];
-          },
-        ] extends [Arguments extends [] ? unknown : Arguments[0]]
-        ? Plugin extends {
-            readonly collect: (
-              ...arguments_: infer CollectArguments
-            ) => unknown;
-          }
-          ? CollectArguments extends [unknown, infer Context, ...unknown[]]
-            ? [
-                PluginExecutionContext<DeclaredConfiguration<Execution>>,
-              ] extends [Context]
-              ? unknown
-              : never
-            : unknown
-          : never
-        : never
-      : never
-    : never
-  : unknown;
 
 /** 新增的纯预检和文件定位钩子必须接受声明的同一引用类型。 */
 type PluginValueContractForReference<Plugin, Ref extends Reference> = [
@@ -194,28 +231,18 @@ type PluginValueContractForReference<Plugin, Ref extends Reference> = [
 ] extends [never]
   ? never
   : [PluginCollectedValue<Plugin>] extends [ReferenceValue<Ref>]
-    ? AcceptsPluginReference<
-        Ref,
-        PluginReferenceArgument<Plugin, "collect">
-      > extends true
-      ? Plugin extends { readonly read: (...arguments_: never[]) => unknown }
-        ? [PluginReadValue<Plugin>] extends [ReferenceValue<Ref>]
-          ? AcceptsPluginReference<
-              Ref,
-              PluginReferenceArgument<Plugin, "read">
-            > extends true
-            ? unknown
-            : never
-          : never
-        : unknown
-      : never
+    ? Plugin extends { readonly read: (...arguments_: never[]) => unknown }
+      ? [PluginReadValue<Plugin>] extends [ReferenceValue<Ref>]
+        ? PluginPreparedContract<Plugin>
+        : never
+      : PluginPreparedContract<Plugin>
     : never;
 
 type PluginValueContract<Plugin> =
   PluginReferenceType<Plugin> extends infer Ref extends Reference
     ? PluginIdentityMatches<PluginIdType<Plugin>, Ref> extends true
       ? PluginValueContractForReference<Plugin, Ref> &
-          ExecutionContract<Plugin, Ref>
+          PluginPreparedContract<Plugin>
       : never
     : never;
 
@@ -292,6 +319,9 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
       throw new TypeError(`引用插件身份重复：${candidate.id}`);
     }
     const read = "read" in candidate ? candidate.read : undefined;
+    const fileInfo = candidate.fileInfo;
+    const prepare = candidate.prepare;
+    const describe = candidate.describe;
     plugins.set(
       candidate.id,
       Object.freeze({
@@ -299,23 +329,14 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
         id: candidate.id,
         validate: candidate.validate.bind(candidate),
         collect: candidate.collect.bind(candidate),
-        ...(candidate.fileInfo === undefined
+        ...(fileInfo === undefined
           ? {}
-          : { fileInfo: candidate.fileInfo.bind(candidate) }),
-        ...(candidate.validateReferences === undefined
+          : { fileInfo: fileInfo.bind(candidate) }),
+        ...(prepare === undefined ? {} : { prepare: prepare.bind(candidate) }),
+        ...(describe === undefined
           ? {}
-          : {
-              validateReferences: candidate.validateReferences.bind(candidate),
-            }),
+          : { describe: describe.bind(candidate) }),
         ...(typeof read === "function" ? { read: read.bind(candidate) } : {}),
-        ...(candidate.execution === undefined
-          ? {}
-          : {
-              execution: Object.freeze({
-                declare: candidate.execution.declare.bind(candidate.execution),
-                execute: candidate.execution.execute.bind(candidate.execution),
-              }),
-            }),
       }),
     );
   }
@@ -469,37 +490,31 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
 }
 
 function assertPlugin(value: unknown): asserts value is ReferencePlugin {
-  const execution =
-    typeof value === "object" && value !== null
-      ? (value as { readonly execution?: unknown }).execution
-      : undefined;
-  const fileInfo =
-    typeof value === "object" && value !== null
-      ? (value as { readonly fileInfo?: unknown }).fileInfo
-      : undefined;
-  const validateReferences =
-    typeof value === "object" && value !== null
-      ? (value as { readonly validateReferences?: unknown }).validateReferences
-      : undefined;
+  const isObject = typeof value === "object" && value !== null;
+  const fileInfo = isObject
+    ? (value as { readonly fileInfo?: unknown }).fileInfo
+    : undefined;
+  const prepare = isObject
+    ? (value as { readonly prepare?: unknown }).prepare
+    : undefined;
+  const describe = isObject
+    ? (value as { readonly describe?: unknown }).describe
+    : undefined;
   if (
-    typeof value !== "object" ||
-    value === null ||
+    !isObject ||
     Array.isArray(value) ||
     typeof (value as { id?: unknown }).id !== "string" ||
     (value as { id: string }).id.length === 0 ||
     typeof (value as { collect?: unknown }).collect !== "function" ||
     typeof (value as { validate?: unknown }).validate !== "function" ||
-    (execution !== undefined &&
-      (typeof execution !== "object" ||
-        execution === null ||
-        typeof (execution as { declare?: unknown }).declare !== "function" ||
-        typeof (execution as { execute?: unknown }).execute !== "function")) ||
     (fileInfo !== undefined && typeof fileInfo !== "function") ||
-    (validateReferences !== undefined &&
-      typeof validateReferences !== "function")
+    (prepare !== undefined && typeof prepare !== "function") ||
+    (describe !== undefined && typeof describe !== "function") ||
+    "execution" in value ||
+    "validateReferences" in value
   ) {
     throw new TypeError(
-      "引用插件必须提供非空 id、validate 和 collect 函数；可选的文件定位与完整集合校验必须是函数，执行能力必须同时提供 declare 和 execute。",
+      "引用插件必须提供非空 id、validate 和 collect 函数；可选的 fileInfo、prepare 与 describe 必须是函数，旧执行协议不再受支持。",
     );
   }
 }

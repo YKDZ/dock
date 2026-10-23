@@ -15,14 +15,14 @@ export type {
   Config,
   ConfigInput,
   DeclarationSource,
+  Awaitable,
   PluginContext,
-  RunDeclaration,
-  ExecutedRun,
-  ExecutionView,
-  PluginExecution,
-  PluginExecutionContext,
+  PluginBatchResult,
+  PluginInformation,
   PluginMemberResult,
   PluginReadResult,
+  PluginReferenceResult,
+  PluginRequest,
   PluginResult,
   ReadableReferenceOf,
   ReadableReferencePlugin,
@@ -43,21 +43,11 @@ export {
   MaintenanceError,
   updateBaseline,
 } from "./maintenance.ts";
-export type { ResolvedMaintenance, ResolvedRun } from "./resolution.ts";
+export type { ResolvedMaintenance, ResolvedPlugin } from "./resolution.ts";
 export type {
   BaselineUpdateOutcome,
   CheckReport,
   MaintenanceScope,
   MaintenanceConfig,
 } from "./maintenance.ts";
-export type {
-  ExecutionObservationRecord,
-  ExecutionReadDiagnostic,
-  ExecutionReadRecord,
-  ExecutionRunRecord,
-  ExecutionSummary,
-  ExecutionTestCatalog,
-  ExecutionTestRecord,
-  ExecutionTestStatus,
-} from "./execution.ts";
 export { readReference } from "./read.ts";

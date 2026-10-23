@@ -2,20 +2,25 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
-  canonicalJson,
   check as checkCore,
-  isJsonValue,
   resolveCheckScope,
   type Baseline,
   type BindingDefinition,
   type CheckContext,
+  type JsonValue,
   type ReferenceDefinition,
 } from "@ykdz/dock-core";
 
 import { normalizeConfig, type NormalizedReference } from "./authoring.ts";
-import type { Config, DeclarationSource, RunDeclaration } from "./contracts.ts";
+import type {
+  Config,
+  DeclarationSource,
+  PluginInformation,
+  PluginRequest,
+  ReferencePlugin,
+} from "./contracts.ts";
 import { MaintenanceError } from "./errors.ts";
-import { ownJsonValue } from "./owned-data.ts";
+import { ownJsonValue, ownPluginInformation } from "./owned-data.ts";
 import {
   normalizeFilePath,
   resolveScope,
@@ -24,12 +29,14 @@ import {
   type MaintenanceScope,
 } from "./scope.ts";
 
-export type ResolvedRun = RunDeclaration & {
-  readonly pluginId: string;
+export type ResolvedPlugin = {
+  readonly id: string;
+  readonly references: readonly string[];
   readonly selectedReferences: readonly string[];
+  readonly description?: PluginInformation;
 };
 
-/** 解析时点的完整声明、历史状态及范围；宿主信息不参与领域比较。 */
+/** 查看结果包含完整声明、历史状态和各插件明确公开的说明。 */
 export type ResolvedMaintenance = {
   readonly context: CheckContext & {
     readonly declarationCompleteness: "complete";
@@ -38,8 +45,7 @@ export type ResolvedMaintenance = {
   readonly root: string;
   readonly baselinePath: string;
   readonly configPath?: string;
-  readonly plugins: readonly string[];
-  readonly runs: readonly ResolvedRun[];
+  readonly plugins: readonly ResolvedPlugin[];
   /** 完整当前声明的直接文件目标，不表示传递依赖或文件已经存在。 */
   readonly files: readonly {
     readonly path: string;
@@ -52,11 +58,19 @@ export type ResolvedMaintenance = {
   };
 };
 
+export type ResolvedPluginRuntime = {
+  readonly plugin: ReferencePlugin;
+  readonly references: readonly NormalizedReference[];
+  readonly selectedReferences: readonly NormalizedReference[];
+  readonly prepared?: JsonValue;
+};
+
 export type ResolvedOperation = {
   readonly model: ResolvedMaintenance;
   readonly runtime: {
     readonly plugins: ReadonlyMap<string, Config["plugins"][number]>;
     readonly references: readonly NormalizedReference[];
+    readonly collectors: readonly ResolvedPluginRuntime[];
   };
 };
 
@@ -67,6 +81,12 @@ type PreparedConfig = {
   readonly references: readonly NormalizedReference[];
   readonly bindings: BindingDefinition[];
   readonly declarationSources: ResolvedMaintenance["declarationSources"];
+};
+
+type PreparedPlugin = {
+  readonly plugin: Config["plugins"][number];
+  readonly references: readonly NormalizedReference[];
+  readonly prepared?: JsonValue;
 };
 
 /** 三种维护操作共用完整预检、文件定位、基线读取及范围解释。 */
@@ -86,7 +106,7 @@ export async function resolveMaintenance(
     }
     throw error;
   }
-  const declarations = await declarePluginRuns(config);
+  const preparedPlugins = await preparePlugins(config);
   const fileInfo = currentFileInfo(config);
   const baseline = await readBaseline(config.baselinePath);
   const selection = resolveMaintenanceScope(
@@ -98,6 +118,42 @@ export async function resolveMaintenance(
   const selectedIds = new Set(
     selection.references.map((reference) => reference.id),
   );
+  const pluginViews = await Promise.all(
+    preparedPlugins.map(async (preparedPlugin) => {
+      const selectedReferences = Object.freeze(
+        preparedPlugin.references.filter((reference) =>
+          selectedIds.has(reference.id),
+        ),
+      );
+      const description = await describePlugin(
+        preparedPlugin,
+        selectedReferences,
+        config.root,
+      );
+      return {
+        id: preparedPlugin.plugin.id,
+        references: Object.freeze(
+          preparedPlugin.references.map(({ id }) => id),
+        ),
+        selectedReferences: Object.freeze(
+          selectedReferences.map(({ id }) => id),
+        ),
+        ...(description === undefined ? {} : { description }),
+      } satisfies ResolvedPlugin;
+    }),
+  );
+  const collectors = preparedPlugins.map((preparedPlugin) => ({
+    plugin: preparedPlugin.plugin,
+    references: preparedPlugin.references,
+    selectedReferences: Object.freeze(
+      preparedPlugin.references.filter((reference) =>
+        selectedIds.has(reference.id),
+      ),
+    ),
+    ...(preparedPlugin.prepared === undefined
+      ? {}
+      : { prepared: preparedPlugin.prepared }),
+  }));
   const context: CheckContext = {
     references: referenceDefinitions(config, fileInfo),
     bindings: config.bindings,
@@ -116,7 +172,6 @@ export async function resolveMaintenance(
   }
   return {
     model: {
-      // 后续插件采集不能改写已解析的领域输入。
       context: structuredClone({
         ...context,
         declarationCompleteness: "complete",
@@ -125,23 +180,14 @@ export async function resolveMaintenance(
       root: config.root,
       baselinePath: config.baselinePath,
       ...(configPath === undefined ? {} : { configPath }),
-      plugins: [...config.plugins.keys()],
-      runs: Object.freeze(
-        declarations.map((declaration) =>
-          Object.freeze({
-            ...declaration,
-            selectedReferences: Object.freeze(
-              declaration.references.filter((id) => selectedIds.has(id)),
-            ),
-          }),
-        ),
-      ),
+      plugins: Object.freeze(pluginViews),
       files: [...files].map(([path, references]) => ({ path, references })),
       declarationSources: config.declarationSources,
     },
     runtime: {
       plugins: config.plugins,
       references: selection.references,
+      collectors: Object.freeze(collectors),
     },
   };
 }
@@ -191,6 +237,73 @@ export function prepareConfig(
   };
 }
 
+async function preparePlugins(
+  config: PreparedConfig,
+): Promise<PreparedPlugin[]> {
+  const context = Object.freeze({ root: config.root });
+  return await Promise.all(
+    [...config.plugins.values()].map(async (plugin) => {
+      const references = Object.freeze(
+        config.references.filter(
+          (reference) => reference.pluginId === plugin.id,
+        ),
+      );
+      if (references.length === 0 || plugin.prepare === undefined) {
+        return { plugin, references };
+      }
+      let prepared: JsonValue | undefined;
+      try {
+        const value = await plugin.prepare(references, context);
+        if (value !== undefined) prepared = ownJsonValue(value);
+      } catch (error) {
+        throw new MaintenanceError(
+          "plugin-prepare-failed",
+          `插件 ${plugin.id} 完整配置预检失败：${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
+      return {
+        plugin,
+        references,
+        ...(prepared === undefined ? {} : { prepared }),
+      };
+    }),
+  );
+}
+
+async function describePlugin(
+  preparedPlugin: PreparedPlugin,
+  selectedReferences: readonly NormalizedReference[],
+  root: string,
+): Promise<PluginInformation | undefined> {
+  if (preparedPlugin.plugin.describe === undefined) return undefined;
+  const request = createPluginRequest(preparedPlugin, selectedReferences);
+  try {
+    return ownPluginInformation(
+      await preparedPlugin.plugin.describe(request, Object.freeze({ root })),
+    );
+  } catch (error) {
+    throw new MaintenanceError(
+      "plugin-description-invalid",
+      `插件 ${preparedPlugin.plugin.id} 返回了无效查看说明：${errorMessage(error)}`,
+      { cause: error },
+    );
+  }
+}
+
+function createPluginRequest(
+  preparedPlugin: PreparedPlugin | ResolvedPluginRuntime,
+  selectedReferences: readonly NormalizedReference[],
+): PluginRequest {
+  return Object.freeze({
+    references: preparedPlugin.references,
+    selectedReferences,
+    ...(preparedPlugin.prepared === undefined
+      ? {}
+      : { prepared: preparedPlugin.prepared }),
+  });
+}
+
 function referenceDefinitions(
   config: PreparedConfig,
   fileInfo: ReadonlyMap<string, string | null>,
@@ -207,7 +320,6 @@ function referenceDefinitions(
       location !== null &&
       isWithinDirectory(projectDirectory, location)
     ) {
-      // 仓库级基线可覆盖包外的共享文档；项目外位置保持绝对目标。
       snapshot = relative(baselineDirectory, location) || ".";
     }
     return {
@@ -231,107 +343,6 @@ function isWithinDirectory(directory: string, path: string): boolean {
     fromDirectory !== ".." &&
     !fromDirectory.startsWith(`..${sep}`) &&
     !isAbsolute(fromDirectory)
-  );
-}
-
-async function declarePluginRuns(
-  config: PreparedConfig,
-): Promise<Omit<ResolvedRun, "selectedReferences">[]> {
-  const runs = new Map<string, Omit<ResolvedRun, "selectedReferences">>();
-  const context = Object.freeze({ root: config.root });
-  for (const plugin of config.plugins.values()) {
-    const references = Object.freeze(
-      config.references.filter((reference) => reference.pluginId === plugin.id),
-    );
-    if (references.length === 0) continue;
-    let declarations: readonly RunDeclaration[];
-    try {
-      if (plugin.validateReferences !== undefined) {
-        const result = await plugin.validateReferences(references, context);
-        if (result !== undefined)
-          throw new TypeError("完整引用集合校验不能返回运行声明。");
-      }
-      if (plugin.execution === undefined) continue;
-      declarations = await plugin.execution.declare(references, context);
-    } catch (error) {
-      throw new MaintenanceError(
-        "plugin-reference-validation-failed",
-        `插件 ${plugin.id} 完整配置预检失败：${errorMessage(error)}`,
-        { cause: error },
-      );
-    }
-    if (!validDeclarations(declarations)) {
-      throw new MaintenanceError(
-        "plugin-reference-validation-failed",
-        `插件 ${plugin.id} 必须返回有效的运行声明列表。`,
-      );
-    }
-    const referenceIds = new Set(references.map((reference) => reference.id));
-    for (const declaration of declarations) {
-      if (!declaration.references.every((id) => referenceIds.has(id))) {
-        throw new MaintenanceError(
-          "plugin-reference-validation-failed",
-          `插件 ${plugin.id} 返回了无效引用归属。`,
-        );
-      }
-      const prior = runs.get(declaration.identity);
-      if (
-        prior !== undefined &&
-        (prior.pluginId !== plugin.id ||
-          canonicalJson(prior.configuration) !==
-            canonicalJson(declaration.configuration))
-      ) {
-        throw new MaintenanceError(
-          prior.pluginId === plugin.id
-            ? "plugin-reference-validation-failed"
-            : "execution-identity-conflict",
-          `执行身份 ${declaration.identity} 在插件 ${prior.pluginId} 与 ${plugin.id} 中存在配置或执行归属冲突。`,
-        );
-      }
-      runs.set(
-        declaration.identity,
-        Object.freeze({
-          pluginId: plugin.id,
-          identity: declaration.identity,
-          configuration:
-            prior?.configuration ?? ownJsonValue(declaration.configuration),
-          references: Object.freeze([
-            ...new Set([
-              ...(prior?.references ?? []),
-              ...declaration.references,
-            ]),
-          ]),
-        }),
-      );
-    }
-  }
-  return [...runs.values()];
-}
-
-function validDeclarations(value: unknown): value is readonly RunDeclaration[] {
-  return (
-    Array.isArray(value) &&
-    isJsonValue(value) &&
-    value.every((declaration: unknown) => {
-      if (
-        typeof declaration !== "object" ||
-        declaration === null ||
-        Array.isArray(declaration)
-      )
-        return false;
-      const run = declaration as Record<string, unknown>;
-      return (
-        typeof run.identity === "string" &&
-        run.identity.length > 0 &&
-        Object.hasOwn(run, "configuration") &&
-        isJsonValue(run.configuration) &&
-        Array.isArray(run.references) &&
-        run.references.length > 0 &&
-        run.references.every(
-          (id: unknown) => typeof id === "string" && id.length > 0,
-        )
-      );
-    })
   );
 }
 
