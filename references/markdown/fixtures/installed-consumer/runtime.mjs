@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { readReference } from "@ykdz/dock";
+import { binding, check, defineConfig, readReference } from "@ykdz/dock";
 import { markdown } from "@ykdz/dock-reference-markdown";
 
 import config, {
@@ -40,8 +40,15 @@ for (const reference of [
   standaloneMarker,
 ]) {
   const result = await readReference(config, reference);
-  const collected = await markdown.collect(reference, { root: process.cwd() });
-  assert.equal(collected.kind, "value");
+  const report = await check(
+    defineConfig({
+      root: process.cwd(),
+      plugins: [markdown],
+      bindings: [binding("selected-reference", [reference])],
+    }),
+  );
+  const collected = report.bindings[0]?.current?.references[reference.id];
+  assert.ok(collected);
   assert.deepEqual({ value: collected.value, range: collected.range }, result);
   if (reference.id === "marker-document") {
     assert.equal(result.range.start, 0);

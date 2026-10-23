@@ -1,6 +1,6 @@
 import { readFile } from "node:fs/promises";
 
-import { readReference } from "@ykdz/dock";
+import { binding, check, defineConfig, readReference } from "@ykdz/dock";
 import { markdown } from "@ykdz/dock-reference-markdown";
 
 import config, { sample, whole } from "./inline-script-config.mjs";
@@ -12,8 +12,14 @@ try {
 } catch (error) {
   selected = { kind: "error", code: error.code };
 }
-const collected = await markdown.collect(sample, { root: process.cwd() });
+const report = await check(
+  defineConfig({
+    root: process.cwd(),
+    plugins: [markdown],
+    bindings: [binding("inline-script-policy", [sample])],
+  }),
+);
 const full = await readReference(config, whole);
 process.stdout.write(
-  `${JSON.stringify({ source, selected, collected, whole: full.value })}\n`,
+  `${JSON.stringify({ source, selected, checked: report.bindings[0], whole: full.value })}\n`,
 );
