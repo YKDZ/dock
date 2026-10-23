@@ -49,25 +49,51 @@ type ReadDiagnostic = {
   };
 };
 
+type VitestRunDiagnostic = {
+  readonly identity: string;
+  readonly command: {
+    readonly attempted: boolean;
+    readonly code: number | null;
+    readonly signal: string | null;
+  };
+  readonly testAttempts: number;
+  readonly tests: readonly {
+    readonly identity: string;
+    readonly status: string;
+    readonly attemptCount: number;
+    readonly message?: string;
+  }[];
+  readonly failures: readonly {
+    readonly identity: string;
+    readonly status: string;
+    readonly attemptCount: number;
+    readonly message?: string;
+  }[];
+  readonly reads: readonly {
+    readonly testIdentity: string;
+    readonly attempt: number;
+    readonly referenceId: string;
+    readonly value: unknown;
+    readonly range?: {
+      readonly path: string;
+      readonly start: number;
+      readonly end: number;
+    };
+  }[];
+};
+
 type MaintenanceReport = {
   readonly scope?: readonly string[];
-  readonly execution?: {
-    readonly commandAttempts: number;
-    readonly failedCommands: number;
-    readonly testExecutions: number;
-    readonly reads?: readonly {
-      readonly runId: string;
-      readonly testId: string;
-      readonly attempt: number;
-      readonly referenceId: string;
-      readonly value: unknown;
-      readonly range?: {
-        readonly path: string;
-        readonly start: number;
-        readonly end: number;
-      };
-    }[];
-  };
+  readonly pluginDiagnostics: readonly {
+    readonly pluginId: string;
+    readonly data: { readonly runs: readonly VitestRunDiagnostic[] };
+    readonly text: readonly string[];
+  }[];
+  readonly pluginErrors: readonly {
+    readonly pluginId: string;
+    readonly code: string;
+    readonly message: string;
+  }[];
   readonly bindings: readonly {
     readonly bindingId: string;
     readonly current?: {
@@ -99,22 +125,26 @@ const fixtureDirectory = join(
 const versions = ["4.1.11", "5.0.3"] as const;
 
 async function main(): Promise<void> {
-  const artifacts = process.argv.slice(2);
+  // 通过内部参数执行 Vitest 单框架验收步骤。
+  const vitestOnly = process.argv[2] === "--vitest-only";
+  const artifacts = process.argv.slice(vitestOnly ? 3 : 2);
   assert.equal(
     artifacts.length,
-    5,
-    "根 check:install 必须传入同批 core、host、Vitest、Node test 与 file 制品。",
+    vitestOnly ? 4 : 5,
+    vitestOnly
+      ? "Vitest 单框架验收需要同批 core、host、Vitest 与 file 制品。"
+      : "根 check:install 必须传入同批 core、host、Vitest、Node test 与 file 制品。",
   );
   const tarballs = artifacts.map((artifact) =>
     resolve(process.cwd(), artifact),
   );
   await Promise.all(tarballs.map((artifact) => access(artifact)));
 
-  const [coreTarball, hostTarball, vitestTarball, nodeTarball, fileTarball] =
-    tarballs;
-  assert.ok(
-    coreTarball && hostTarball && vitestTarball && nodeTarball && fileTarball,
-  );
+  const coreTarball = tarballs[0]!;
+  const hostTarball = tarballs[1]!;
+  const vitestTarball = tarballs[2]!;
+  const fileTarball = tarballs[vitestOnly ? 3 : 4]!;
+  assert.ok(coreTarball && hostTarball && vitestTarball && fileTarball);
   const vitestTarballs = [coreTarball, hostTarball, vitestTarball];
   for (const version of versions) {
     await verifyVersion(version, vitestTarballs, [
@@ -124,15 +154,18 @@ async function main(): Promise<void> {
       fileTarball,
     ]);
   }
-  await test("Node 与 Vitest：跨框架身份冲突", async () => {
-    await verifyCrossFrameworkIdentityConflict([
-      coreTarball,
-      hostTarball,
-      vitestTarball,
-      nodeTarball,
-      fileTarball,
-    ]);
-  });
+  if (!vitestOnly) {
+    const nodeTarball = tarballs[3]!;
+    await test("Node 与 Vitest：跨框架身份冲突", async () => {
+      await verifyCrossFrameworkIdentityConflict([
+        coreTarball,
+        hostTarball,
+        vitestTarball,
+        nodeTarball,
+        fileTarball,
+      ]);
+    });
+  }
 }
 
 async function verifyCrossFrameworkIdentityConflict(
@@ -380,8 +413,19 @@ async function verifyUserConfig(dock: string, consumer: string): Promise<void> {
   assert.equal(viewed.code, 0, viewed.stderr);
   const resolution = parseEnvelope(viewed.stdout).data?.resolution;
   assert.ok(resolution);
+  const plugin = resolution.plugins.find(
+    ({ id }) => id === "@ykdz/dock-reference-vitest",
+  );
+  assert.ok(plugin?.description);
+  const description = plugin.description.data as unknown as {
+    readonly runs: readonly {
+      readonly identity: string;
+      readonly references: readonly string[];
+      readonly selectedReferences: readonly string[];
+    }[];
+  };
   assert.deepEqual(
-    resolution.runs.map((run) => ({
+    description.runs.map((run) => ({
       identity: run.identity,
       references: run.references,
       selectedReferences: run.selectedReferences,
@@ -404,7 +448,7 @@ async function verifyUserConfig(dock: string, consumer: string): Promise<void> {
   assert.deepEqual(JSON.parse(host.stdout), resolution);
   const text = await runDock(dock, ["inspect", ...arguments_], consumer);
   assert.equal(text.code, 0, text.stderr);
-  assert.match(text.stdout, /运行声明 用户配置运行/);
+  assert.match(text.stdout, /Vitest 运行声明 用户配置运行/);
   assert.match(text.stdout, /本次选中 配置通过/);
   const maintenanceRoot = join(consumer, "maintenance-root");
   await assert.rejects(access(join(maintenanceRoot, "config-evaluated.log")), {
@@ -418,7 +462,7 @@ async function verifyUserConfig(dock: string, consumer: string): Promise<void> {
   assert.equal(checked.code, 1, checked.stderr);
   const report = requireReport(parseEnvelope(checked.stdout));
   assertBindingHasNoErrors(report, "用户配置状态");
-  assertExecutionSummary(report, 1, 1);
+  assertVitestDiagnostics(report, 1, 1);
   assert.match(
     await readFile(join(maintenanceRoot, "config-evaluated.log"), "utf8"),
     /serve\/test/,
@@ -620,7 +664,7 @@ async function verifyObservationAndReadRoundTrip(
   assert.equal(multiFileEnvelope.variant, "changed", multiFile.stdout);
   const multiFileReport = requireReport(multiFileEnvelope);
   assertBindingHasNoErrors(multiFileReport, "多文件观察记录");
-  assertExecutionSummary(multiFileReport, 1, 2);
+  assertVitestDiagnostics(multiFileReport, 1, 2);
 
   const multiFileUpdate = await runDock(
     dock,
@@ -649,7 +693,7 @@ async function verifyObservationAndReadRoundTrip(
   assert.equal(firstEnvelope.variant, "changed", firstCheck.stdout);
   const firstReport = requireReport(firstEnvelope);
   assertBindingHasNoErrors(firstReport, "业务文本");
-  assertExecutionSummary(firstReport, 1, 1);
+  assertVitestDiagnostics(firstReport, 1, 1);
   assertReadDiagnostics(firstReport, [
     {
       runId: "文件读取业务观察",
@@ -765,7 +809,7 @@ async function verifyObservationAndReadRoundTrip(
   assert.equal(missingEnvelope.variant, "errors", missing.stdout);
   const missingReport = requireReport(missingEnvelope);
   assertBindingError(missingReport, "最终尝试观察", "observation-missing");
-  assertExecutionSummary(missingReport, 1, 2);
+  assertVitestDiagnostics(missingReport, 1, 2);
   const retryTestId = JSON.stringify([
     "test/missing-final-observation.test.mts",
     "最终成功缺少观察",
@@ -822,7 +866,7 @@ async function verifyObservationAndReadRoundTrip(
   assert.equal(finalFailureEnvelope.variant, "errors", finalFailure.stdout);
   const finalFailureReport = requireReport(finalFailureEnvelope);
   assertBindingError(finalFailureReport, "最终失败观察", "test-failed");
-  assertExecutionSummary(finalFailureReport, 1, 2, 1);
+  assertVitestDiagnostics(finalFailureReport, 1, 2, 1);
   const finalFailureUpdate = await runDock(
     dock,
     ["baseline", "update", "--config", "final-failure.config.mts", "--json"],
@@ -877,12 +921,12 @@ async function verifyObservationAndReadRoundTrip(
   );
   assert.equal(text.code, 0, `${text.stdout}\n${text.stderr}`);
   for (const fragment of [
-    "测试内读取 business-text-source",
+    "读取引用 business-text-source",
     "运行 文件读取业务观察",
     "业务文本观察",
-    "尝试 1",
+    "第 1 次",
     '"changed"',
-    "范围 read-target.txt:21-28",
+    "read-target.txt:21-28",
   ]) {
     assert.ok(
       text.stdout.includes(fragment),
@@ -916,7 +960,23 @@ async function verifyHappyRoundTrip(
   assert.equal(first.variant, "changed", firstCheck.stdout);
   const firstReport = requireReport(first);
   assertBindingHasNoErrors(firstReport, "通过状态");
-  assertExecutionSummary(firstReport, 1, 5, 1);
+  assertVitestDiagnostics(firstReport, 1, 5, 1);
+  const firstRunDiagnostic = vitestRuns(firstReport)[0];
+  assert.ok(firstRunDiagnostic);
+  assert.equal(firstRunDiagnostic.identity, "成功与额外失败同次运行");
+  assert.equal(firstRunDiagnostic.tests.length, 2);
+  assert.equal(firstRunDiagnostic.tests[0]?.attemptCount, 2);
+  assert.equal(firstRunDiagnostic.failures.length, 1);
+  assert.equal(firstRunDiagnostic.failures[0]?.status, "failed");
+  assert.match(
+    firstRunDiagnostic.failures[0]?.message ?? "",
+    /同名但未声明的附加测试失败/,
+  );
+  const firstDiagnosticText = firstReport.pluginDiagnostics
+    .find(({ pluginId }) => pluginId === "@ykdz/dock-reference-vitest")
+    ?.text.join("\n");
+  assert.match(firstDiagnosticText ?? "", /原生命令退出码 1/);
+  assert.match(firstDiagnosticText ?? "", /同名但未声明的附加测试失败/);
 
   const update = await runDock(
     dock,
@@ -928,7 +988,7 @@ async function verifyHappyRoundTrip(
   assert.equal(updated.variant, "updated", update.stdout);
   const updateReport = requireReport(updated);
   assertBindingHasNoErrors(updateReport, "通过状态");
-  assertExecutionSummary(updateReport, 1, 5, 1);
+  assertVitestDiagnostics(updateReport, 1, 5, 1);
   const baselineBytes = await readFile(baselinePath);
   await assert.rejects(access(join(consumer, "happy.baseline.json")), {
     code: "ENOENT",
@@ -939,7 +999,7 @@ async function verifyHappyRoundTrip(
   const checked = parseEnvelope(current.stdout);
   assert.equal(checked.variant, "consistent", current.stdout);
   assertBindingHasNoErrors(requireReport(checked), "通过状态");
-  assertExecutionSummary(requireReport(checked), 1, 5, 1);
+  assertVitestDiagnostics(requireReport(checked), 1, 5, 1);
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
 
   const textCheck = await runDock(
@@ -948,7 +1008,7 @@ async function verifyHappyRoundTrip(
     consumer,
   );
   assert.equal(textCheck.code, 0, `${textCheck.stdout}\n${textCheck.stderr}`);
-  assert.match(textCheck.stdout, /原生命令失败：1 次/);
+  assert.match(textCheck.stdout, /原生命令退出码 1/);
 }
 
 async function verifyGroups(dock: string, consumer: string): Promise<void> {
@@ -1006,7 +1066,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   assert.equal(allPreviewMemberIds.has(sameNamedNestedMemberId), true);
   assert.notEqual(primaryMemberId, sameNamedNestedMemberId);
   assert.equal(allPreviewMemberIds.size, 4);
-  assertExecutionSummary(initialReport, 1, 4);
+  assertVitestDiagnostics(initialReport, 1, 4);
   let baselineBytes = await readFile(baselinePath);
 
   const stable = await runDock(
@@ -1017,7 +1077,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   );
   assert.equal(stable.code, 0, `${stable.stdout}\n${stable.stderr}`);
   assert.equal(parseEnvelope(stable.stdout).variant, "consistent");
-  assertExecutionSummary(requireReport(parseEnvelope(stable.stdout)), 1, 4);
+  assertVitestDiagnostics(requireReport(parseEnvelope(stable.stdout)), 1, 4);
 
   const changed = await runDock(
     dock,
@@ -1029,7 +1089,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   assert.equal(parseEnvelope(changed.stdout).variant, "changed");
   const changedReport = requireReport(parseEnvelope(changed.stdout));
   assertBindingHasNoErrors(changedReport, "预览组");
-  assertExecutionSummary(changedReport, 1, 4);
+  assertVitestDiagnostics(changedReport, 1, 4);
   const changedFact = changedReport.bindings
     .find((binding) => binding.bindingId === "预览组")
     ?.changes?.find(
@@ -1053,7 +1113,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   );
   assert.equal(changedUpdate.code, 0, changedUpdate.stderr);
   assert.equal(parseEnvelope(changedUpdate.stdout).variant, "updated");
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(changedUpdate.stdout)),
     1,
     4,
@@ -1070,7 +1130,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   assert.equal(parseEnvelope(renamed.stdout).variant, "changed");
   const renamedReport = requireReport(parseEnvelope(renamed.stdout));
   assertBindingHasNoErrors(renamedReport, "预览组");
-  assertExecutionSummary(renamedReport, 1, 4);
+  assertVitestDiagnostics(renamedReport, 1, 4);
   const renamedFact = renamedReport.bindings
     .find((binding) => binding.bindingId === "预览组")
     ?.changes?.find(
@@ -1117,7 +1177,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
     `${renamedCheck.stdout}\n${renamedCheck.stderr}`,
   );
   assert.equal(parseEnvelope(renamedCheck.stdout).variant, "consistent");
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(renamedCheck.stdout)),
     1,
     4,
@@ -1144,7 +1204,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   assert.equal(parseEnvelope(sharedUpdate.stdout).variant, "updated");
   const sharedReport = requireReport(parseEnvelope(sharedUpdate.stdout));
   assertBindingHasNoErrors(sharedReport, "组和单测共享");
-  assertExecutionSummary(sharedReport, 1, 2);
+  assertVitestDiagnostics(sharedReport, 1, 2);
   await assert.rejects(access(groupMarker), { code: "ENOENT" });
   await rm(groupMarker, { force: true });
   const sharedCheck = await runDock(
@@ -1162,7 +1222,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
     `${sharedCheck.stdout}\n${sharedCheck.stderr}`,
   );
   assert.equal(parseEnvelope(sharedCheck.stdout).variant, "consistent");
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(sharedCheck.stdout)),
     1,
     2,
@@ -1186,7 +1246,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
     `${additionalUpdate.stdout}\n${additionalUpdate.stderr}`,
   );
   assert.equal(parseEnvelope(additionalUpdate.stdout).variant, "updated");
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(additionalUpdate.stdout)),
     1,
     3,
@@ -1201,7 +1261,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   );
   assert.equal(additionalCheck.code, 0, additionalCheck.stderr);
   assert.equal(parseEnvelope(additionalCheck.stdout).variant, "consistent");
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(additionalCheck.stdout)),
     1,
     3,
@@ -1228,7 +1288,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
     requireReport(parseEnvelope(patternUpdate.stdout)),
     "configured pattern",
   );
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(patternUpdate.stdout)),
     1,
     1,
@@ -1243,7 +1303,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   );
   assert.equal(nonprefixCheck.code, 0, nonprefixCheck.stderr);
   assert.equal(parseEnvelope(nonprefixCheck.stdout).variant, "consistent");
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(nonprefixCheck.stdout)),
     1,
     1,
@@ -1262,7 +1322,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   );
   assert.equal(flaggedCheck.code, 0, flaggedCheck.stderr);
   assert.equal(parseEnvelope(flaggedCheck.stdout).variant, "consistent");
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(flaggedCheck.stdout)),
     1,
     1,
@@ -1287,7 +1347,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   assert.equal(parseEnvelope(collisionUpdate.stdout).variant, "updated");
   const collisionReport = requireReport(parseEnvelope(collisionUpdate.stdout));
   assertBindingHasNoErrors(collisionReport, "路径相同标题组");
-  assertExecutionSummary(collisionReport, 1, 2);
+  assertVitestDiagnostics(collisionReport, 1, 2);
   const collisionBinding = collisionReport.bindings.find(
     (binding) => binding.bindingId === "路径相同标题组",
   );
@@ -1327,7 +1387,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   );
   assert.equal(collisionCheck.code, 0, collisionCheck.stderr);
   assert.equal(parseEnvelope(collisionCheck.stdout).variant, "consistent");
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(collisionCheck.stdout)),
     1,
     2,
@@ -1350,7 +1410,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
     "标题对应多个路径",
     "duplicate-test-identity",
   );
-  assertExecutionSummary(
+  assertVitestDiagnostics(
     requireReport(parseEnvelope(ambiguousSingle.stdout)),
     1,
     2,
@@ -1397,7 +1457,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
     "含错误组与有效单测",
     "observation-duplicate",
   );
-  assertExecutionSummary(invalidReport, 1, 3);
+  assertVitestDiagnostics(invalidReport, 1, 3);
 
   const invalidUpdate = await runDock(
     dock,
@@ -1430,7 +1490,7 @@ async function verifyGroups(dock: string, consumer: string): Promise<void> {
   assert.equal(filtered.code, 1, `${filtered.stdout}\n${filtered.stderr}`);
   const filteredReport = requireReport(parseEnvelope(filtered.stdout));
   assertBindingError(filteredReport, "受筛选组", "test-skipped");
-  assertExecutionSummary(filteredReport, 1, 1);
+  assertVitestDiagnostics(filteredReport, 1, 1);
   const filteredUpdate = await runDock(
     dock,
     ["baseline", "update", "--config", "group-filter.config.mts", "--json"],
@@ -1525,7 +1585,7 @@ async function verifyStatusFailures(
   assertBindingError(statusReport, "待实现状态", "test-todo");
   assertBindingError(statusReport, "主动跳过状态", "test-skipped");
   assertBindingError(statusReport, "缺失状态", "test-not-executed");
-  assertExecutionSummary(statusReport, 1, 1);
+  assertVitestDiagnostics(statusReport, 1, 1);
 
   const failure = await runDock(
     dock,
@@ -1537,7 +1597,7 @@ async function verifyStatusFailures(
   assert.equal(failureEnvelope.variant, "errors");
   const failureReport = requireReport(failureEnvelope);
   assertBindingError(failureReport, "失败状态", "test-failed");
-  assertExecutionSummary(failureReport, 1, 2, 1);
+  assertVitestDiagnostics(failureReport, 1, 2, 1);
 
   for (const [config, bindingId, code] of [
     ["statuses.config.mts", "跳过状态", "test-skipped"],
@@ -1579,7 +1639,7 @@ async function verifySuiteFailure(
   assert.equal(checkEnvelope.variant, "errors", check.stdout);
   const checkReport = requireReport(checkEnvelope);
   assertBindingError(checkReport, "共同收尾状态", "run-lifecycle-failed");
-  assertExecutionSummary(checkReport, 1, 3, 1);
+  assertVitestDiagnostics(checkReport, 1, 3, 1);
   assert.equal(await readFile(markerPath, "utf8"), "收尾已执行\n");
 
   const update = await runDock(
@@ -1601,7 +1661,7 @@ async function verifySuiteFailure(
     "共同收尾状态",
     "run-lifecycle-failed",
   );
-  assertExecutionSummary(requireReport(updateEnvelope), 1, 3, 1);
+  assertVitestDiagnostics(requireReport(updateEnvelope), 1, 3, 1);
   await assert.rejects(access(baselinePath), { code: "ENOENT" });
 }
 
@@ -1630,7 +1690,7 @@ async function verifyAdditionalTests(
     await readFile(markerPath, "utf8"),
     "额外测试已执行\n额外测试已执行\n",
   );
-  assertExecutionSummary(report, 1, 3, 1);
+  assertVitestDiagnostics(report, 1, 3, 1);
 }
 
 async function verifyFilterAndIdentity(
@@ -1657,7 +1717,7 @@ async function verifyFilterAndIdentity(
   const filteredReport = requireReport(filteredEnvelope);
   assertBindingHasNoErrors(filteredReport, "保留状态");
   assertBindingHasSomeError(filteredReport, "筛除状态");
-  assertExecutionSummary(filteredReport, 1, 1);
+  assertVitestDiagnostics(filteredReport, 1, 1);
 
   const duplicate = await runDock(
     dock,
@@ -1669,7 +1729,7 @@ async function verifyFilterAndIdentity(
   assert.equal(duplicateEnvelope.variant, "errors");
   const duplicateReport = requireReport(duplicateEnvelope);
   assertBindingError(duplicateReport, "歧义状态", "duplicate-test-identity");
-  assertExecutionSummary(duplicateReport, 1, 2);
+  assertVitestDiagnostics(duplicateReport, 1, 2);
 
   const update = await runDock(
     dock,
@@ -1701,10 +1761,7 @@ async function verifyConflictPreflight(
     consumer,
   );
   assert.equal(check.code, 1, check.stderr);
-  assert.equal(
-    parseEnvelope(check.stderr).data?.code,
-    "plugin-reference-validation-failed",
-  );
+  assert.equal(parseEnvelope(check.stderr).data?.code, "plugin-prepare-failed");
   await assert.rejects(access(marker), { code: "ENOENT" });
 
   const update = await runDock(
@@ -1715,7 +1772,7 @@ async function verifyConflictPreflight(
   assert.equal(update.code, 1, update.stderr);
   assert.equal(
     parseEnvelope(update.stderr).data?.code,
-    "plugin-reference-validation-failed",
+    "plugin-prepare-failed",
   );
   await assert.rejects(access(marker), { code: "ENOENT" });
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
@@ -1761,7 +1818,7 @@ async function verifyLifecycleFailures(
     );
     const report = requireReport(envelope);
     assertBindingError(report, bindingId, "run-lifecycle-failed");
-    assertExecutionSummary(report, 1, testExecutions, failedCommands);
+    assertVitestDiagnostics(report, 1, testExecutions, failedCommands);
     if (config === "interrupted.config.mts") {
       assert.equal(
         await readFile(
@@ -1786,7 +1843,7 @@ async function verifyLifecycleFailures(
     assert.equal(updateEnvelope.variant, "rejected");
     const updateReport = requireReport(updateEnvelope);
     assertBindingError(updateReport, bindingId, "run-lifecycle-failed");
-    assertExecutionSummary(updateReport, 1, testExecutions, failedCommands);
+    assertVitestDiagnostics(updateReport, 1, testExecutions, failedCommands);
     assert.deepEqual(await readFile(baselinePath), baselineBytes);
   }
 }
@@ -1928,17 +1985,30 @@ function requireReport(envelope: CliEnvelope): MaintenanceReport {
   return envelope.data.report as MaintenanceReport;
 }
 
-function assertExecutionSummary(
+function vitestRuns(report: MaintenanceReport): readonly VitestRunDiagnostic[] {
+  const diagnostics = report.pluginDiagnostics.find(
+    ({ pluginId }) => pluginId === "@ykdz/dock-reference-vitest",
+  );
+  assert.ok(diagnostics, "缺少 Vitest 插件诊断");
+  assert.ok(Array.isArray(diagnostics.data.runs), "Vitest 诊断缺少运行列表");
+  return diagnostics.data.runs;
+}
+
+function assertVitestDiagnostics(
   report: MaintenanceReport,
   commandAttempts: number,
   testExecutions: number,
   failedCommands = 0,
 ): void {
+  const runs = vitestRuns(report);
   assert.deepEqual(
     {
-      commandAttempts: report.execution?.commandAttempts,
-      failedCommands: report.execution?.failedCommands,
-      testExecutions: report.execution?.testExecutions,
+      commandAttempts: runs.filter(({ command }) => command.attempted).length,
+      failedCommands: runs.filter(
+        ({ command }) =>
+          command.attempted && (command.code !== 0 || command.signal !== null),
+      ).length,
+      testExecutions: runs.reduce((total, run) => total + run.testAttempts, 0),
     },
     { commandAttempts, failedCommands, testExecutions },
   );
@@ -1948,7 +2018,14 @@ function assertReadDiagnostics(
   report: MaintenanceReport,
   expected: readonly ReadDiagnostic[],
 ): void {
-  assert.deepEqual(report.execution?.reads ?? [], expected);
+  const reads = vitestRuns(report).flatMap(({ identity, reads }) =>
+    reads.map(({ testIdentity, ...read }) => ({
+      runId: identity,
+      testId: testIdentity,
+      ...read,
+    })),
+  );
+  assert.deepEqual(reads, expected);
 }
 
 function assertBindingError(

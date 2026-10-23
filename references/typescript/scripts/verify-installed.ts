@@ -360,7 +360,7 @@ async function installedRuntime(consumer: string): Promise<InstalledSelection> {
   assert.equal(
     result.code,
     0,
-    `安装制品 readReference／collect 场景失败：\n${result.stdout}\n${result.stderr}`,
+    `安装制品 readReference／批量 check 场景失败：\n${result.stdout}\n${result.stderr}`,
   );
   const value: unknown = JSON.parse(result.stdout);
   assert.ok(isRecord(value));

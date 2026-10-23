@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 import { check, readReference } from "@ykdz/dock";
-import { typescript } from "@ykdz/dock-reference-typescript";
 
 import config, { expression } from "./dock.config.mjs";
 
@@ -11,9 +10,6 @@ const source = await readFile(
   "utf8",
 );
 const read = await readReference(config, expression);
-const collected = await typescript.collect(expression, { root: process.cwd() });
-assert.equal(collected.kind, "value");
-assert.deepEqual({ value: collected.value, range: collected.range }, read);
 assert.equal(source.slice(read.range.start, read.range.end), read.value);
 const report = await check(config);
 const checked = report.bindings[0]?.current?.references[expression.id];

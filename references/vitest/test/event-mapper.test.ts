@@ -59,7 +59,7 @@ test("目录从原生 parent/name 恢复嵌套路径并保留执行身份", () =
     ],
     tests: [
       {
-        executionId: testIdentity(
+        identity: testIdentity(
           "test/tree.test.mts",
           ["outer > label", "inner"],
           "case",
@@ -70,7 +70,10 @@ test("目录从原生 parent/name 恢复嵌套路径并保留执行身份", () =
       },
     ],
   });
-  assert.equal(candidate.tests[0]?.id, candidate.catalog.tests[0]?.executionId);
+  assert.equal(
+    candidate.tests[0]?.identity,
+    candidate.catalog.tests[0]?.identity,
+  );
 });
 
 test("展开标题相同的不同原生路径仍有独立执行身份", () => {
@@ -142,7 +145,7 @@ test("展开标题相同的不同原生路径仍有独立执行身份", () => {
       ["outer", "nested", "child"],
     ],
   );
-  assert.notEqual(candidate.tests[0]?.id, candidate.tests[1]?.id);
+  assert.notEqual(candidate.tests[0]?.identity, candidate.tests[1]?.identity);
 });
 
 test("缺少请求文件会标记部分目录并保留已有发现", () => {
@@ -173,8 +176,8 @@ test("缺少请求文件会标记部分目录并保留已有发现", () => {
 
   assert.equal(candidate.catalog.completeness, "partial");
   assert.deepEqual(candidate.catalog.tests, []);
-  assert.equal(record.testCatalog?.completeness, "partial");
-  assert.equal(record.lifecycle, "incomplete");
+  assert.equal(record.discovery?.completeness, "partial");
+  assert.equal(record.complete, false);
 });
 
 test("原生收集错误会把目录标为部分，避免据此删除成员", () => {
@@ -300,7 +303,10 @@ test("观察与读取保留原生尝试序号且不合并历史记录", () => {
     { code: 0, signal: null },
   );
 
-  assert.equal(record.testExecutions, 2);
+  assert.equal(
+    record.tests.reduce((total, test) => total + test.attemptCount, 0),
+    2,
+  );
   assert.deepEqual(record.tests[0]?.observations, [
     { attempt: 1, key: "result", value: "早期值" },
   ]);
@@ -389,15 +395,16 @@ test("可解释的无关断言失败不使已通过测试的运行事实无效",
       catalog: { completeness: "complete", suites: [], tests: [] },
       tests: [
         {
-          id: JSON.stringify({ file: "selected.test.mts", name: "选中" }),
+          identity: JSON.stringify({ file: "selected.test.mts", name: "选中" }),
           status: "passed",
-          started: true,
           attemptCount: 1,
         },
         {
-          id: JSON.stringify({ file: "extra.test.mts", name: "额外失败" }),
+          identity: JSON.stringify({
+            file: "extra.test.mts",
+            name: "额外失败",
+          }),
           status: "failed",
-          started: true,
           attemptCount: 1,
           message: "断言失败",
         },
@@ -410,14 +417,21 @@ test("可解释的无关断言失败不使已通过测试的运行事实无效",
     signal: null,
   });
 
-  assert.equal(record.lifecycle, "complete");
-  assert.deepEqual(record.errors, []);
+  assert.equal(record.complete, true);
+  assert.deepEqual(record.issues, []);
   assert.deepEqual(
     record.tests.map((entry) => entry.status),
     ["passed", "failed"],
   );
-  assert.equal(record.testExecutions, 2);
-  assert.deepEqual(record.commandResult, { exitCode: 1, signal: null });
+  assert.equal(
+    record.tests.reduce((total, test) => total + test.attemptCount, 0),
+    2,
+  );
+  assert.deepEqual(record.command, {
+    attempted: true,
+    code: 1,
+    signal: null,
+  });
 });
 
 test("终态事件与原生命令结果冲突时不形成完整运行", () => {
@@ -432,9 +446,8 @@ test("终态事件与原生命令结果冲突时不形成完整运行", () => {
       catalog: { completeness: "complete", suites: [], tests: [] },
       tests: [
         {
-          id: JSON.stringify({ file: "test.test.mts", name: "断言失败" }),
+          identity: JSON.stringify({ file: "test.test.mts", name: "断言失败" }),
           status: "failed",
-          started: true,
           attemptCount: 1,
           message: "断言失败",
         },
@@ -443,11 +456,15 @@ test("终态事件与原生命令结果冲突时不形成完整运行", () => {
   };
   const record = mapVitestRun(receipt, { code: 0, signal: null });
 
-  assert.equal(record.lifecycle, "incomplete");
+  assert.equal(record.complete, false);
   assert.ok(
-    record.errors.some((error) => error.code === "vitest-exit-mismatch"),
+    record.issues.some((error) => error.code === "vitest-exit-mismatch"),
   );
-  assert.deepEqual(record.commandResult, { exitCode: 0, signal: null });
+  assert.deepEqual(record.command, {
+    attempted: true,
+    code: 0,
+    signal: null,
+  });
 });
 
 test("close 失败或缺少完整关闭收据使运行记录无效", () => {
@@ -477,13 +494,17 @@ test("close 失败或缺少完整关闭收据使运行记录无效", () => {
     { code: 0, signal: null },
   );
 
-  assert.equal(closeFailure.lifecycle, "incomplete");
+  assert.equal(closeFailure.complete, false);
   assert.equal(
-    closeFailure.errors.some((error) => error.code === "vitest-close-failed"),
+    closeFailure.issues.some((error) => error.code === "vitest-close-failed"),
     true,
   );
-  assert.deepEqual(closeFailure.commandResult, { exitCode: 0, signal: null });
-  assert.equal(missingClose.lifecycle, "incomplete");
+  assert.deepEqual(closeFailure.command, {
+    attempted: true,
+    code: 0,
+    signal: null,
+  });
+  assert.equal(missingClose.complete, false);
 });
 
 test("缺少运行版本或关闭摘要的部分收据不暴露测试事实", () => {
@@ -496,9 +517,8 @@ test("缺少运行版本或关闭摘要的部分收据不暴露测试事实", ()
         catalog: { completeness: "complete", suites: [], tests: [] },
         tests: [
           {
-            id: JSON.stringify({ file: "test.test.mts", name: "已通过" }),
+            identity: JSON.stringify({ file: "test.test.mts", name: "已通过" }),
             status: "passed",
-            started: true,
             attemptCount: 1,
           },
         ],
@@ -508,9 +528,9 @@ test("缺少运行版本或关闭摘要的部分收据不暴露测试事实", ()
     { code: 0, signal: null },
   );
 
-  assert.equal(record.lifecycle, "incomplete");
+  assert.equal(record.complete, false);
   assert.equal(record.tests.length, 0);
   assert.ok(
-    record.errors.some((error) => error.code === "vitest-receipt-incomplete"),
+    record.issues.some((error) => error.code === "vitest-receipt-incomplete"),
   );
 });

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { defineConfig, readReference } from "@ykdz/dock";
+import { binding, check, defineConfig, readReference } from "@ykdz/dock";
 import { file } from "@ykdz/dock-reference-file";
 
 import { markdown } from "../src/index.ts";
@@ -233,11 +233,17 @@ test("标记选择读取段内当前内容并返回原文 UTF-16 范围", async 
     });
     assert.equal(source.slice(read.range!.start, read.range!.end), read.value);
 
-    assert.deepEqual(await markdown.collect(reference, { root }), {
-      kind: "value",
-      value: read.value,
-      range: read.range,
-    });
+    const report = await check(
+      defineConfig({
+        root,
+        plugins: [markdown],
+        bindings: [binding("port-policy", [reference])],
+      }),
+    );
+    const checked = report.bindings[0];
+    assert.ok(checked && "current" in checked);
+    assert.equal(checked.current.references.port?.value, read.value);
+    assert.deepEqual(checked.current.references.port?.range, read.range);
   });
 });
 
@@ -315,11 +321,17 @@ test("比较事实只移除真实定位注释并保留普通注释与示例文�
       start: 0,
       end: source.length,
     });
-    assert.deepEqual(await markdown.collect(reference, { root }), {
-      kind: "value",
-      value: read.value,
-      range: read.range,
-    });
+    const report = await check(
+      defineConfig({
+        root,
+        plugins: [markdown],
+        bindings: [binding("whole-document", [reference])],
+      }),
+    );
+    const checked = report.bindings[0];
+    assert.ok(checked && "current" in checked);
+    assert.equal(checked.current.references.whole?.value, read.value);
+    assert.deepEqual(checked.current.references.whole?.range, read.range);
   });
 });
 
@@ -473,11 +485,70 @@ test("标记缺失、重复、倒序及越出当前结构范围时明确失败",
         },
         example.source,
       );
-      const collected = await markdown.collect(reference, { root: _root });
-      assert.equal(collected.kind, "error", example.source);
-      if (collected.kind === "error") {
-        assert.equal(collected.error.code, example.code, example.source);
-      }
+      const report = await check(
+        defineConfig({
+          root: _root,
+          plugins: [markdown],
+          bindings: [binding("invalid-selection", [reference])],
+        }),
+      );
+      const checked = report.bindings[0];
+      assert.ok(checked && "errors" in checked, example.source);
+      assert.equal(checked.errors[0]?.code, example.code, example.source);
     });
+  }
+});
+
+test("批量采集保留独立读取错误且不采集未选中的引用", async () => {
+  const source = "# 概览\n\n当前内容。\n";
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-batch-"));
+  try {
+    await writeFile(join(root, "guide.md"), source, "utf8");
+    const readable = markdown
+      .from("guide.md")
+      .section("概览")
+      .node({ type: "paragraph" })
+      .reference("readable");
+    const missingSelection = markdown
+      .from("guide.md")
+      .section("不存在的章节")
+      .reference("missing-selection");
+    const unselected = markdown.from("not-selected.md").reference("unselected");
+    const config = defineConfig({
+      root,
+      plugins: [markdown],
+      bindings: [
+        binding("readable-policy", [readable]),
+        binding("missing-policy", [missingSelection]),
+        binding("unselected-policy", [unselected]),
+      ],
+    });
+
+    const report = await check(config, {
+      binding: ["readable-policy", "missing-policy"],
+    });
+    const readableResult = report.bindings.find(
+      ({ bindingId }) => bindingId === "readable-policy",
+    );
+    const missingResult = report.bindings.find(
+      ({ bindingId }) => bindingId === "missing-policy",
+    );
+
+    assert.ok(readableResult && "current" in readableResult);
+    assert.equal(
+      readableResult.current.references.readable?.value,
+      "当前内容。",
+    );
+    assert.deepEqual(readableResult.current.references.readable?.range, {
+      path: "guide.md",
+      start: source.indexOf("当前内容。"),
+      end: source.indexOf("当前内容。") + "当前内容。".length,
+    });
+    assert.ok(missingResult && "errors" in missingResult);
+    assert.equal(missingResult.errors[0]?.code, "missing-selection");
+    assert.deepEqual(report.scope, ["missing-policy", "readable-policy"]);
+    assert.deepEqual(report.pluginErrors, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
   }
 });

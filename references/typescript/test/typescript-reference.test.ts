@@ -249,3 +249,59 @@ void test("无名调用和构造签名的返回类型不提升为接口成员", 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("批量采集保留独立符号错误且不读取未选中的文件", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-typescript-batch-"));
+  try {
+    const source = "export function calculate() { return 42; }\n";
+    await writeFile(join(root, "symbols.ts"), source, "utf8");
+    const readable = typescript
+      .from("symbols.ts")
+      .symbol("calculate", "function")
+      .reference("readable");
+    const missingSymbol = typescript
+      .from("symbols.ts")
+      .symbol("notPresent", "function")
+      .reference("missing-symbol");
+    const unselected = typescript
+      .from("not-selected.ts")
+      .symbol("neverRead", "function")
+      .reference("unselected");
+    const config = defineConfig({
+      root,
+      plugins: [typescript],
+      bindings: [
+        binding("readable-policy", [readable]),
+        binding("missing-policy", [missingSymbol]),
+        binding("unselected-policy", [unselected]),
+      ],
+    });
+
+    const report = await check(config, {
+      binding: ["readable-policy", "missing-policy"],
+    });
+    const readableResult = report.bindings.find(
+      ({ bindingId }) => bindingId === "readable-policy",
+    );
+    const missingResult = report.bindings.find(
+      ({ bindingId }) => bindingId === "missing-policy",
+    );
+
+    assert.ok(readableResult && "current" in readableResult);
+    assert.equal(
+      readableResult.current.references.readable?.value,
+      "export function calculate() { return 42; }",
+    );
+    assert.deepEqual(readableResult.current.references.readable?.range, {
+      path: "symbols.ts",
+      start: source.indexOf("export function calculate"),
+      end: source.indexOf("\n"),
+    });
+    assert.ok(missingResult && "errors" in missingResult);
+    assert.equal(missingResult.errors[0]?.code, "missing-symbol");
+    assert.deepEqual(report.scope, ["missing-policy", "readable-policy"]);
+    assert.deepEqual(report.pluginErrors, []);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

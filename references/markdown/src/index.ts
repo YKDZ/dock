@@ -6,9 +6,11 @@ import {
   createReference,
   definePlugin,
   type JsonValue,
+  type PluginBatchResult,
   type PluginContext,
   type PluginReadResult,
-  type PluginResult,
+  type PluginReferenceResult,
+  type PluginRequest,
   type Reference,
   type ReferenceOptions,
   type ReadableReferencePlugin,
@@ -144,25 +146,31 @@ const implementation = definePlugin({
     return resolveTarget(reference.target, context.root);
   },
   async collect(
-    reference: MarkdownReference,
+    request: PluginRequest<MarkdownReference>,
     context: PluginContext,
-  ): Promise<PluginResult<string>> {
-    try {
-      const result = await readMarkdownReference(reference, context.root);
-      return {
-        kind: "value",
-        value: result.value,
-        ...(result.range === undefined ? {} : { range: result.range }),
-      };
-    } catch (error) {
-      const range =
-        error instanceof MarkdownReferenceError ? error.range : undefined;
-      return {
-        kind: "error",
-        error: { code: errorCode(error), message: errorMessage(error) },
-        ...(range === undefined ? {} : { range }),
-      };
+  ): Promise<PluginBatchResult<string>> {
+    const results: PluginReferenceResult<string>[] = [];
+    for (const reference of request.selectedReferences) {
+      try {
+        const result = await readMarkdownReference(reference, context.root);
+        results.push({
+          referenceId: reference.id,
+          kind: "value",
+          value: result.value,
+          ...(result.range === undefined ? {} : { range: result.range }),
+        });
+      } catch (error) {
+        const range =
+          error instanceof MarkdownReferenceError ? error.range : undefined;
+        results.push({
+          referenceId: reference.id,
+          kind: "error",
+          error: { code: errorCode(error), message: errorMessage(error) },
+          ...(range === undefined ? {} : { range }),
+        });
+      }
     }
+    return { results };
   },
   async read(
     reference: MarkdownReference,

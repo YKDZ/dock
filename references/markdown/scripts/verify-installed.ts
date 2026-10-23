@@ -381,7 +381,7 @@ async function verifyInstalledInlineScript(consumer: string): Promise<void> {
 type InstalledInlineRuntime = {
   readonly source: string;
   readonly selected: RecordValue;
-  readonly collected: RecordValue;
+  readonly checked: RecordValue;
   readonly whole: string;
 };
 
@@ -402,7 +402,7 @@ async function installedInlineRuntime(
   assert.ok(isRecord(parsed));
   assert.ok(typeof parsed.source === "string");
   assert.ok(isRecord(parsed.selected));
-  assert.ok(isRecord(parsed.collected));
+  assert.ok(isRecord(parsed.checked));
   assert.ok(typeof parsed.whole === "string");
   return parsed as InstalledInlineRuntime;
 }
@@ -425,9 +425,12 @@ function assertInlineValue(
     source.slice(runtime.selected.range.start, runtime.selected.range.end),
     expected,
   );
-  assert.equal(runtime.collected.kind, "value");
-  assert.equal(runtime.collected.value, expected);
-  assert.deepEqual(runtime.collected.range, runtime.selected.range);
+  assert.ok(isRecord(runtime.checked.current));
+  assert.ok(isRecord(runtime.checked.current.references));
+  const collected = runtime.checked.current.references.sample;
+  assert.ok(isRecord(collected));
+  assert.equal(collected.value, expected);
+  assert.deepEqual(collected.range, runtime.selected.range);
 }
 
 function assertInlineError(
@@ -436,9 +439,10 @@ function assertInlineError(
 ): void {
   assert.equal(runtime.selected.kind, "error");
   assert.equal(runtime.selected.code, expected);
-  assert.equal(runtime.collected.kind, "error");
-  assert.ok(isRecord(runtime.collected.error));
-  assert.equal(runtime.collected.error.code, expected);
+  assert.ok(Array.isArray(runtime.checked.errors));
+  const error = runtime.checked.errors[0];
+  assert.ok(isRecord(error));
+  assert.equal(error.code, expected);
 }
 
 async function verifyInstalledEmptyCells(consumer: string): Promise<void> {
@@ -848,7 +852,7 @@ async function installedRuntime(
   assert.equal(
     result.code,
     0,
-    `安装制品 readReference／collect 场景失败：\n${result.stdout}\n${result.stderr}`,
+    `安装制品 readReference／批量 check 场景失败：\n${result.stdout}\n${result.stderr}`,
   );
   return JSON.parse(result.stdout) as InstalledReads;
 }
