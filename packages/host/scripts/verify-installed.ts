@@ -67,7 +67,7 @@ async function main(): Promise<void> {
 
     await runConsumerTypechecks(consumer);
     for (const fixture of [
-      "execution-runtime.mjs",
+      "batch-runtime.mjs",
       "external-plugin-consumer.mts",
       "physical-multiversion.mts",
     ]) {

@@ -49,9 +49,9 @@ const config = defineConfig({
 resetCollectionCount();
 const updated = await updateBaseline(config);
 assert(updated.status === "updated", "同版本多实例基线应成功。");
-assert(readCollectionCount() === 2, "共享引用每次维护只采集一次。");
+assert(readCollectionCount() === 1, "同一插件每次维护只接收一次批量采集。");
 const current = await check(config);
-assert(readCollectionCount() === 4, "下一次维护重新采集当前事实。");
+assert(readCollectionCount() === 2, "下一次维护重新采集当前事实。");
 assert(
   current.bindings.every((result) => result.consistency === "consistent"),
   "同版本多实例当前报告应一致。",
@@ -80,7 +80,7 @@ assert(
     /引用身份 shared-reference 对应多个不同定义/.test(conflict.message),
   "冲突定义应在配置组装时拒绝。",
 );
-assert(readCollectionCount() === 4, "冲突必须在任何采集前拒绝。");
+assert(readCollectionCount() === 2, "冲突必须在任何采集前拒绝。");
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

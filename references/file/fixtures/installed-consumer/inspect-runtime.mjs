@@ -46,12 +46,19 @@ try {
       {
         id: "fixture:snapshot",
         validate() {},
-        async validateReferences() {
+        async prepare() {
           entered.resolve();
           await release.promise;
+          return undefined;
         },
-        collect(reference) {
-          return { kind: "value", value: reference.target.path };
+        collect(request) {
+          return {
+            results: request.selectedReferences.map((reference) => ({
+              referenceId: reference.id,
+              kind: "value",
+              value: reference.target.path,
+            })),
+          };
         },
       },
     ],
@@ -90,9 +97,15 @@ const tag = definePlugin({
   validate(reference) {
     if (typeof reference.target !== "string") throw new TypeError("标签必须是文本。");
   },
-  async collect(reference, context) {
+  async collect(request, context) {
     await appendFile(join(context.root, "calls.txt"), "collect\\n");
-    return { kind: "value", value: reference.target };
+    return {
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: reference.target,
+      })),
+    };
   },
 });
 
@@ -146,7 +159,7 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
   assert.equal(initial.root, directory);
   assert.equal(initial.baselinePath, baselinePath);
   assert.deepEqual(
-    new Set(initial.plugins),
+    new Set(initial.plugins.map(({ id }) => id)),
     new Set(["@ykdz/dock-reference-file", "fixture:inspect-tag"]),
   );
   assert.equal(initial.context.declarationCompleteness, "complete");
@@ -217,7 +230,11 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
     },
   ];
   const initialInput = { ...roundTrip(initial.context), facts };
-  const initialReport = roundTrip(checkCore(initialInput));
+  const initialReport = {
+    ...roundTrip(checkCore(initialInput)),
+    pluginDiagnostics: [],
+    pluginErrors: [],
+  };
   assert.deepEqual(await check(configPath), initialReport);
   assert.deepEqual(
     roundTrip(await check(createConfig(directory))),
@@ -231,7 +248,15 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
   ]);
   assert.equal(initialCheck.status, 1, initialCheck.stderr);
   assert.deepEqual(JSON.parse(initialCheck.stdout).data.report, initialReport);
-  const initialUpdate = roundTrip(updateBaselineCore(initialInput));
+  const initialUpdateCore = roundTrip(updateBaselineCore(initialInput));
+  const initialUpdate = {
+    ...initialUpdateCore,
+    report: {
+      ...initialUpdateCore.report,
+      pluginDiagnostics: [],
+      pluginErrors: [],
+    },
+  };
   assert.equal(initialUpdate.status, "updated");
   assert.deepEqual(await updateBaseline(configPath), initialUpdate);
   const baselineBytes = await readFile(baselinePath);
@@ -306,7 +331,11 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
       { referenceId: "tag", value: "known" },
     ],
   };
-  const selectedReport = roundTrip(checkCore(selectedInput));
+  const selectedReport = {
+    ...roundTrip(checkCore(selectedInput)),
+    pluginDiagnostics: [],
+    pluginErrors: [],
+  };
   assert.deepEqual(await check(configPath, selectedScope), selectedReport);
   assert.deepEqual(
     roundTrip(
@@ -338,7 +367,15 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
   );
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
 
-  const selectedUpdate = roundTrip(updateBaselineCore(selectedInput));
+  const selectedUpdateCore = roundTrip(updateBaselineCore(selectedInput));
+  const selectedUpdate = {
+    ...selectedUpdateCore,
+    report: {
+      ...selectedUpdateCore.report,
+      pluginDiagnostics: [],
+      pluginErrors: [],
+    },
+  };
   assert.equal(selectedUpdate.status, "updated");
   assert.deepEqual(
     await updateBaseline(configPath, equivalentScope),

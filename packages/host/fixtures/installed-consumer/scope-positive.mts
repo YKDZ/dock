@@ -6,11 +6,9 @@ import {
   definePlugin,
   updateBaseline,
   type MaintenanceScope,
+  type PluginBatchResult,
   type PluginContext,
-  type PluginExecution,
-  type RunDeclaration,
-  type PluginExecutionContext,
-  type PluginResult,
+  type PluginRequest,
   type Reference,
 } from "@ykdz/dock";
 
@@ -21,39 +19,33 @@ type ScopeReference = Reference<
   string
 >;
 
+type Prepared = { readonly paths: string[] };
+
 const scopePlugin = definePlugin({
   id: "fixture:scope",
   validate(_reference: ScopeReference): void {},
   fileInfo(reference: ScopeReference, context: PluginContext): string {
     return `${context.root}/${reference.target.path}`;
   },
-  execution: {
-    declare(
-      references: readonly ScopeReference[],
-    ): readonly RunDeclaration<{ path: string }>[] {
-      return references.map((reference) => ({
-        identity: `scope:${reference.target.path}`,
-        configuration: { path: reference.target.path },
-        references: [reference.id],
-      }));
-    },
-    execute() {
-      return {
-        lifecycle: "complete",
-        commandAttempts: 1,
-        testExecutions: 0,
-        tests: [],
-        errors: [],
-      };
-    },
-  } satisfies PluginExecution<ScopeReference, { path: string }>,
+  prepare(references: readonly ScopeReference[]): Prepared {
+    return { paths: references.map(({ target }) => target.path) };
+  },
+  describe(request: PluginRequest<ScopeReference, Prepared>) {
+    return {
+      data: { selected: request.selectedReferences.map(({ id }) => id) },
+      text: [request.prepared?.paths.join("、") ?? ""],
+    };
+  },
   collect(
-    reference: ScopeReference,
-    context: PluginExecutionContext<{ path: string }>,
-  ): PluginResult<string> {
-    const run = context.execution.get(`scope:${reference.target.path}`);
-    const path: string = run?.declaration.configuration.path ?? "";
-    return { kind: "value", value: path };
+    request: PluginRequest<ScopeReference, Prepared>,
+  ): PluginBatchResult<string> {
+    return {
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: request.prepared?.paths.join("、") ?? reference.target.path,
+      })),
+    };
   },
 });
 

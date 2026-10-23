@@ -2,7 +2,8 @@ import {
   binding,
   createReference,
   definePlugin,
-  type PluginResult,
+  type PluginBatchResult,
+  type PluginRequest,
   type Reference,
 } from "@ykdz/dock";
 
@@ -28,9 +29,17 @@ export const physicalPlugin = definePlugin({
       throw new TypeError(`无效物理安装引用：${reference.id}`);
     }
   },
-  collect(reference: PhysicalReference): PluginResult<PhysicalValue> {
+  collect(
+    request: PluginRequest<PhysicalReference>,
+  ): PluginBatchResult<PhysicalValue> {
     collectionCount += 1;
-    return { kind: "value", value: { path: reference.target.path } };
+    return {
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: { path: reference.target.path },
+      })),
+    };
   },
 });
 

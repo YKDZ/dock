@@ -3,6 +3,8 @@ import {
   createReference,
   defineConfig,
   definePlugin,
+  type PluginBatchResult,
+  type PluginRequest,
   type PluginResult,
   type Reference,
   type ReferenceValue,
@@ -33,16 +35,23 @@ const fixturePlugin: ReferencePlugin<
   fileInfo(reference): string {
     return reference.target.path;
   },
-  validateReferences(references) {
+  prepare(references) {
     for (const reference of references) {
       if (reference.target.path.length === 0)
         throw new TypeError("路径不能为空。");
     }
+    return undefined;
   },
-  collect(reference, context): PluginResult<string> {
+  collect(
+    request: PluginRequest<ChangelogReference>,
+    context,
+  ): PluginBatchResult<string> {
     return {
-      kind: "value",
-      value: `${context.root}/${reference.target.path}`,
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: `${context.root}/${reference.target.path}`,
+      })),
     };
   },
 });
@@ -58,16 +67,25 @@ const directPlugin = {
   validate(reference: DirectPluginReference): void {
     void reference;
   },
-  collect(reference: DirectPluginReference): PluginResult<string> {
-    return { kind: "value", value: reference.target };
+  collect(
+    request: PluginRequest<DirectPluginReference>,
+  ): PluginBatchResult<string> {
+    return {
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: reference.target,
+      })),
+    };
   },
   fileInfo(reference: DirectPluginReference): string {
     return reference.target;
   },
-  validateReferences(references: readonly DirectPluginReference[]) {
+  prepare(references: readonly DirectPluginReference[]) {
     for (const reference of references) {
       if (reference.target.length === 0) throw new TypeError("目标不能为空。");
     }
+    return undefined;
   },
 };
 const directDocument = createReference<

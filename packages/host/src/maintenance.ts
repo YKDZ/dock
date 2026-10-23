@@ -417,23 +417,31 @@ function toMemberResult(value: unknown):
   if (!isPlainRecord(value)) return undefined;
   const id = ownDataProperty(value, "id");
   if (id.status !== "value" || !isNonEmptyString(id.value)) return undefined;
+  const error = ownDataProperty(value, "error");
+  if (error.status === "accessor") return undefined;
+  if (error.status === "value") {
+    if (!isPlainRecord(error.value)) return undefined;
+    const code = ownDataProperty(error.value, "code");
+    const message = ownDataProperty(error.value, "message");
+    if (
+      code.status !== "value" ||
+      !isNonEmptyString(code.value) ||
+      message.status !== "value" ||
+      typeof message.value !== "string"
+    ) {
+      return undefined;
+    }
+    // core 按 error 字段判断成员失败，必须保留该错误语义。
+    return {
+      id: id.value,
+      error: { code: code.value, message: message.value },
+    };
+  }
   const fact = ownDataProperty(value, "value");
   if (fact.status === "value" && isJsonValue(fact.value)) {
     return { id: id.value, value: copyJsonValue(fact.value) };
   }
-  const error = ownDataProperty(value, "error");
-  if (error.status !== "value" || !isPlainRecord(error.value)) return undefined;
-  const code = ownDataProperty(error.value, "code");
-  const message = ownDataProperty(error.value, "message");
-  if (
-    code.status !== "value" ||
-    !isNonEmptyString(code.value) ||
-    message.status !== "value" ||
-    typeof message.value !== "string"
-  ) {
-    return undefined;
-  }
-  return { id: id.value, error: { code: code.value, message: message.value } };
+  return undefined;
 }
 
 function copyTextRange(value: unknown): TextRange | undefined {

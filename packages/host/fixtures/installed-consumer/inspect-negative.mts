@@ -13,9 +13,6 @@ void resolution.context.facts;
 // @ts-expect-error 解析结果只包含插件身份，不包含插件执行函数。
 void resolution.plugins[0].collect;
 
-// @ts-expect-error 运行声明不包含实际执行记录。
-void resolution.runs[0].record;
-
 // @ts-expect-error 宿主解析的是完整配置，筛选不改变声明完整性。
 const partial: "partial" = resolution.context.declarationCompleteness;
 void partial;

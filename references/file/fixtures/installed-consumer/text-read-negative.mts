@@ -4,9 +4,10 @@ import {
   defineConfig,
   definePlugin,
   readReference,
+  type PluginBatchResult,
   type PluginContext,
   type PluginReadResult,
-  type PluginResult,
+  type PluginRequest,
   type Reference,
 } from "@ykdz/dock";
 import { file, filePluginId } from "@ykdz/dock-reference-file";
@@ -46,11 +47,17 @@ const unreadable = definePlugin({
     void reference;
   },
   collect(
-    reference: UnreadableReference,
+    request: PluginRequest<UnreadableReference>,
     context: PluginContext,
-  ): PluginResult<string> {
+  ): PluginBatchResult<string> {
     void context;
-    return { kind: "value", value: reference.target };
+    return {
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: reference.target,
+      })),
+    };
   },
 });
 const unreadableConfig = defineConfig({ plugins: [unreadable], bindings: [] });
@@ -84,12 +91,17 @@ definePlugin({
     void reference;
   },
   collect(
-    reference: InvalidReaderReference,
+    request: PluginRequest<InvalidReaderReference>,
     context: PluginContext,
-  ): PluginResult<number> {
-    void reference;
+  ): PluginBatchResult<number> {
     void context;
-    return { kind: "value", value: 1 };
+    return {
+      results: request.selectedReferences.map(({ id }) => ({
+        referenceId: id,
+        kind: "value",
+        value: 1,
+      })),
+    };
   },
   read(
     reference: InvalidReaderReference,

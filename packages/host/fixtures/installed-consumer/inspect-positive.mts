@@ -2,8 +2,8 @@ import {
   inspect,
   type Config,
   type MaintenanceScope,
+  type ResolvedPlugin,
   type ResolvedMaintenance,
-  type ResolvedRun,
 } from "@ykdz/dock";
 import {
   check,
@@ -19,7 +19,9 @@ async function consume(config: Config, url: URL): Promise<void> {
   const complete: "complete" = resolution.context.declarationCompleteness;
   const selected: readonly string[] = resolution.context.scope;
   const sources: readonly string[] = resolution.declarationSources.config;
-  const runs: readonly ResolvedRun[] = resolution.runs;
+  const plugins: readonly ResolvedPlugin[] = resolution.plugins;
+  const selectedPluginReferences: readonly string[] =
+    plugins[0]?.selectedReferences ?? [];
   const files: readonly { path: string; references: readonly string[] }[] =
     resolution.files;
   const facts: ReferenceResult[] = [{ referenceId: "guide", value: "正文" }];
@@ -30,7 +32,8 @@ async function consume(config: Config, url: URL): Promise<void> {
   void complete;
   void sources;
   void files;
-  void runs;
+  void selectedPluginReferences;
+  void plugins;
 }
 
 void consume;
