@@ -1,19 +1,20 @@
 import { relative, resolve } from "node:path";
 
-import type {
-  ExecutionObservationRecord,
-  ExecutionReadRecord,
-  ExecutionRunRecord,
-  ExecutionTestRecord,
-  ExecutionTestStatus,
-  JsonValue,
-} from "@ykdz/dock";
+import type { JsonValue } from "@ykdz/dock";
 
 import {
   nodeObservationMessagePrefix,
   nodeReadMessagePrefix,
 } from "./test-context.ts";
-import type { NodeEvent, NodeSelectedTest } from "./types.ts";
+import type {
+  NodeEvent,
+  NodeObservationRecord,
+  NodeReadRecord,
+  NodeSelectedTest,
+  NodeTestRecord,
+  NodeTestRunResult,
+  NodeTestStatus,
+} from "./types.ts";
 
 type NodeTestNode = {
   readonly key: string;
@@ -27,10 +28,10 @@ type NodeTestNode = {
   readonly column?: number;
   runnerStarted: boolean;
   started: boolean;
-  readonly observations: ExecutionObservationRecord[];
-  readonly reads: ExecutionReadRecord[];
+  readonly observations: NodeObservationRecord[];
+  readonly reads: NodeReadRecord[];
   terminal?: {
-    readonly status: ExecutionTestStatus;
+    readonly status: NodeTestStatus;
     readonly message?: string;
   };
 };
@@ -46,11 +47,11 @@ export type NodeRunCompletion = {
   readonly protocolError?: string;
 };
 
-/** 将 Node 24.21 TestsStream 事件和进程关闭结果映射为宿主通用执行记录。 */
+/** 将 Node TestsStream 事件和进程关闭结果映射为 Node 原生运行记录。 */
 export function collectNodeRun(
   events: readonly NodeEvent[],
   completion: NodeRunCompletion,
-): ExecutionRunRecord {
+): NodeTestRunResult {
   const nodes = new Map<string, NodeTestNode>();
   const errors: { code: string; message: string }[] = [];
   const finalSummaries: Record<string, unknown>[] = [];
@@ -142,7 +143,7 @@ export function collectNodeRun(
 
   const tests = [...nodes.values()]
     .filter((node) => node.type === "test")
-    .map((node): ExecutionTestRecord => {
+    .map((node): NodeTestRecord => {
       const status =
         node.terminal?.status ?? (node.runnerStarted ? "not-run" : "filtered");
       return {
@@ -165,7 +166,7 @@ export function collectNodeRun(
 
   const finalSummary =
     finalSummaries.length === 1 ? finalSummaries[0] : undefined;
-  let lifecycle: ExecutionRunRecord["lifecycle"] = "complete";
+  let lifecycle: NodeTestRunResult["lifecycle"] = "complete";
   if (interrupted) lifecycle = "incomplete";
   if (invalidActivity) lifecycle = "incomplete";
   if (completion.processError !== undefined) {
@@ -298,12 +299,12 @@ type ParsedActivityMessage =
   | {
       readonly kind: "observation";
       readonly testFullName: string;
-      readonly record: ExecutionObservationRecord;
+      readonly record: NodeObservationRecord;
     }
   | {
       readonly kind: "read";
       readonly testFullName: string;
-      readonly record: ExecutionReadRecord;
+      readonly record: NodeReadRecord;
     }
   | {
       readonly kind: "invalid";
@@ -402,7 +403,9 @@ function parseActivityMessage(
   };
 }
 
-function isTextRange(value: unknown): value is ExecutionReadRecord["range"] {
+function isTextRange(
+  value: unknown,
+): value is NonNullable<NodeReadRecord["range"]> {
   return (
     isRecord(value) &&
     typeof value.path === "string" &&
@@ -459,7 +462,7 @@ function nodeKey(file: string, testId: string | number): string {
 function terminalStatus(
   eventType: string,
   data: Record<string, unknown>,
-): ExecutionTestStatus {
+): NodeTestStatus {
   if (data.skip !== undefined && data.skip !== false) return "skipped";
   if (data.todo !== undefined && data.todo !== false) return "todo";
   if (eventType === "test:pass") return "passed";
@@ -507,7 +510,7 @@ function testIdentity(file: string, name: string): string {
 
 export { testIdentity };
 
-function markDuplicateIdentities(tests: ExecutionTestRecord[]): void {
+function markDuplicateIdentities(tests: NodeTestRecord[]): void {
   const counts = new Map<string, number>();
   for (const test of tests) counts.set(test.id, (counts.get(test.id) ?? 0) + 1);
   for (let index = 0; index < tests.length; index++) {
@@ -523,7 +526,7 @@ function markDuplicateIdentities(tests: ExecutionTestRecord[]): void {
 }
 
 function appendUnreportedSelections(
-  tests: ExecutionTestRecord[],
+  tests: NodeTestRecord[],
   completion: NodeRunCompletion,
 ): void {
   const existing = new Set(tests.map((test) => test.id));

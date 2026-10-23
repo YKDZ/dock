@@ -2,11 +2,10 @@ import { spawn } from "node:child_process";
 import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 
-import type { ExecutionRunRecord } from "@ykdz/dock";
-
 import { collectNodeRun } from "./event-mapper.ts";
 import type {
   NodeEvent,
+  NodeTestRunResult,
   NodeSelectedTest,
   NodeRunConfiguration,
 } from "./types.ts";
@@ -17,7 +16,7 @@ const diagnosticLimit = 8_192;
 export async function executeNodeTestRun(
   run: NodeRunConfiguration,
   selectedTests: readonly NodeSelectedTest[],
-): Promise<ExecutionRunRecord> {
+): Promise<NodeTestRunResult> {
   const reporterPath = fileURLToPath(
     new URL(
       import.meta.url.endsWith(".ts")
@@ -38,7 +37,7 @@ export async function executeNodeTestRun(
   const environment = { ...process.env };
   delete environment.NODE_TEST_CONTEXT;
 
-  return await new Promise<ExecutionRunRecord>((resolve) => {
+  return await new Promise<NodeTestRunResult>((resolve) => {
     const events: NodeEvent[] = [];
     const decoder = new StringDecoder("utf8");
     let pending = "";
