@@ -61,7 +61,7 @@ async function main(): Promise<void> {
   assert.equal(
     artifacts.length,
     4,
-    "根验收必须传入同批 core、SDK、file 与 Markdown 包制品路径。",
+    "根验收必须传入同批 core、host、file 与 Markdown 包制品路径。",
   );
   const tarballs = artifacts.map((artifact) =>
     resolve(process.cwd(), artifact),

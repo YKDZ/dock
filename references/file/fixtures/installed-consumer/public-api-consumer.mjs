@@ -12,17 +12,21 @@ import {
 } from "@ykdz/dock";
 import { file } from "@ykdz/dock-reference-file";
 
-const target = "sdk-guide.txt";
+const target = "public-api-guide.txt";
 const baseline = "dock.baseline.json";
-await writeFile(target, "SDK 原始全文\n", "utf8");
+await writeFile(target, "原始全文\n", "utf8");
 
 const config = defineConfig({
   plugins: [file],
-  bindings: [binding("sdk-policy", [file.from(target).reference("sdk-guide")])],
+  bindings: [
+    binding("public-api-policy", [
+      file.from(target).reference("public-api-guide"),
+    ]),
+  ],
 });
 
 const initial = await check(config);
-assert.deepEqual(initial.scope, ["sdk-policy"]);
+assert.deepEqual(initial.scope, ["public-api-policy"]);
 assert.equal(initial.bindings[0]?.consistency, "inconsistent");
 assert.equal("kind" in initial, false);
 assert.equal("exitCode" in initial, false);
@@ -37,13 +41,13 @@ assert.equal("exitCode" in update, false);
 const current = await check(config);
 assert.equal(current.bindings[0]?.consistency, "consistent");
 assert.equal("kind" in current, false);
-await writeFile(target, "SDK 更新后的全文\n", "utf8");
+await writeFile(target, "更新后的全文\n", "utf8");
 const changedFact = await check(config);
 assert.equal(changedFact.bindings[0]?.changes[0]?.kind, "fact");
 assert.equal((await updateBaseline(config)).status, "updated");
 assert.equal((await check(config)).bindings[0]?.consistency, "consistent");
 
-const identityRoot = "handler-identity-sdk";
+const identityRoot = "handler-identity";
 await mkdir(identityRoot);
 await writeFile(`${identityRoot}/guide.txt`, "同一份事实\n", "utf8");
 const originalHandler = defineConfig({
@@ -86,11 +90,11 @@ assert.deepEqual(
 const empty = defineConfig({ plugins: [], bindings: [] });
 const untracked = await updateBaseline(empty);
 assert.equal(untracked.status, "updated");
-assert.deepEqual(untracked.report.scope, ["sdk-policy"]);
+assert.deepEqual(untracked.report.scope, ["public-api-policy"]);
 assert.equal(untracked.report.bindings[0]?.untracked, true);
 const saved = JSON.parse(await readFile(baseline, "utf8"));
 assert.deepEqual(Object.keys(saved.bindings), []);
 
 await rm(baseline);
 await rm(target);
-process.stdout.write("安装制品 SDK 直接调用往返通过。\n");
+process.stdout.write("安装制品公开维护结果往返通过。\n");

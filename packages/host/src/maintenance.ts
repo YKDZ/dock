@@ -87,7 +87,7 @@ async function runOperation<Kind extends Operation>(
   return await operateConfig(operation, config, process.cwd(), scope);
 }
 
-/** 配置文件和 SDK 对象入口在这里汇合，操作不会重新解释解析结果。 */
+/** 配置文件和宿主对象入口在这里汇合，操作不会重新解释解析结果。 */
 export async function operateConfig<Kind extends Operation>(
   operation: Kind,
   value: unknown,

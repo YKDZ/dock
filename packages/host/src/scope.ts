@@ -210,10 +210,7 @@ function historicalFileInfo(
     typeof target.pluginId !== "string" ||
     target.pluginId.length === 0
   ) {
-    throw historyUnexplainable(
-      definition.id,
-      "历史定义没有 SDK 插件身份包装。",
-    );
+    throw historyUnexplainable(definition.id, "历史定义没有宿主插件身份包装。");
   }
   if (!Object.hasOwn(target, "target")) {
     throw historyUnexplainable(definition.id, "历史定义没有插件目标。");

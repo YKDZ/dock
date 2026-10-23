@@ -14,5 +14,5 @@ const status = vitestStatus("状态", run, {
   name: "普通通过",
 });
 const config = defineConfig({ plugins: [vitest], bindings: [] });
-// @ts-expect-error Vitest 状态引用没有 read 实现，不能作为 SDK 读取目标。
+// @ts-expect-error Vitest 状态引用没有 read 实现，不能作为宿主读取目标。
 void readReferenceInTest(config, status);

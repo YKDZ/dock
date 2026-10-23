@@ -16,7 +16,7 @@ void resolution.plugins[0].collect;
 // @ts-expect-error 运行声明不包含实际执行记录。
 void resolution.runs[0].record;
 
-// @ts-expect-error SDK 解析的是完整配置，筛选不改变声明完整性。
+// @ts-expect-error 宿主解析的是完整配置，筛选不改变声明完整性。
 const partial: "partial" = resolution.context.declarationCompleteness;
 void partial;
 

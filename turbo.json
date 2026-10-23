@@ -11,14 +11,14 @@
           "allow": ["dock-tooling"]
         }
       },
-      "dock-sdk": {
+      "dock-host": {
         "dependencies": {
           "allow": ["dock-core", "dock-tooling"]
         }
       },
       "dock-reference": {
         "dependencies": {
-          "allow": ["dock-core", "dock-sdk", "dock-tooling", "dock-reference"]
+          "allow": ["dock-core", "dock-host", "dock-tooling", "dock-reference"]
         }
       },
       "dock-tooling": {

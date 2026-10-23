@@ -1,6 +1,6 @@
 {
   "extends": ["//"],
-  "tags": ["library", "dock-sdk"],
+  "tags": ["library", "dock-host"],
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
@@ -11,6 +11,11 @@
       "dependsOn": ["build"],
       "outputs": [".artifacts/*.tgz"],
       "tags": ["work:preparation"]
+    },
+    "test": {
+      "dependsOn": [],
+      "outputs": [],
+      "tags": ["quality:light"]
     },
     "format:check": {
       "outputs": [],

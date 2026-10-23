@@ -321,7 +321,7 @@ function incompleteRecord(code: string, message: string): ExecutionRunRecord {
 function invalidRecord(): ExecutionRunRecord {
   return incompleteRecord(
     "invalid-execution-record",
-    "插件返回的执行记录不符合 SDK 公开契约。",
+    "插件返回的执行记录不符合宿主公开契约。",
   );
 }
 

@@ -5,14 +5,15 @@ import { collectArtifacts, packageNames } from "./release-artifacts.ts";
 
 const directory = resolve(".artifacts/candidate");
 const manifest = await collectArtifacts(directory);
-const [core, sdk, file, markdown, nodeTest, typescript, vitest] = packageNames;
+const [core, host, file, markdown, nodeTest, typescript, vitest] = packageNames;
 const consumers: [string, readonly string[]][] = [
-  [file, [core, sdk, file]],
-  [markdown, [core, sdk, file, markdown]],
-  [nodeTest, [core, sdk, nodeTest, file]],
-  [typescript, [core, sdk, file, typescript]],
-  [vitest, [core, sdk, vitest, nodeTest, file]],
-  ["@dock/consumer-readme", [core, sdk, file, markdown, nodeTest]],
+  [host, [core, host]],
+  [file, [core, host, file]],
+  [markdown, [core, host, file, markdown]],
+  [nodeTest, [core, host, nodeTest, file]],
+  [typescript, [core, host, file, typescript]],
+  [vitest, [core, host, vitest, nodeTest, file]],
+  ["@dock/consumer-readme", [core, host, file, markdown, nodeTest]],
 ];
 for (const [name, dependencies] of consumers) {
   const result = spawnSync(

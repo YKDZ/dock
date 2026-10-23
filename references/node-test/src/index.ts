@@ -295,7 +295,7 @@ export function nodeTestObservation<
   );
 }
 
-/** 活动 Node 测试内经 SDK 读取当前引用并记录可解释的读取结果。 */
+/** 活动 Node 测试内经宿主读取当前引用并记录可解释的读取结果。 */
 export async function readReferenceInTest<
   const Plugins extends readonly ReferencePlugin[],
   const Ref extends ReadableReferenceOf<Plugins>,

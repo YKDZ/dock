@@ -123,7 +123,7 @@ export function recordVitestObservation<Value extends JsonValue>(
   return value;
 }
 
-/** 经 SDK 读取当前引用，并将真实读取归属到当前测试尝试。 */
+/** 经宿主读取当前引用，并将真实读取归属到当前测试尝试。 */
 export async function readReferenceInTest<
   const Plugins extends readonly ReferencePlugin[],
   const Ref extends ReadableReferenceOf<Plugins>,

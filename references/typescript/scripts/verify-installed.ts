@@ -32,7 +32,7 @@ async function main(): Promise<void> {
   assert.equal(
     artifacts.length,
     4,
-    "根 Turbo 验收必须传入同批 core、SDK、file 与 TypeScript 包制品。",
+    "根 Turbo 验收必须传入同批 core、host、file 与 TypeScript 包制品。",
   );
   const tarballs = artifacts.map((artifact) =>
     resolve(process.cwd(), artifact),
