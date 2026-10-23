@@ -45,7 +45,7 @@
     "oxlint": "catalog:",
     "oxlint-tsgolint": "catalog:",
     "typescript-7": "catalog:",
-    "vitest": "4.1.11"
+    "vitest": "5.0.5"
   },
   "peerDependencies": {
     "@ykdz/dock": "workspace:*",
