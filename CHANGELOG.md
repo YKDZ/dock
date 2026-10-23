@@ -4,6 +4,7 @@
 
 - 七个公开包统一升级至 0.2.0，继续作为同版本配套单元安装；`@ykdz/dock`、`@ykdz/dock-core`、五个引用插件及 `dock` 命令保持原身份。
 - 插件采集改为一次接收完整声明和本次选中引用，并返回逐引用结果；运行记录和类别诊断由所属插件提供。自定义插件需迁移到批量 `collect` 返回值，查看说明可由 `describe` 提供。
+- 旧 `execution.declare`、`execution.execute` 与 `validateReferences` 迁至 `prepare` 和批量 `collect`：在 `prepare` 完成完整集合预检并返回纯数据，在一次 `collect` 内自管共享执行与收尾；旧 `inspect.runs` 的查看信息改读 `plugins[].description`，具体运行诊断由对应插件在 `pluginDiagnostics` 中提供。
 - 检查报告移除宿主测试统计，改由 `pluginDiagnostics` 按插件保留结构化数据与文字，插件诊断格式错误列入 `pluginErrors`。消费者应按来源读取插件诊断。
 - 当前基线编码不变，无需重建基线。请将七个产品包一起升级到 0.2.0，不要混用跨版本宿主与插件。
 

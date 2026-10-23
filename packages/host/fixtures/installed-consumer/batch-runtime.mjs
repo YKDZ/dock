@@ -120,125 +120,135 @@ try {
   assert.equal(collectionCalls, 3);
   assert.equal(stable.bindings[0].consistency, "consistent");
 
-  const invalidObjectDiagnostics = definePlugin({
-    id: "fixture:invalid-object-diagnostics",
-    validate() {},
-    collect(request) {
-      return {
-        results: request.selectedReferences.map((reference) => ({
-          referenceId: reference.id,
-          kind: "value",
-          value: "accepted object fact",
-        })),
-        diagnostics: {
-          data: { invalid() {} },
-          text: ["有效文本", 42],
-        },
-      };
-    },
-  });
-  const objectOutcome = await updateBaseline(
-    defineConfig({
-      root,
-      baseline: "object-diagnostics.baseline.json",
-      plugins: [invalidObjectDiagnostics],
-      bindings: [
-        binding("object-diagnostics-policy", [
-          createReference(
-            "fixture:invalid-object-diagnostics",
-            "object-diagnostics-reference",
-            "object target",
-          ),
-        ]),
-      ],
-    }),
-  );
-  assert.equal(objectOutcome.status, "updated");
-  assert.deepEqual(
-    objectOutcome.report.pluginErrors.map(({ pluginId, code }) => ({
-      pluginId,
-      code,
-    })),
-    [
-      {
-        pluginId: "fixture:invalid-object-diagnostics",
-        code: "invalid-plugin-diagnostics",
+  for (const diagnosticKind of ["data", "text"]) {
+    const pluginId = `fixture:invalid-object-${diagnosticKind}-diagnostics`;
+    const referenceId = `object-${diagnosticKind}-reference`;
+    const fact = `accepted object ${diagnosticKind} fact`;
+    const diagnostics =
+      diagnosticKind === "data"
+        ? {
+            data: { invalid() {} },
+            text: ["有效对象诊断文字"],
+          }
+        : {
+            data: { valid: true },
+            text: ["有效文本", 42],
+          };
+    const invalidObjectDiagnostics = definePlugin({
+      id: pluginId,
+      validate() {},
+      collect(request) {
+        return {
+          results: request.selectedReferences.map((reference) => ({
+            referenceId: reference.id,
+            kind: "value",
+            value: fact,
+          })),
+          diagnostics,
+        };
       },
-    ],
-  );
-  assert.deepEqual(objectOutcome.report.pluginDiagnostics, []);
-  assert.equal(
-    objectOutcome.report.bindings[0]?.current?.references[
-      "object-diagnostics-reference"
-    ]?.value,
-    "accepted object fact",
-  );
-  assert.match(
-    await readFile(join(root, "object-diagnostics.baseline.json"), "utf8"),
-    /accepted object fact/u,
-  );
+    });
+    const objectOutcome = await updateBaseline(
+      defineConfig({
+        root,
+        baseline: `object-${diagnosticKind}-diagnostics.baseline.json`,
+        plugins: [invalidObjectDiagnostics],
+        bindings: [
+          binding(`object-${diagnosticKind}-diagnostics-policy`, [
+            createReference(pluginId, referenceId, "object target"),
+          ]),
+        ],
+      }),
+    );
+    assert.equal(objectOutcome.status, "updated");
+    assert.deepEqual(
+      objectOutcome.report.pluginErrors.map(({ pluginId, code }) => ({
+        pluginId,
+        code,
+      })),
+      [{ pluginId, code: "invalid-plugin-diagnostics" }],
+    );
+    assert.deepEqual(objectOutcome.report.pluginDiagnostics, []);
+    assert.equal(
+      objectOutcome.report.bindings[0]?.current?.references[referenceId]?.value,
+      fact,
+    );
+    assert.match(
+      await readFile(
+        join(root, `object-${diagnosticKind}-diagnostics.baseline.json`),
+        "utf8",
+      ),
+      new RegExp(fact, "u"),
+    );
+  }
 
-  await writeFile(
-    workerConfigPath,
-    `import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";
+  for (const diagnosticKind of ["data", "text"]) {
+    const pluginId = `fixture:invalid-worker-${diagnosticKind}-diagnostics`;
+    const referenceId = `worker-${diagnosticKind}-reference`;
+    const fact = `accepted worker ${diagnosticKind} fact`;
+    const diagnostics =
+      diagnosticKind === "data"
+        ? `{
+        data: { invalid() { return true; } },
+        text: ["有效 Worker 诊断文字"],
+      }`
+        : `{
+        data: { valid: true },
+        text: ["有效 Worker 文字", 42],
+      }`;
+    await writeFile(
+      workerConfigPath,
+      `import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";
 
 const plugin = definePlugin({
-  id: "fixture:invalid-worker-diagnostics",
+  id: ${JSON.stringify(pluginId)},
   validate() {},
   collect(request) {
     return {
       results: request.selectedReferences.map((reference) => ({
         referenceId: reference.id,
         kind: "value",
-        value: "accepted worker fact",
+        value: ${JSON.stringify(fact)},
       })),
-      diagnostics: {
-        data: { invalid() { return true; } },
-        text: ["有效文本", 42],
-      },
+      diagnostics: ${diagnostics},
     };
   },
 });
 
 export default defineConfig({
   root: ${JSON.stringify(workerRoot)},
-  baseline: "worker-diagnostics.baseline.json",
+  baseline: ${JSON.stringify(`worker-${diagnosticKind}-diagnostics.baseline.json`)},
   plugins: [plugin],
   bindings: [
-    binding("worker-diagnostics-policy", [
-      createReference("fixture:invalid-worker-diagnostics", "worker-reference", "worker target"),
+    binding(${JSON.stringify(`worker-${diagnosticKind}-diagnostics-policy`)}, [
+      createReference(${JSON.stringify(pluginId)}, ${JSON.stringify(referenceId)}, "worker target"),
     ]),
   ],
 });
 `,
-  );
-  const workerOutcome = await updateBaseline(workerConfigPath);
-  assert.equal(workerOutcome.status, "updated");
-  assert.deepEqual(
-    workerOutcome.report.pluginErrors.map(({ pluginId, code }) => ({
-      pluginId,
-      code,
-    })),
-    [
-      {
-        pluginId: "fixture:invalid-worker-diagnostics",
-        code: "invalid-plugin-diagnostics",
-      },
-    ],
-  );
-  assert.deepEqual(workerOutcome.report.pluginDiagnostics, []);
-  assert.equal(
-    workerOutcome.report.bindings[0]?.current?.references["worker-reference"]
-      ?.value,
-    "accepted worker fact",
-  );
-  assert.match(
-    await readFile(
-      join(workerRoot, "worker-diagnostics.baseline.json"),
-      "utf8",
-    ),
-    /accepted worker fact/u,
-  );
+    );
+    const workerOutcome = await updateBaseline(workerConfigPath);
+    assert.equal(workerOutcome.status, "updated");
+    assert.deepEqual(
+      workerOutcome.report.pluginErrors.map(({ pluginId, code }) => ({
+        pluginId,
+        code,
+      })),
+      [{ pluginId, code: "invalid-plugin-diagnostics" }],
+    );
+    assert.deepEqual(workerOutcome.report.pluginDiagnostics, []);
+    assert.equal(
+      workerOutcome.report.bindings[0]?.current?.references[referenceId]?.value,
+      fact,
+    );
+    assert.match(
+      await readFile(
+        join(workerRoot, `worker-${diagnosticKind}-diagnostics.baseline.json`),
+        "utf8",
+      ),
+      new RegExp(fact, "u"),
+    );
+  }
 } finally {
   await rm(workerConfigPath, { force: true });
   await rm(root, { recursive: true, force: true });
