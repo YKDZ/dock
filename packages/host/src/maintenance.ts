@@ -535,7 +535,11 @@ function isNonEmptyString(value: unknown): value is string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
+  try {
+    return String(error instanceof Error ? error.message : error);
+  } catch {
+    return "错误对象无法转换为文本";
+  }
 }
 
 async function writeBaseline(path: string, baseline: Baseline): Promise<void> {

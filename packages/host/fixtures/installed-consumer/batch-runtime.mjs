@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +22,8 @@ const workerConfigPath = join(
   process.cwd(),
   ".dock-worker-diagnostics.config.mjs",
 );
+const cliConfigPath = join(process.cwd(), ".dock-cli-diagnostics.config.mjs");
+const cliRoot = await mkdtemp(join(tmpdir(), "dock-host-cli-diagnostics-"));
 let collectionCalls = 0;
 let descriptionCalls = 0;
 const plugin = definePlugin({
@@ -119,6 +122,73 @@ try {
   const stable = await check(config, selected);
   assert.equal(collectionCalls, 3);
   assert.equal(stable.bindings[0].consistency, "consistent");
+
+  await writeFile(
+    cliConfigPath,
+    `import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";
+
+const makePlugin = (id, value) => definePlugin({
+  id,
+  validate() {},
+  collect(request) {
+    return {
+      results: request.selectedReferences.map(({ id: referenceId }) => ({
+        referenceId,
+        kind: "value",
+        value,
+      })),
+      diagnostics: { data: { owner: id }, text: ["执行完成"] },
+    };
+  },
+});
+const firstId = "@fixture/cli-first";
+const secondId = "@fixture/cli-second";
+
+export default defineConfig({
+  root: ${JSON.stringify(cliRoot)},
+  baseline: "cli-diagnostics.baseline.json",
+  plugins: [makePlugin(firstId, "first fact"), makePlugin(secondId, "second fact")],
+  bindings: [
+    binding("cli-first-policy", [
+      createReference(firstId, "cli-first", "first target"),
+    ]),
+    binding("cli-second-policy", [
+      createReference(secondId, "cli-second", "second target"),
+    ]),
+  ],
+});
+`,
+  );
+  await updateBaseline(cliConfigPath);
+  const installedCli = join(
+    process.cwd(),
+    "node_modules",
+    "@ykdz",
+    "dock",
+    "dist",
+    "cli.js",
+  );
+  const textResult = spawnSync(
+    process.execPath,
+    [installedCli, "check", "--config", cliConfigPath],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  assert.equal(textResult.status, 0, textResult.stderr);
+  assert.match(textResult.stdout, /插件 @fixture\/cli-first：执行完成/u);
+  assert.match(textResult.stdout, /插件 @fixture\/cli-second：执行完成/u);
+
+  const jsonResult = spawnSync(
+    process.execPath,
+    [installedCli, "check", "--config", cliConfigPath, "--json"],
+    { cwd: process.cwd(), encoding: "utf8" },
+  );
+  assert.equal(jsonResult.status, 0, jsonResult.stderr);
+  const jsonOutput = JSON.stringify(JSON.parse(jsonResult.stdout));
+  assert.ok(jsonOutput.includes('"pluginId":"@fixture/cli-first"'));
+  assert.ok(jsonOutput.includes('"pluginId":"@fixture/cli-second"'));
+  assert.ok(jsonOutput.includes('"data":{"owner":"@fixture/cli-first"}'));
+  assert.ok(jsonOutput.includes('"data":{"owner":"@fixture/cli-second"}'));
+  assert.ok(jsonOutput.includes('"text":["执行完成"]'));
 
   for (const diagnosticKind of ["data", "text"]) {
     const pluginId = `fixture:invalid-object-${diagnosticKind}-diagnostics`;
@@ -250,6 +320,8 @@ export default defineConfig({
     );
   }
 } finally {
+  await rm(cliConfigPath, { force: true });
+  await rm(cliRoot, { recursive: true, force: true });
   await rm(workerConfigPath, { force: true });
   await rm(root, { recursive: true, force: true });
   await rm(workerRoot, { recursive: true, force: true });

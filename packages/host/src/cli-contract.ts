@@ -360,7 +360,9 @@ function formatReport(report: CheckReport): [string, ...string[]] {
     `范围：${report.scope.length === 0 ? "无关联" : report.scope.join("、")}`,
   ];
   for (const diagnostic of report.pluginDiagnostics) {
-    lines.push(...diagnostic.text);
+    for (const line of diagnostic.text) {
+      lines.push(`插件 ${diagnostic.pluginId}：${line}`);
+    }
   }
   for (const error of report.pluginErrors) {
     lines.push(
