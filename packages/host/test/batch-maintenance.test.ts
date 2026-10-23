@@ -209,11 +209,82 @@ void test("所有插件预检完成后并发采集且单个失败保留其他插
   );
   assert.ok(failed && "errors" in failed);
   assert.equal(failed.errors[0]?.code, "plugin-failed");
+  assert.equal(
+    failed.errors[0]?.message,
+    "插件 first-plugin 批量采集失败：first plugin failed",
+  );
   assert.ok(survived && "current" in survived);
   assert.equal(
     survived.current.references.second?.value,
     "second plugin survived",
   );
+});
+
+void test("插件抛出无法转成文本的值时仍隔离失败并保留其他插件事实", async () => {
+  type UnknownErrorReference = Reference<
+    "unknown-error-plugin",
+    "unprintable",
+    string,
+    string
+  >;
+  type GoodReference = Reference<"good-plugin", "good", string, string>;
+  const unknownErrorPlugin = definePlugin({
+    id: "unknown-error-plugin",
+    validate(_reference: UnknownErrorReference): void {},
+    collect(
+      _request: PluginRequest<UnknownErrorReference>,
+    ): PluginBatchResult<string> {
+      throw Object.create(null);
+    },
+  });
+  const goodPlugin = definePlugin({
+    id: "good-plugin",
+    validate(_reference: GoodReference): void {},
+    collect(request: PluginRequest<GoodReference>): PluginBatchResult<string> {
+      return {
+        results: request.selectedReferences.map(({ id }) => ({
+          referenceId: id,
+          kind: "value",
+          value: "good fact",
+        })),
+      };
+    },
+  });
+  const config = defineConfig({
+    plugins: [unknownErrorPlugin, goodPlugin],
+    bindings: [
+      binding("unknown-error-policy", [
+        createReference<"unknown-error-plugin", "unprintable", string, string>(
+          "unknown-error-plugin",
+          "unprintable",
+          "target",
+        ),
+      ]),
+      binding("good-policy", [
+        createReference<"good-plugin", "good", string, string>(
+          "good-plugin",
+          "good",
+          "target",
+        ),
+      ]),
+    ],
+  });
+
+  const report = await check(config);
+  const unknownFailure = report.bindings.find(
+    ({ bindingId }) => bindingId === "unknown-error-policy",
+  );
+  const goodResult = report.bindings.find(
+    ({ bindingId }) => bindingId === "good-policy",
+  );
+  assert.ok(unknownFailure && "errors" in unknownFailure);
+  assert.equal(unknownFailure.errors[0]?.code, "plugin-failed");
+  assert.equal(
+    unknownFailure.errors[0]?.message,
+    "插件 unknown-error-plugin 批量采集失败：错误对象无法转换为文本",
+  );
+  assert.ok(goodResult && "current" in goodResult);
+  assert.equal(goodResult.current.references.good?.value, "good fact");
 });
 
 void test("逐引用缺失、重复、非法与越界批量结果按归属隔离", async () => {
