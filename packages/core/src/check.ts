@@ -397,7 +397,7 @@ function changesFor(
   ) {
     changes.push({
       kind: "binding-definition",
-      before: previous.definition,
+      before: structuredClone(previous.definition),
       after: current.definition,
     });
   }
@@ -428,7 +428,7 @@ function changesFor(
       changes.push({
         kind: "reference-definition",
         referenceId,
-        before: before.definition,
+        before: structuredClone(before.definition),
         after: after.definition,
       });
     }
@@ -458,7 +458,7 @@ function changesFor(
       changes.push({
         kind: "fact",
         referenceId,
-        before: before.value,
+        before: structuredClone(before.value),
         after: after.value,
         ...(before.valueKind === undefined
           ? {}
@@ -535,7 +535,12 @@ export function check(input: CheckInput): CheckReport {
         return {
           bindingId,
           consistency: "inconsistent",
-          changes: [{ kind: "binding-removed", before: previous.definition }],
+          changes: [
+            {
+              kind: "binding-removed",
+              before: structuredClone(previous.definition),
+            },
+          ],
           untracked: true,
         };
       }
