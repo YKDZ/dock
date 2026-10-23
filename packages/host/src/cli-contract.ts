@@ -359,22 +359,13 @@ function formatReport(report: CheckReport): [string, ...string[]] {
   const lines = [
     `范围：${report.scope.length === 0 ? "无关联" : report.scope.join("、")}`,
   ];
-  if (report.execution !== undefined) {
+  for (const diagnostic of report.pluginDiagnostics) {
+    lines.push(...diagnostic.text);
+  }
+  for (const error of report.pluginErrors) {
     lines.push(
-      `执行：${report.execution.testExecutions} 次测试尝试，${report.execution.commandAttempts} 次命令尝试`,
+      `插件 ${error.pluginId} 错误（${error.code}）：${error.message}`,
     );
-    if (report.execution.failedCommands > 0) {
-      lines.push(`原生命令失败：${report.execution.failedCommands} 次`);
-    }
-    for (const read of report.execution.reads ?? []) {
-      const range =
-        read.range === undefined
-          ? ""
-          : `，范围 ${read.range.path}:${read.range.start}-${read.range.end}`;
-      lines.push(
-        `测试内读取 ${read.referenceId}（运行 ${read.runId} / 测试 ${read.testId} / 尝试 ${read.attempt}）：${JSON.stringify(read.value)}${range}`,
-      );
-    }
   }
   for (const binding of report.bindings) {
     lines.push(...formatBinding(binding));
@@ -392,7 +383,7 @@ function formatResolution(
     `基线：${resolution.baselinePath}`,
     `基线状态：${context.baseline === undefined ? "尚未创建" : "已读取"}`,
     `检查范围：${scope.length === 0 ? "无关联" : scope.join("、")}`,
-    `插件：${resolution.plugins.length === 0 ? "无" : resolution.plugins.join("、")}`,
+    `插件：${resolution.plugins.length === 0 ? "无" : resolution.plugins.map(({ id }) => id).join("、")}`,
   ];
   if (resolution.configPath !== undefined) {
     lines.unshift(`配置入口：${resolution.configPath}`);
@@ -403,10 +394,13 @@ function formatResolution(
   for (const binding of context.bindings) {
     lines.push(`关联声明 ${binding.id}：${JSON.stringify(binding)}`);
   }
-  for (const run of resolution.runs) {
+  for (const plugin of resolution.plugins) {
     lines.push(
-      `运行声明 ${run.identity}（插件 ${run.pluginId}）：关联引用 ${run.references.join("、")}；本次选中 ${run.selectedReferences.length === 0 ? "无" : run.selectedReferences.join("、")}`,
+      `插件 ${plugin.id}：完整声明引用 ${plugin.references.length === 0 ? "无" : plugin.references.join("、")}；本次选中 ${plugin.selectedReferences.length === 0 ? "无" : plugin.selectedReferences.join("、")}`,
     );
+    if (plugin.description !== undefined) {
+      lines.push(...plugin.description.text);
+    }
   }
   for (const file of resolution.files) {
     lines.push(`目标文件 ${file.path}：${file.references.join("、")}`);

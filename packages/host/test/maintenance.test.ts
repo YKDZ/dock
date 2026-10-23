@@ -10,6 +10,8 @@ import {
   createReference,
   defineConfig,
   definePlugin,
+  type PluginBatchResult,
+  type PluginRequest,
   type Reference,
 } from "@ykdz/dock";
 
@@ -24,8 +26,16 @@ void test("JSON 键顺序和备注不制造引用身份冲突", () => {
   const plugin = definePlugin({
     id: "fixture-plugin",
     validate(_reference: SharedReference): void {},
-    collect(_reference: SharedReference) {
-      return { kind: "value", value: "same" };
+    collect(
+      request: PluginRequest<SharedReference>,
+    ): PluginBatchResult<string> {
+      return {
+        results: request.selectedReferences.map((reference) => ({
+          referenceId: reference.id,
+          kind: "value",
+          value: "same",
+        })),
+      };
     },
   });
   const first = createReference<
@@ -85,7 +95,7 @@ void test("配置路径维护使用新的模块图读取导入声明", async () 
       [
         'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
         'import { target } from "./declarations.mjs";',
-        'const fixture = definePlugin({ id: "fixture", validate() {}, collect(reference) { return { kind: "value", value: reference.target }; } });',
+        'const fixture = definePlugin({ id: "fixture", validate() {}, collect({ selectedReferences }) { return { results: selectedReferences.map((reference) => ({ referenceId: reference.id, kind: "value", value: reference.target })) }; } });',
         'export default defineConfig({ plugins: [fixture], bindings: [binding("guide-policy", [createReference("fixture", "guide", target)])] });',
       ].join("\n"),
     );
