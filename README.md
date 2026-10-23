@@ -70,13 +70,29 @@ const nodeEngine = definePlugin({
       throw new Error("请指定包清单的路径。");
     }
   },
-  async collect({ target }, { root }) {
-    const data = JSON.parse(await readFile(resolve(root, target), "utf8"));
-    const value = data.engines?.node;
-    if (typeof value !== "string") {
-      throw new Error("请在包清单中用 engines.node 声明版本要求。");
+  async collect(request, { root }) {
+    const results = [];
+    for (const reference of request.selectedReferences) {
+      const target = reference.target;
+      if (typeof target !== "string") {
+        throw new Error("包清单路径必须是文本。");
+      }
+      const data = JSON.parse(await readFile(resolve(root, target), "utf8"));
+      const value = data.engines?.node;
+      results.push(
+        typeof value === "string"
+          ? { referenceId: reference.id, kind: "value", value }
+          : {
+              referenceId: reference.id,
+              kind: "error",
+              error: {
+                code: "node-version-missing",
+                message: "请在包清单中用 engines.node 声明版本要求。",
+              },
+            },
+      );
     }
-    return { kind: "value", value };
+    return { results };
   },
 });
 

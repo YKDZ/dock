@@ -15,12 +15,24 @@ import { fileURLToPath } from "node:url";
 
 type Report = {
   bindings: { bindingId: string; errors?: { code: string }[] }[];
-  execution?: {
-    commandAttempts: number;
-    testExecutions: number;
-    failedCommands: number;
-    reads?: { testId: string }[];
-  };
+  pluginDiagnostics: {
+    pluginId: string;
+    data: unknown;
+    text: string[];
+  }[];
+  pluginErrors: { pluginId: string; code: string; message: string }[];
+};
+
+type NodeDiagnosticData = {
+  runs: NodeRunDiagnostic[];
+};
+
+type NodeRunDiagnostic = {
+  identity: string;
+  commandAttempts: number;
+  testExecutions: number;
+  failedCommands: number;
+  reads: { testId: string }[];
 };
 
 const artifacts = process.argv.slice(2);
@@ -91,10 +103,20 @@ try {
     "readme-extension",
     "readme-workflow",
   ]);
-  assert.equal(report.execution?.commandAttempts, 1);
-  assert.equal(report.execution?.testExecutions, 1);
-  assert.equal(report.execution?.failedCommands, 0);
-  const reads = report.execution?.reads;
+  assert.deepEqual(report.pluginErrors, []);
+  const nodePlugin = report.pluginDiagnostics.find(
+    ({ pluginId }) => pluginId === "@ykdz/dock-reference-node-test",
+  );
+  assert.ok(nodePlugin, "README JSON 必须保留 Node 插件来源和诊断。");
+  const diagnostic = nodePlugin.data as NodeDiagnosticData;
+  const nodeRun = diagnostic.runs[0];
+  assert.ok(nodeRun, "README JSON 必须包含 Node 运行诊断。");
+  assert.equal(nodeRun.identity, "README 示例");
+  assert.equal(nodeRun.commandAttempts, 1);
+  assert.equal(nodeRun.testExecutions, 1);
+  assert.equal(nodeRun.failedCommands, 0);
+  assert.ok(nodePlugin.text.length > 0);
+  const reads = nodeRun.reads;
   assert.ok(reads && reads.length > 0, "README 验收必须产生原生测试读取证据。");
   for (const read of reads) {
     const identity = JSON.parse(read.testId) as { name?: unknown };
@@ -123,6 +145,7 @@ try {
     ]);
     assert.equal(failed.status, 1, failed.stdout + failed.stderr);
     const failure = readReport(failed.stdout, variant);
+    assert.deepEqual(failure.pluginErrors, []);
     assert.ok(
       failure.bindings.some((binding) =>
         binding.errors?.some((error) => error.code === "test-failed"),

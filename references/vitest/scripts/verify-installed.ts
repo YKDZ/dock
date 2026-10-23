@@ -116,6 +116,20 @@ type MaintenanceReport = {
   }[];
 };
 
+type CrossFrameworkReport = {
+  readonly pluginDiagnostics: readonly {
+    readonly pluginId: string;
+    readonly data: unknown;
+    readonly text: readonly string[];
+  }[];
+  readonly pluginErrors: readonly {
+    readonly pluginId: string;
+    readonly code: string;
+    readonly message: string;
+  }[];
+  readonly bindings: MaintenanceReport["bindings"];
+};
+
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const fixtureDirectory = join(
   packageDirectory,
@@ -156,8 +170,8 @@ async function main(): Promise<void> {
   }
   if (!vitestOnly) {
     const nodeTarball = tarballs[3]!;
-    await test("Node 与 Vitest：跨框架身份冲突", async () => {
-      await verifyCrossFrameworkIdentityConflict([
+    await test("Node 与 Vitest：同名运行隔离且组合结果稳定", async () => {
+      await verifyCrossFrameworkCombination([
         coreTarball,
         hostTarball,
         vitestTarball,
@@ -168,7 +182,7 @@ async function main(): Promise<void> {
   }
 }
 
-async function verifyCrossFrameworkIdentityConflict(
+async function verifyCrossFrameworkCombination(
   tarballs: readonly string[],
 ): Promise<void> {
   const temporary = await mkdtemp(join(tmpdir(), "dock-test-frameworks-"));
@@ -198,6 +212,7 @@ async function verifyCrossFrameworkIdentityConflict(
       0,
       `Node 与 Vitest 正式制品的交叉安装失败：\n${installation.stdout}\n${installation.stderr}`,
     );
+    await verifyCrossFrameworkTypes(consumer);
 
     const maintenanceRoot = join(consumer, "maintenance-root");
     const marker = join(maintenanceRoot, "cross-framework-started.log");
@@ -208,50 +223,176 @@ async function verifyCrossFrameworkIdentityConflict(
       ".bin",
       process.platform === "win32" ? "dock.cmd" : "dock",
     );
-    const result = await runDock(
-      dock,
-      [
-        "check",
-        "--config",
-        "cross-framework.config.mts",
-        "--binding",
-        "Node 运行",
-        "--json",
-      ],
-      consumer,
-    );
-    assert.equal(result.code, 1, result.stderr);
-    assert.equal(
-      parseEnvelope(result.stderr).data?.code,
-      "execution-identity-conflict",
-    );
-    await assert.rejects(access(marker), { code: "ENOENT" });
+    const configurations = [
+      "cross-framework.config.mts",
+      "cross-framework-reordered.config.mts",
+    ];
+    const reports: CrossFrameworkReport[] = [];
 
-    const update = await runDock(
+    for (const configuration of configurations) {
+      await rm(marker, { force: true });
+      const result = await runDock(
+        dock,
+        ["check", "--config", configuration, "--json"],
+        consumer,
+      );
+      assert.equal(result.code, 1, `${result.stdout}\n${result.stderr}`);
+      const envelope = parseEnvelope(result.stdout);
+      assert.equal(envelope.variant, "changed");
+      const report = requireReport(envelope) as CrossFrameworkReport;
+      assert.deepEqual(report.pluginErrors, []);
+      assert.deepEqual(
+        report.pluginDiagnostics.map(({ pluginId }) => pluginId).sort(),
+        ["@ykdz/dock-reference-node-test", "@ykdz/dock-reference-vitest"],
+      );
+      for (const diagnostic of report.pluginDiagnostics) {
+        const data = diagnostic.data as {
+          readonly runs: readonly { readonly identity: string }[];
+        };
+        assert.deepEqual(
+          data.runs.map(({ identity }) => identity),
+          ["同一运行身份"],
+        );
+      }
+      assert.deepEqual(
+        report.bindings.map(({ bindingId }) => bindingId),
+        ["Node 运行", "Vitest 运行"],
+      );
+      assert.deepEqual(
+        report.bindings.map((binding) =>
+          Object.fromEntries(
+            Object.entries(binding.current?.references ?? {}).map(
+              ([referenceId, reference]) => [referenceId, reference.value],
+            ),
+          ),
+        ),
+        [
+          { "Node 状态": { status: "passed" } },
+          { "Vitest 状态": { status: "passed" } },
+        ],
+      );
+      assert.deepEqual(await markerLines(marker), ["node", "vitest"]);
+      reports.push(report);
+    }
+
+    assert.deepEqual(
+      reports[0]?.bindings,
+      reports[1]?.bindings,
+      "调换插件登记顺序不得改变关联结果。",
+    );
+    assert.deepEqual(
+      diagnosticsByPlugin(reports[0]!),
+      diagnosticsByPlugin(reports[1]!),
+      "调换插件登记顺序不得改变各来源的诊断内容。",
+    );
+
+    await rm(marker, { force: true });
+    const textResult = await runDock(
       dock,
-      [
-        "baseline",
-        "update",
-        "--config",
-        "cross-framework.config.mts",
-        "--binding",
-        "Node 运行",
-        "--json",
-      ],
+      ["check", "--config", configurations[0]!],
       consumer,
     );
-    assert.equal(update.code, 1, update.stderr);
     assert.equal(
-      parseEnvelope(update.stderr).data?.code,
-      "execution-identity-conflict",
+      textResult.code,
+      1,
+      `${textResult.stdout}\n${textResult.stderr}`,
     );
-    await assert.rejects(access(marker), { code: "ENOENT" });
-    await assert.rejects(access(join(maintenanceRoot, "dock.baseline.json")), {
-      code: "ENOENT",
-    });
+    assert.match(textResult.stdout, /Node 运行 同一运行身份：1 次测试尝试/u);
+    assert.match(textResult.stdout, /Vitest 运行 同一运行身份：1 次测试尝试/u);
+    assert.deepEqual(await markerLines(marker), ["node", "vitest"]);
+
+    for (const selected of [
+      {
+        bindingId: "Node 运行",
+        referenceId: "Node 状态",
+        pluginId: "@ykdz/dock-reference-node-test",
+        started: "node",
+      },
+      {
+        bindingId: "Vitest 运行",
+        referenceId: "Vitest 状态",
+        pluginId: "@ykdz/dock-reference-vitest",
+        started: "vitest",
+      },
+    ]) {
+      await rm(marker, { force: true });
+      const filtered = await runDock(
+        dock,
+        [
+          "check",
+          "--config",
+          configurations[0]!,
+          "--binding",
+          selected.bindingId,
+          "--json",
+        ],
+        consumer,
+      );
+      assert.equal(filtered.code, 1, `${filtered.stdout}\n${filtered.stderr}`);
+      const envelope = parseEnvelope(filtered.stdout);
+      assert.equal(envelope.variant, "changed");
+      const report = requireReport(envelope) as CrossFrameworkReport;
+      assert.deepEqual(
+        report.bindings.map(({ bindingId }) => bindingId),
+        [selected.bindingId],
+      );
+      assert.deepEqual(
+        report.pluginDiagnostics.map(({ pluginId }) => pluginId),
+        [selected.pluginId],
+      );
+      assert.deepEqual(report.pluginErrors, []);
+      const binding = report.bindings[0];
+      assert.deepEqual(
+        binding?.current?.references[selected.referenceId]?.value,
+        { status: "passed" },
+      );
+      const data = report.pluginDiagnostics[0]!.data as {
+        readonly runs: readonly { readonly identity: string }[];
+      };
+      assert.deepEqual(
+        data.runs.map(({ identity }) => identity),
+        ["同一运行身份"],
+      );
+      assert.deepEqual(await markerLines(marker), [selected.started]);
+    }
   } finally {
     await rm(temporary, { recursive: true, force: true });
   }
+}
+
+function diagnosticsByPlugin(report: CrossFrameworkReport) {
+  return report.pluginDiagnostics
+    .map(({ pluginId, data, text }) => ({ pluginId, data, text }))
+    .sort((left, right) => left.pluginId.localeCompare(right.pluginId));
+}
+
+async function markerLines(marker: string): Promise<string[]> {
+  const contents = await readFile(marker, "utf8");
+  return contents.trim().split(/\r?\n/u).sort();
+}
+
+async function verifyCrossFrameworkTypes(consumer: string): Promise<void> {
+  const compiler = join(
+    packageDirectory,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "tsc.cmd" : "tsc",
+  );
+  const result = await run(
+    compiler,
+    [
+      "-p",
+      join(consumer, "cross-framework-types-tsconfig.json"),
+      "--pretty",
+      "false",
+    ],
+    consumer,
+  );
+  assert.equal(
+    result.code,
+    0,
+    `Node 与 Vitest 组合公开类型正例未通过：\n${result.stdout}\n${result.stderr}`,
+  );
 }
 
 async function verifyVersion(
