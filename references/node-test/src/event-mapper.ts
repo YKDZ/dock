@@ -46,7 +46,7 @@ export type NodeRunCompletion = {
   readonly protocolError?: string;
 };
 
-/** 将 Node 24.21 TestsStream 事件和进程关闭结果映射为 SDK 通用执行记录。 */
+/** 将 Node 24.21 TestsStream 事件和进程关闭结果映射为宿主通用执行记录。 */
 export function collectNodeRun(
   events: readonly NodeEvent[],
   completion: NodeRunCompletion,

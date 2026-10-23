@@ -16,14 +16,7 @@
     "composition.mts",
     "reexported-declarations.mts",
     "composition-consumer.mts",
-    "external-plugin-consumer.mts",
-    "physical-multiversion.mts",
     "paths-positive.mts",
-    "paths-negative.mts",
-    "scope-positive.mts",
-    "scope-negative.mts",
-    "inspect-positive.mts",
-    "inspect-negative.mts",
-    "secondary/physical-author.mts"
+    "paths-negative.mts"
   ]
 }

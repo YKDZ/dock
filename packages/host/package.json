@@ -10,7 +10,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/YKDZ/dock.git",
-    "directory": "packages/sdk"
+    "directory": "packages/host"
   },
   "bin": {
     "dock": "./dist/cli.js"
@@ -34,6 +34,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json --pretty false",
     "pack": "mkdir -p .artifacts && pnpm pack --out .artifacts/package.tgz",
+    "test": "node --conditions=source --test --test-reporter=spec 'test/**/*.test.ts'",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",

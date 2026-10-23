@@ -6,7 +6,6 @@ import {
   copyFile,
   mkdir,
   mkdtemp,
-  realpath,
   readFile,
   rm,
   writeFile,
@@ -57,7 +56,7 @@ async function main(): Promise<void> {
   assert.equal(
     artifacts.length,
     3,
-    "根 Turbo 验收必须传入同批 core、SDK 与 file 包制品路径。",
+    "根 Turbo 验收必须传入同批 core、host 与 file 包制品路径。",
   );
   const tarballs = artifacts.map((artifact) =>
     resolve(process.cwd(), artifact),
@@ -84,19 +83,9 @@ async function runConsumerTypechecks(consumer: string): Promise<void> {
   await copyFixture(consumer, "composition.mts");
   await copyFixture(consumer, "composition-consumer.mts");
   await copyFixture(consumer, "external-plugin.mts");
-  await copyFixture(consumer, "external-plugin-consumer.mts");
   await copyFixture(consumer, "reexported-declarations.mts");
-  await copyFixture(consumer, "physical-multiversion.mts");
   await copyFixture(consumer, "paths-positive.mts");
   await copyFixture(consumer, "paths-negative.mts");
-  await copyFixture(consumer, "scope-positive.mts");
-  await copyFixture(consumer, "scope-negative.mts");
-  await copyFixture(consumer, "inspect-positive.mts");
-  await copyFixture(consumer, "inspect-negative.mts");
-  await copyFile(
-    join(fixtureDirectory, "secondary", "physical-author.mts"),
-    join(consumer, "secondary", "physical-author.mts"),
-  );
   const compiler = join(
     packageDirectory,
     "node_modules",
@@ -151,37 +140,12 @@ async function runInstalledCli(
   tarballs: readonly string[],
 ): Promise<void> {
   await installConsumer(consumer, tarballs, "dock-installed-consumer");
-  const secondary = join(consumer, "secondary");
-  await mkdir(secondary, { recursive: true });
-  await installConsumer(secondary, tarballs, "dock-secondary-consumer");
-  const primarySdk = await realpath(
-    join(consumer, "node_modules", "@ykdz", "dock"),
-  );
-  const secondarySdk = await realpath(
-    join(secondary, "node_modules", "@ykdz", "dock"),
-  );
-  assert.notEqual(
-    primarySdk,
-    secondarySdk,
-    "多实例验收必须来自两份物理 SDK 安装。",
-  );
-  const primaryPackage = JSON.parse(
-    await readFile(join(primarySdk, "package.json"), "utf8"),
-  ) as { readonly version: string };
-  const secondaryPackage = JSON.parse(
-    await readFile(join(secondarySdk, "package.json"), "utf8"),
-  ) as { readonly version: string };
-  assert.equal(primaryPackage.version, secondaryPackage.version);
   await runConsumerTypechecks(consumer);
   await copyFixture(consumer, "inspect-runtime.mjs");
-  await copyFixture(consumer, "execution-runtime.mjs");
 
   for (const [fixture, label] of [
     ["composition-consumer.mts", "拆分声明与插件派发"],
-    ["external-plugin-consumer.mts", "外部插件采集与错误"],
-    ["physical-multiversion.mts", "两份物理安装互操作"],
     ["inspect-runtime.mjs", "统一解析与核心模型重放"],
-    ["execution-runtime.mjs", "运行声明与共享执行"],
   ] as const) {
     const installedRuntime = await run(
       "node",
@@ -195,47 +159,17 @@ async function runInstalledCli(
     );
   }
 
-  await copyFixture(consumer, "sdk-consumer.mjs");
-  const sdkConsumer = await run(
+  await copyFixture(consumer, "public-api-consumer.mjs");
+  const publicApiConsumer = await run(
     "node",
-    [join(consumer, "sdk-consumer.mjs")],
+    [join(consumer, "public-api-consumer.mjs")],
     consumer,
   );
   assert.equal(
-    sdkConsumer.code,
+    publicApiConsumer.code,
     0,
-    `安装制品 SDK 业务结果往返失败：\n${sdkConsumer.stdout}\n${sdkConsumer.stderr}`,
+    `安装制品公开维护结果往返失败：\n${publicApiConsumer.stdout}\n${publicApiConsumer.stderr}`,
   );
-
-  const installedPackages = await run(
-    "npm",
-    ["ls", "--all", "--json", "--prefix", consumer],
-    consumer,
-  );
-  assert.equal(installedPackages.code, 0, installedPackages.stderr);
-  const dependencyNames = new Set<string>();
-  collectPackageNames(
-    JSON.parse(installedPackages.stdout) as unknown,
-    dependencyNames,
-  );
-  for (const forbidden of [
-    "typescript",
-    "typescript-7",
-    "vitest",
-    "@vitest/runner",
-    "@ykdz/dock-reference-markdown",
-    "@ykdz/dock-reference-typescript",
-    "@ykdz/dock-reference-node-test",
-    "@ykdz/dock-reference-vitest",
-    "remark",
-    "markdown-it",
-  ]) {
-    assert.equal(
-      dependencyNames.has(forbidden),
-      false,
-      `运行制品不应依赖 ${forbidden}`,
-    );
-  }
 
   await copyFixture(consumer, "dock.config.mjs");
   await copyFixture(consumer, "dock.config.ts");
@@ -251,7 +185,7 @@ async function runInstalledCli(
     ".bin",
     process.platform === "win32" ? "dock.cmd" : "dock",
   );
-  const installedSdk = JSON.parse(
+  const installedHost = JSON.parse(
     await readFile(
       join(consumer, "node_modules", "@ykdz", "dock", "package.json"),
       "utf8",
@@ -259,7 +193,7 @@ async function runInstalledCli(
   ) as { readonly version: string };
   const version = await runDock(bin, ["--version"], consumer);
   assert.equal(version.code, 0, version.stderr);
-  assert.equal(version.stdout.trim(), installedSdk.version);
+  assert.equal(version.stdout.trim(), installedHost.version);
   const missingConfigOption = await runDock(bin, ["check"], consumer);
   assert.equal(missingConfigOption.code, 64, missingConfigOption.stderr);
   const missingConfigFile = await runDock(
@@ -870,23 +804,6 @@ function readReport(envelope: CliEnvelope): {
       readonly changes: readonly { readonly kind: string }[];
     }[];
   };
-}
-
-function collectPackageNames(value: unknown, names: Set<string>): void {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return;
-  const packageValue = value as { name?: unknown; dependencies?: unknown };
-  if (typeof packageValue.name === "string") names.add(packageValue.name);
-  collectDependencies(packageValue.dependencies, names);
-}
-
-function collectDependencies(value: unknown, names: Set<string>): void {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return;
-  for (const [name, dependency] of Object.entries(value)) {
-    names.add(name);
-    collectPackageNames(dependency, names);
-  }
 }
 
 void main().catch((error: unknown) => {

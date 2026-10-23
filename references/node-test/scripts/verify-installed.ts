@@ -85,7 +85,7 @@ async function main(): Promise<void> {
   assert.equal(
     artifacts.length,
     4,
-    "根 check:install 必须传入同批 core、SDK、file 与 Node test 制品。",
+    "根 check:install 必须传入同批 core、host、file 与 Node test 制品。",
   );
   const tarballs = artifacts.map((artifact) =>
     resolve(process.cwd(), artifact),

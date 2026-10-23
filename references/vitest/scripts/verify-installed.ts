@@ -103,23 +103,23 @@ async function main(): Promise<void> {
   assert.equal(
     artifacts.length,
     5,
-    "根 check:install 必须传入同批 core、SDK、Vitest、Node test 与 file 制品。",
+    "根 check:install 必须传入同批 core、host、Vitest、Node test 与 file 制品。",
   );
   const tarballs = artifacts.map((artifact) =>
     resolve(process.cwd(), artifact),
   );
   await Promise.all(tarballs.map((artifact) => access(artifact)));
 
-  const [coreTarball, sdkTarball, vitestTarball, nodeTarball, fileTarball] =
+  const [coreTarball, hostTarball, vitestTarball, nodeTarball, fileTarball] =
     tarballs;
   assert.ok(
-    coreTarball && sdkTarball && vitestTarball && nodeTarball && fileTarball,
+    coreTarball && hostTarball && vitestTarball && nodeTarball && fileTarball,
   );
-  const vitestTarballs = [coreTarball, sdkTarball, vitestTarball];
+  const vitestTarballs = [coreTarball, hostTarball, vitestTarball];
   for (const version of versions) {
     await verifyVersion(version, vitestTarballs, [
       coreTarball,
-      sdkTarball,
+      hostTarball,
       vitestTarball,
       fileTarball,
     ]);
@@ -127,7 +127,7 @@ async function main(): Promise<void> {
   await test("Node 与 Vitest：跨框架身份冲突", async () => {
     await verifyCrossFrameworkIdentityConflict([
       coreTarball,
-      sdkTarball,
+      hostTarball,
       vitestTarball,
       nodeTarball,
       fileTarball,
@@ -394,14 +394,14 @@ async function verifyUserConfig(dock: string, consumer: string): Promise<void> {
       },
     ],
   );
-  const sdk = await run(
+  const host = await run(
     process.execPath,
     [join(consumer, "user-config-runtime.mts")],
     consumer,
     60_000,
   );
-  assert.equal(sdk.code, 0, sdk.stderr);
-  assert.deepEqual(JSON.parse(sdk.stdout), resolution);
+  assert.equal(host.code, 0, host.stderr);
+  assert.deepEqual(JSON.parse(host.stdout), resolution);
   const text = await runDock(dock, ["inspect", ...arguments_], consumer);
   assert.equal(text.code, 0, text.stderr);
   assert.match(text.stdout, /运行声明 用户配置运行/);
