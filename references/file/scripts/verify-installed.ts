@@ -171,6 +171,36 @@ async function runInstalledCli(
     `安装制品公开维护结果往返失败：\n${publicApiConsumer.stdout}\n${publicApiConsumer.stderr}`,
   );
 
+  const installedPackages = await run(
+    "npm",
+    ["ls", "--all", "--json", "--prefix", consumer],
+    consumer,
+  );
+  assert.equal(installedPackages.code, 0, installedPackages.stderr);
+  const dependencyNames = new Set<string>();
+  collectPackageNames(
+    JSON.parse(installedPackages.stdout) as unknown,
+    dependencyNames,
+  );
+  for (const forbidden of [
+    "typescript",
+    "typescript-7",
+    "vitest",
+    "@vitest/runner",
+    "@ykdz/dock-reference-markdown",
+    "@ykdz/dock-reference-typescript",
+    "@ykdz/dock-reference-node-test",
+    "@ykdz/dock-reference-vitest",
+    "remark",
+    "markdown-it",
+  ]) {
+    assert.equal(
+      dependencyNames.has(forbidden),
+      false,
+      `file 安装不应依赖 ${forbidden}`,
+    );
+  }
+
   await copyFixture(consumer, "dock.config.mjs");
   await copyFixture(consumer, "dock.config.ts");
   await copyFixture(consumer, "declarations.mjs");
@@ -804,6 +834,23 @@ function readReport(envelope: CliEnvelope): {
       readonly changes: readonly { readonly kind: string }[];
     }[];
   };
+}
+
+function collectPackageNames(value: unknown, names: Set<string>): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return;
+  const packageValue = value as { name?: unknown; dependencies?: unknown };
+  if (typeof packageValue.name === "string") names.add(packageValue.name);
+  collectDependencies(packageValue.dependencies, names);
+}
+
+function collectDependencies(value: unknown, names: Set<string>): void {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    return;
+  for (const [name, dependency] of Object.entries(value)) {
+    names.add(name);
+    collectPackageNames(dependency, names);
+  }
 }
 
 void main().catch((error: unknown) => {
