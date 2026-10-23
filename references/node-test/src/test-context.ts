@@ -1,11 +1,8 @@
 import { getTestContext } from "node:test";
 
-import {
-  copyJsonValue,
-  type ExecutionReadRecord,
-  type JsonValue,
-  type TextRange,
-} from "@ykdz/dock";
+import { copyJsonValue, type JsonValue, type TextRange } from "@ykdz/dock";
+
+import type { NodeReadRecord } from "./types.ts";
 
 export const nodeObservationMessagePrefix = "dock:observation:";
 export const nodeReadMessagePrefix = "dock:read:";
@@ -31,7 +28,7 @@ export function recordNodeObservation(key: string, value: unknown): void {
 }
 
 export function recordNodeRead(
-  record: Omit<ExecutionReadRecord, "attempt" | "value"> & {
+  record: Omit<NodeReadRecord, "attempt" | "value"> & {
     readonly value: unknown;
   },
 ): void {

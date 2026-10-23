@@ -40,22 +40,16 @@ type CliEnvelope = {
 };
 
 type MaintenanceReport = {
-  readonly execution?: {
-    readonly commandAttempts: number;
-    readonly failedCommands: number;
-    readonly testExecutions: number;
-    readonly reads?: readonly {
-      readonly runId: string;
-      readonly testId: string;
-      readonly referenceId: string;
-      readonly value: unknown;
-      readonly range?: {
-        readonly path: string;
-        readonly start: number;
-        readonly end: number;
-      };
-    }[];
-  };
+  readonly pluginDiagnostics: readonly {
+    readonly pluginId: string;
+    readonly data: unknown;
+    readonly text: readonly string[];
+  }[];
+  readonly pluginErrors: readonly {
+    readonly pluginId: string;
+    readonly code: string;
+    readonly message: string;
+  }[];
   readonly bindings: readonly {
     readonly bindingId: string;
     readonly errors?: readonly { readonly code: string }[];
@@ -66,6 +60,50 @@ type MaintenanceReport = {
       readonly after?: unknown;
     }[];
   }[];
+};
+
+type NodeRunDiagnostic = {
+  readonly identity: string;
+  readonly configuration: {
+    readonly framework: string;
+    readonly root: string;
+    readonly testRoot: string;
+    readonly files: readonly string[];
+    readonly observationKeys: readonly string[];
+    readonly namePattern?: string;
+  };
+  readonly commandAttempts: number;
+  readonly failedCommands: number;
+  readonly testExecutions: number;
+  readonly failures: readonly {
+    readonly id: string;
+    readonly status: string;
+    readonly message?: string;
+  }[];
+  readonly errors: readonly {
+    readonly code: string;
+    readonly message: string;
+  }[];
+  readonly commandResult?: {
+    readonly exitCode: number | null;
+    readonly signal: string | null;
+  };
+  readonly reads: readonly {
+    readonly runId: string;
+    readonly testId: string;
+    readonly attempt: number;
+    readonly referenceId: string;
+    readonly value: unknown;
+    readonly range?: {
+      readonly path: string;
+      readonly start: number;
+      readonly end: number;
+    };
+  }[];
+};
+
+type NodeDiagnosticData = {
+  readonly runs: readonly NodeRunDiagnostic[];
 };
 
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
@@ -308,7 +346,10 @@ async function verifyHappyRoundTrip(
     consumer,
   );
   assert.equal(textCheck.code, 1, textCheck.stderr);
-  assert.match(textCheck.stdout, /执行：2 次测试尝试，1 次命令尝试/);
+  assert.match(
+    textCheck.stdout,
+    /Node 运行 业务运行：2 次测试尝试，1 次命令尝试/,
+  );
 
   const update = await runDock(
     bin,
@@ -599,12 +640,13 @@ function assertReadDiagnostic(
   start?: number,
   testName = "读取当前值并记录观察",
 ): void {
-  const read = report.execution?.reads?.find(
-    (candidate) => candidate.referenceId === referenceId,
-  );
+  const diagnostic = requireNodeDiagnostic(report);
+  const read = diagnostic.runs
+    .flatMap((run) => run.reads)
+    .find((candidate) => candidate.referenceId === referenceId);
   assert.ok(
     read,
-    `执行报告未包含读取 ${referenceId}：${JSON.stringify(report.execution)}`,
+    `执行报告未包含读取 ${referenceId}：${JSON.stringify(diagnostic)}`,
   );
   assert.equal(read.value, value);
   assert.equal(typeof read.runId, "string");
@@ -666,6 +708,10 @@ async function verifyFailureIsolation(
   assertExecutionSummary(report, 1, 2, 1);
   assertBindingError(report, "失败业务", "test-failed");
   assertBindingHasNoErrors(report, "独立业务");
+  const run = requireNodeDiagnostic(report).runs[0];
+  assert.ok(run);
+  assert.equal(run.commandResult?.exitCode, 1);
+  assert.ok(run.failures.some((failure) => failure.status === "failed"));
 
   const update = await runDock(
     bin,
@@ -765,8 +811,7 @@ async function verifyInterruptedProcess(
   assert.equal(checkEnvelope.variant, "errors");
   const checkReport = requireReport(checkEnvelope);
   assertBindingError(checkReport, "中断状态", "run-lifecycle-failed");
-  assert.equal(checkReport.execution?.commandAttempts, 1);
-  assert.equal(checkReport.execution?.failedCommands, 1);
+  assertNodeCommandSummary(checkReport, 1, 1);
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
 
   const update = await runDock(
@@ -781,8 +826,7 @@ async function verifyInterruptedProcess(
   assert.equal(updateEnvelope.variant, "rejected");
   const updateReport = requireReport(updateEnvelope);
   assertBindingError(updateReport, "中断状态", "run-lifecycle-failed");
-  assert.equal(updateReport.execution?.commandAttempts, 1);
-  assert.equal(updateReport.execution?.failedCommands, 1);
+  assertNodeCommandSummary(updateReport, 1, 1);
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
 }
 
@@ -824,8 +868,7 @@ async function verifyAfterEndFailure(
       assert.equal(checkEnvelope.variant, "errors");
       const checkReport = requireReport(checkEnvelope);
       assertBindingError(checkReport, "异步失败状态", "run-lifecycle-failed");
-      assert.equal(checkReport.execution?.commandAttempts, 1);
-      assert.equal(checkReport.execution?.failedCommands, 1);
+      assertNodeCommandSummary(checkReport, 1, 1);
 
       assert.equal(
         update.code,
@@ -836,8 +879,7 @@ async function verifyAfterEndFailure(
       assert.equal(updateEnvelope.variant, "rejected");
       const updateReport = requireReport(updateEnvelope);
       assertBindingError(updateReport, "异步失败状态", "run-lifecycle-failed");
-      assert.equal(updateReport.execution?.commandAttempts, 1);
-      assert.equal(updateReport.execution?.failedCommands, 1);
+      assertNodeCommandSummary(updateReport, 1, 1);
       assert.deepEqual(await readFile(baselinePath), baselineBytes);
     } finally {
       await rm(marker, { force: true });
@@ -892,10 +934,7 @@ async function verifyConflictPreflight(
     consumer,
   );
   assert.equal(check.code, 1, check.stderr);
-  assert.equal(
-    parseEnvelope(check.stderr).data?.code,
-    "plugin-reference-validation-failed",
-  );
+  assert.equal(parseEnvelope(check.stderr).data?.code, "plugin-prepare-failed");
   await assert.rejects(access(marker), { code: "ENOENT" });
 }
 
@@ -1002,9 +1041,55 @@ function assertExecutionSummary(
   testExecutions: number,
   failedCommands = 0,
 ): void {
-  assert.equal(report.execution?.commandAttempts, commandAttempts);
-  assert.equal(report.execution?.failedCommands, failedCommands);
-  assert.equal(report.execution?.testExecutions, testExecutions);
+  assertNodeDiagnosticSummary(
+    report,
+    commandAttempts,
+    testExecutions,
+    failedCommands,
+  );
+}
+
+function assertNodeDiagnosticSummary(
+  report: MaintenanceReport,
+  commandAttempts: number,
+  testExecutions: number,
+  failedCommands = 0,
+): void {
+  assertNodeCommandSummary(report, commandAttempts, failedCommands);
+  const diagnostic = requireNodeDiagnostic(report);
+  assert.equal(
+    diagnostic.runs.reduce((sum, run) => sum + run.testExecutions, 0),
+    testExecutions,
+  );
+}
+
+function assertNodeCommandSummary(
+  report: MaintenanceReport,
+  commandAttempts: number,
+  failedCommands: number,
+): void {
+  assert.deepEqual(report.pluginErrors, []);
+  const diagnostic = requireNodeDiagnostic(report);
+  assert.equal(
+    diagnostic.runs.reduce((sum, run) => sum + run.commandAttempts, 0),
+    commandAttempts,
+  );
+  assert.equal(
+    diagnostic.runs.reduce((sum, run) => sum + run.failedCommands, 0),
+    failedCommands,
+  );
+  for (const run of diagnostic.runs) {
+    assert.ok(run.identity.length > 0);
+    assert.ok(run.configuration.files.length > 0);
+  }
+}
+
+function requireNodeDiagnostic(report: MaintenanceReport): NodeDiagnosticData {
+  const diagnostic = report.pluginDiagnostics.find(
+    (item) => item.pluginId === "@ykdz/dock-reference-node-test",
+  );
+  assert.ok(diagnostic, "报告未包含 Node 插件诊断");
+  return diagnostic.data as NodeDiagnosticData;
 }
 
 function assertBindingError(

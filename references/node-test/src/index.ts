@@ -1,15 +1,20 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createReference, definePlugin, readReference } from "@ykdz/dock";
+import {
+  canonicalJson,
+  createReference,
+  definePlugin,
+  readReference,
+} from "@ykdz/dock";
 import type {
   Config,
   JsonValue,
   PluginContext,
+  PluginBatchResult,
+  PluginInformation,
   PluginReadResult,
-  PluginExecutionContext,
-  PluginExecution,
-  RunDeclaration,
+  PluginRequest,
   PluginResult,
   ReadableReferenceOf,
   Reference,
@@ -29,6 +34,7 @@ import type {
   NodeEventTarget,
   NodeSelectedTest,
   NodeRunConfiguration,
+  NodeTestRunResult,
 } from "./types.ts";
 
 export const nodeTestPluginId = "@ykdz/dock-reference-node-test" as const;
@@ -166,6 +172,20 @@ export type NodeTestReference<Id extends string = string> =
   | NodeTestObservationReference<Id>;
 
 type RuntimeNodeTestReference = Reference<typeof nodeTestPluginId, string>;
+
+type NodePreparedRun = {
+  readonly identity: string;
+  readonly configuration: NodeRunConfiguration;
+  readonly references: string[];
+};
+
+type NodePrepared = { readonly runs: NodePreparedRun[] };
+
+type NodeRunOutcome = {
+  readonly preparedRun: NodePreparedRun;
+  readonly references: readonly RuntimeNodeTestReference[];
+  readonly result: NodeTestRunResult;
+};
 
 /** 声明稳定观察键；sample 只用于推导类型，不作为默认事实。 */
 export function defineNodeTestObservation<
@@ -332,48 +352,21 @@ const nodeTestImplementation = definePlugin({
       target.file,
     );
   },
-  execution: {
-    declare(
-      references: readonly RuntimeNodeTestReference[],
-      context: PluginContext,
-    ): readonly RunDeclaration<NodeRunConfiguration>[] {
-      return references.map((reference) => {
-        const target = getNodeTestTarget(reference.target);
-        return {
-          identity: target.run.identity,
-          configuration: normalizeRun(target.run, context.root),
-          references: [reference.id],
-        };
-      });
-    },
-    async execute({ declaration, selectedReferences }) {
-      const run = declaration.configuration;
-      const targets = selectedReferences.map((reference) => {
-        const target = getNodeTestTarget(reference.target);
-        return {
-          file: resolveTargetFile(run.testRoot, target.file),
-          name: target.name,
-        };
-      });
-      return await executeNodeTestRun(run, uniqueSelectedTests(targets));
-    },
-  } satisfies PluginExecution<RuntimeNodeTestReference, NodeRunConfiguration>,
-  collect(
-    reference: RuntimeNodeTestReference,
-    context: PluginExecutionContext<NodeRunConfiguration>,
-  ): PluginResult {
-    const target = getNodeTestTarget(reference.target);
-    const run = context.execution.get(target.run.identity);
-    if (run === undefined) {
-      return {
-        kind: "error",
-        error: {
-          code: "execution-record-missing",
-          message: `Node 执行 ${target.run.identity} 没有完成当前维护会话。`,
-        },
-      };
-    }
-    return factFromNodeRun(reference, run.record, run.declaration);
+  prepare(
+    references: readonly RuntimeNodeTestReference[],
+    context: PluginContext,
+  ): NodePrepared {
+    return prepareNodeRuns(references, context.root);
+  },
+  describe(
+    request: PluginRequest<RuntimeNodeTestReference, NodePrepared>,
+  ): PluginInformation {
+    return describeNodeRuns(request);
+  },
+  async collect(
+    request: PluginRequest<RuntimeNodeTestReference, NodePrepared>,
+  ): Promise<PluginBatchResult> {
+    return await collectNodeTests(request);
   },
   readReferenceInTest,
 });
@@ -383,10 +376,209 @@ export const nodeTest = nodeTestImplementation;
 /** 在 Node 原生测试回调入口标记实际开始，供取消用例区分是否进入回调。 */
 export { beginExecution };
 
+function prepareNodeRuns(
+  references: readonly RuntimeNodeTestReference[],
+  root: string,
+): NodePrepared {
+  const runs = new Map<string, NodePreparedRun>();
+  for (const reference of references) {
+    const target = getNodeTestTarget(reference.target);
+    const configuration = normalizeRun(target.run, root);
+    const existing = runs.get(target.run.identity);
+    if (existing !== undefined) {
+      if (
+        canonicalJson(existing.configuration) !== canonicalJson(configuration)
+      ) {
+        throw new TypeError(
+          `Node 运行身份 ${target.run.identity} 在完整声明中对应不同配置。`,
+        );
+      }
+      existing.references.push(reference.id);
+      continue;
+    }
+    runs.set(target.run.identity, {
+      identity: target.run.identity,
+      configuration,
+      references: [reference.id],
+    });
+  }
+  return { runs: [...runs.values()] };
+}
+
+function describeNodeRuns(
+  request: PluginRequest<RuntimeNodeTestReference, NodePrepared>,
+): PluginInformation {
+  const selectedIds = new Set(
+    request.selectedReferences.map((reference) => reference.id),
+  );
+  const runs = (request.prepared?.runs ?? []).map((run) => ({
+    identity: run.identity,
+    configuration: run.configuration,
+    references: [...run.references],
+    selectedReferences: run.references.filter((id) => selectedIds.has(id)),
+  }));
+  return {
+    data: { runs },
+    text: runs.map(
+      (run) =>
+        `Node 运行 ${run.identity}：${describeNodeRunConfiguration(run.configuration)}；完整引用 ${run.references.join("、") || "无"}；本次选中 ${run.selectedReferences.join("、") || "无"}`,
+    ),
+  };
+}
+
+async function collectNodeTests(
+  request: PluginRequest<RuntimeNodeTestReference, NodePrepared>,
+): Promise<PluginBatchResult> {
+  if (request.selectedReferences.length === 0) {
+    return { results: [], diagnostics: { data: { runs: [] }, text: [] } };
+  }
+  const prepared = request.prepared;
+  if (prepared === undefined) {
+    throw new TypeError("Node 批量采集缺少本次完整预检结果。");
+  }
+
+  const selected = new Map<string, RuntimeNodeTestReference[]>();
+  for (const reference of request.selectedReferences) {
+    const target = getNodeTestTarget(reference.target);
+    const references = selected.get(target.run.identity) ?? [];
+    references.push(reference);
+    selected.set(target.run.identity, references);
+  }
+  const preparedByIdentity = new Map(
+    prepared.runs.map((run) => [run.identity, run]),
+  );
+  for (const identity of selected.keys()) {
+    if (!preparedByIdentity.has(identity)) {
+      throw new TypeError(`Node 运行 ${identity} 未通过完整预检。`);
+    }
+  }
+
+  const outcomes = await Promise.all(
+    prepared.runs
+      .filter((run) => selected.has(run.identity))
+      .map(async (preparedRun): Promise<NodeRunOutcome> => {
+        const references = selected.get(preparedRun.identity)!;
+        const targets = references.map((reference) => {
+          const target = getNodeTestTarget(reference.target);
+          return {
+            file: resolveTargetFile(
+              preparedRun.configuration.testRoot,
+              target.file,
+            ),
+            name: target.name,
+          };
+        });
+        let result: NodeTestRunResult;
+        try {
+          result = await executeNodeTestRun(
+            preparedRun.configuration,
+            uniqueSelectedTests(targets),
+          );
+        } catch (error) {
+          result = failedNodeTestRun(error);
+        }
+        return { preparedRun, references, result };
+      }),
+  );
+
+  return {
+    results: outcomes.flatMap(({ preparedRun, references, result }) =>
+      references.map((reference) => ({
+        referenceId: reference.id,
+        ...factFromNodeRun(reference, result, preparedRun),
+      })),
+    ),
+    diagnostics: nodeRunInformation(outcomes),
+  };
+}
+
+function nodeRunInformation(
+  outcomes: readonly NodeRunOutcome[],
+): PluginInformation {
+  const runs = outcomes.map(({ preparedRun, result }) => {
+    const failedCommands =
+      result.commandResult !== undefined &&
+      (result.commandResult.exitCode !== 0 ||
+        result.commandResult.signal !== null)
+        ? 1
+        : 0;
+    const failures = result.tests
+      .filter((test) => test.status === "failed" || test.status === "cancelled")
+      .map((test) => ({
+        id: test.id,
+        status: test.status,
+        ...(test.message === undefined ? {} : { message: test.message }),
+      }));
+    const reads = result.tests.flatMap((test) =>
+      (test.reads ?? []).map((read) => ({
+        runId: preparedRun.identity,
+        testId: test.id,
+        ...read,
+      })),
+    );
+    return {
+      identity: preparedRun.identity,
+      configuration: preparedRun.configuration,
+      commandAttempts: result.commandAttempts,
+      failedCommands,
+      testExecutions: result.testExecutions,
+      failures,
+      errors: result.errors.map(({ code, message }) => ({ code, message })),
+      ...(result.commandResult === undefined
+        ? {}
+        : { commandResult: { ...result.commandResult } }),
+      reads,
+    };
+  });
+  const text: string[] = [];
+  for (const run of runs) {
+    text.push(
+      `Node 运行 ${run.identity}：${run.testExecutions} 次测试尝试，${run.commandAttempts} 次命令尝试，${run.failedCommands} 次命令失败。`,
+      `Node 运行 ${run.identity} 配置：${describeNodeRunConfiguration(run.configuration)}`,
+    );
+    for (const failure of run.failures) {
+      text.push(
+        `Node 测试 ${failure.id} 最终状态 ${failure.status}${failure.message === undefined ? "" : `：${failure.message}`}`,
+      );
+    }
+    for (const read of run.reads) {
+      const location =
+        read.range === undefined
+          ? ""
+          : `；位置 ${read.range.path}（文本偏移 ${read.range.start}–${read.range.end}）`;
+      text.push(
+        `Node 测试内读取 ${read.referenceId}（运行 ${read.runId}，测试 ${read.testId}，第 ${read.attempt} 次尝试）：${JSON.stringify(read.value)}${location}`,
+      );
+    }
+    for (const error of run.errors) {
+      text.push(
+        `Node 运行 ${run.identity} 错误（${error.code}）：${error.message}`,
+      );
+    }
+  }
+  return { data: { runs }, text };
+}
+
+function describeNodeRunConfiguration(
+  configuration: NodeRunConfiguration,
+): string {
+  return `项目目录 ${configuration.root}；测试目录 ${configuration.testRoot}；测试文件 ${configuration.files.join("、")}；名称筛选 ${configuration.namePattern ?? "无"}；观察键 ${configuration.observationKeys.join("、") || "无"}`;
+}
+
+function failedNodeTestRun(error: unknown): NodeTestRunResult {
+  return {
+    lifecycle: "incomplete",
+    commandAttempts: 0,
+    testExecutions: 0,
+    tests: [],
+    errors: [{ code: "execution-failed", message: errorMessage(error) }],
+  };
+}
+
 function factFromNodeRun(
   reference: RuntimeNodeTestReference,
-  run: Awaited<ReturnType<typeof executeNodeTestRun>>,
-  declaration: RunDeclaration<NodeRunConfiguration>,
+  run: NodeTestRunResult,
+  declaration: NodePreparedRun,
 ): PluginResult {
   const normalized = declaration.configuration;
   if (run.lifecycle !== "complete" || run.errors.length > 0) {
@@ -615,6 +807,10 @@ function assertTestSelection(value: unknown): asserts value is {
 
 function nodeError(code: string, message: string): PluginResult<NodeTestValue> {
   return { kind: "error", error: { code, message } };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function isNonEmptyString(value: unknown): value is string {
