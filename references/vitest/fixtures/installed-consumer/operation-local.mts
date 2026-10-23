@@ -25,24 +25,12 @@ const config = defineConfig({
 });
 
 const first = await check(config);
-assert.deepEqual(first.execution, {
-  commandAttempts: 1,
-  failedCommands: 0,
-  testExecutions: 1,
-});
+assertFreshRun(first);
 const updated = await updateBaseline(config);
 assert.equal(updated.status, "updated");
-assert.deepEqual(updated.report.execution, {
-  commandAttempts: 1,
-  failedCommands: 0,
-  testExecutions: 1,
-});
+assertFreshRun(updated.report);
 const third = await check(config);
-assert.deepEqual(third.execution, {
-  commandAttempts: 1,
-  failedCommands: 0,
-  testExecutions: 1,
-});
+assertFreshRun(third);
 assert.equal(
   readFileSync(
     resolve(process.cwd(), "maintenance-root", "operation-count.txt"),
@@ -50,3 +38,26 @@ assert.equal(
   ),
   "xxx",
 );
+
+function assertFreshRun(report: {
+  readonly pluginDiagnostics: readonly {
+    readonly pluginId: string;
+    readonly data: unknown;
+  }[];
+}): void {
+  const plugin = report.pluginDiagnostics.find(
+    ({ pluginId }) => pluginId === "@ykdz/dock-reference-vitest",
+  );
+  assert.ok(plugin);
+  assert.deepEqual(
+    (
+      plugin.data as {
+        readonly runs: readonly {
+          readonly identity: string;
+          readonly testAttempts: number;
+        }[];
+      }
+    ).runs.map(({ identity, testAttempts }) => ({ identity, testAttempts })),
+    [{ identity: "同进程连续维护", testAttempts: 1 }],
+  );
+}

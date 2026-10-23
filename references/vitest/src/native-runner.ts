@@ -5,10 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import type { ExecutionRunRecord } from "@ykdz/dock";
-
 import { mapVitestRun } from "./event-mapper.ts";
-import type { VitestProcessResult } from "./event-mapper.ts";
+import type { VitestProcessResult, VitestRunResult } from "./event-mapper.ts";
 import type { OverlayConfigOptions } from "./overlay-config.ts";
 
 export type VitestRunConfiguration = {
@@ -44,7 +42,7 @@ export async function executeVitestRun(
   run: VitestRunConfiguration,
   selectedTests: readonly SelectedVitestTest[],
   selectedSuites: readonly SelectedVitestSuite[] = [],
-): Promise<ExecutionRunRecord> {
+): Promise<VitestRunResult> {
   const temporary = await mkdtemp(join(tmpdir(), "dock-vitest-run-"));
   const receiptPath = join(temporary, "receipt.json");
   const configPath = join(temporary, "vitest.config.mjs");
@@ -201,13 +199,12 @@ function internalFile(name: "setup" | "reporter" | "overlay-config"): string {
   return fileURLToPath(new URL(`./${name}${extension}`, import.meta.url));
 }
 
-function incompleteRun(code: string, message: string): ExecutionRunRecord {
+function incompleteRun(code: string, message: string): VitestRunResult {
   return {
-    lifecycle: "incomplete",
-    commandAttempts: 0,
-    testExecutions: 0,
+    complete: false,
+    command: { attempted: false, code: null, signal: null },
     tests: [],
-    errors: [{ code, message }],
+    issues: [{ code, message }],
   };
 }
 

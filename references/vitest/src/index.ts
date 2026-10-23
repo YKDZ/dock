@@ -2,24 +2,25 @@ import { accessSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { createReference, definePlugin } from "@ykdz/dock";
+import { canonicalJson, createReference, definePlugin } from "@ykdz/dock";
 import type {
-  ExecutionRunRecord,
   JsonValue,
   PluginContext,
-  PluginExecutionContext,
-  PluginExecution,
-  RunDeclaration,
+  PluginBatchResult,
+  PluginInformation,
+  PluginRequest,
   PluginResult,
   Reference,
   ReferenceOptions,
   ReferencePlugin,
+  ReferenceValue,
 } from "@ykdz/dock";
 
 import {
   readReferenceInTest,
   recordVitestObservation,
 } from "./attempt-context.ts";
+import type { VitestRunResult } from "./event-mapper.ts";
 import { executeVitestRun } from "./native-runner.ts";
 import type {
   VitestRunConfiguration,
@@ -431,7 +432,19 @@ export function vitestSuite<
   );
 }
 
-type VitestPlugin = ReferencePlugin<typeof vitestPluginId, VitestReference>;
+type VitestValue = ReferenceValue<VitestReference>;
+type PreparedVitestRun = {
+  identity: string;
+  configuration: VitestRunConfiguration;
+  referenceIds: string[];
+};
+type VitestPrepared = { runs: PreparedVitestRun[] };
+type VitestPlugin = ReferencePlugin<
+  typeof vitestPluginId,
+  VitestReference,
+  VitestValue,
+  VitestPrepared
+>;
 
 const vitestImplementation: VitestPlugin = definePlugin({
   id: vitestPluginId,
@@ -472,81 +485,342 @@ const vitestImplementation: VitestPlugin = definePlugin({
       target.file,
     );
   },
-  execution: {
-    declare(
-      references: readonly VitestReference[],
-      context: PluginContext,
-    ): readonly RunDeclaration<VitestRunConfiguration>[] {
-      return references.map((reference) => {
-        const target = getVitestTarget(reference.target);
-        const configuration = normalizeRun(target.run, context.root);
+  prepare(
+    references: readonly VitestReference[],
+    context: PluginContext,
+  ): VitestPrepared {
+    const runs = new Map<
+      string,
+      {
+        readonly configuration: VitestRunConfiguration;
+        readonly referenceIds: string[];
+      }
+    >();
+    for (const reference of references) {
+      const target = getVitestTarget(reference.target);
+      const configuration = normalizeRun(target.run, context.root);
+      assertSuiteBelongsToRun(target, configuration);
+      const previous = runs.get(target.run.identity);
+      if (previous !== undefined) {
         if (
-          target.kind === "vitest-suite" &&
-          !configuration.files.includes(
-            resolveTargetFile(configuration.testRoot, target.file),
-          )
+          canonicalJson(previous.configuration) !== canonicalJson(configuration)
         ) {
           throw new TypeError(
-            `Vitest 测试组文件 ${target.file} 不在运行 ${target.run.identity} 的 files 中。`,
+            `Vitest 运行 ${target.run.identity} 在同一插件中使用了不同配置。`,
           );
         }
-        return {
-          identity: target.run.identity,
+        previous.referenceIds.push(reference.id);
+      } else {
+        runs.set(target.run.identity, {
           configuration,
-          references: [reference.id],
-        };
-      });
-    },
-    async execute({ declaration, selectedReferences }) {
-      const run = declaration.configuration;
-      const targets: SelectedVitestTest[] = [...run.additionalTests];
-      const suites: SelectedVitestSuite[] = [];
-      for (const reference of selectedReferences) {
-        const target = getVitestTarget(reference.target);
-        if (target.kind === "vitest-suite") {
-          suites.push({
-            file: resolveTargetFile(run.testRoot, target.file),
-            suitePath: [...target.suitePath],
-          });
-        } else {
-          targets.push({
-            file: resolveTargetFile(run.testRoot, target.file),
-            name: target.name,
-          });
-        }
+          referenceIds: [reference.id],
+        });
       }
-      return await executeVitestRun(
-        run,
-        uniqueSelectedTests(targets),
-        uniqueSelectedSuites(suites),
-      );
-    },
-  } satisfies PluginExecution<VitestReference, VitestRunConfiguration>,
-  collect(
-    reference: VitestReference,
-    context: PluginExecutionContext<VitestRunConfiguration>,
-  ): PluginResult {
-    const target = getVitestTarget(reference.target);
-    const run = context.execution.get(target.run.identity);
-    if (run === undefined) {
-      return {
-        kind: "error",
-        error: {
-          code: "execution-record-missing",
-          message: `Vitest 执行 ${target.run.identity} 没有完成当前维护会话。`,
-        },
-      };
     }
-    return factFromVitestRun(
-      reference,
-      run.record,
-      run.declaration.configuration.testRoot,
-    );
+    return {
+      runs: [...runs].map(([identity, run]) => ({
+        identity,
+        configuration: run.configuration,
+        referenceIds: run.referenceIds,
+      })),
+    };
+  },
+  describe(
+    request: PluginRequest<VitestReference, VitestPrepared>,
+  ): PluginInformation {
+    return describeVitestRuns(request);
+  },
+  collect(
+    request: PluginRequest<VitestReference, VitestPrepared>,
+  ): Promise<PluginBatchResult<VitestValue>> {
+    return collectVitestRuns(request);
   },
 });
 
 export const vitest = vitestImplementation;
 export { readReferenceInTest };
+
+type VitestCollectionRun = {
+  readonly prepared: PreparedVitestRun;
+  readonly selectedReferences: readonly VitestReference[];
+  readonly result: VitestRunResult;
+};
+
+function assertSuiteBelongsToRun(
+  target: VitestTestTarget,
+  configuration: VitestRunConfiguration,
+): void {
+  if (
+    target.kind === "vitest-suite" &&
+    !configuration.files.includes(
+      resolveTargetFile(configuration.testRoot, target.file),
+    )
+  ) {
+    throw new TypeError(
+      `Vitest 测试组文件 ${target.file} 不在运行 ${target.run.identity} 的 files 中。`,
+    );
+  }
+}
+
+function describeVitestRuns(
+  request: PluginRequest<VitestReference, VitestPrepared>,
+): PluginInformation {
+  const prepared = requirePrepared(request);
+  const selectedIds = new Set(
+    request.selectedReferences.map((reference) => reference.id),
+  );
+  const runs = prepared.runs.map(
+    ({ identity, configuration, referenceIds }) => {
+      const selectedReferences = referenceIds.filter((id) =>
+        selectedIds.has(id),
+      );
+      return {
+        identity,
+        configuration,
+        references: [...referenceIds],
+        selectedReferences,
+      };
+    },
+  );
+  return {
+    data: { runs },
+    text: runs.map(
+      ({ identity, configuration, references, selectedReferences }) =>
+        `Vitest 运行声明 ${identity}：选中 ${selectedReferences.length}/${references.length} 条引用，测试文件 ${configuration.files.join("、")}。`,
+    ),
+  };
+}
+
+async function collectVitestRuns(
+  request: PluginRequest<VitestReference, VitestPrepared>,
+): Promise<PluginBatchResult<VitestValue>> {
+  const prepared = requirePrepared(request);
+  const runs = await Promise.all(
+    prepared.runs.flatMap((run) => {
+      const referenceIds = new Set(run.referenceIds);
+      const selectedReferences = request.selectedReferences.filter(
+        (reference) => referenceIds.has(reference.id),
+      );
+      return selectedReferences.length === 0
+        ? []
+        : [
+            collectVitestRun({
+              prepared: run,
+              selectedReferences,
+            }),
+          ];
+    }),
+  );
+  const byReference = new Map(
+    runs.flatMap((run) =>
+      run.selectedReferences.map((reference) => [reference.id, run] as const),
+    ),
+  );
+  return {
+    results: request.selectedReferences.map((reference) => {
+      const run = byReference.get(reference.id);
+      const result =
+        run === undefined
+          ? vitestError(
+              "prepared-run-missing",
+              `Vitest 引用 ${reference.id} 没有对应的本次运行声明。`,
+            )
+          : factFromVitestRun(
+              reference,
+              run.result,
+              run.prepared.configuration.testRoot,
+            );
+      return { referenceId: reference.id, ...result };
+    }),
+    diagnostics: vitestDiagnostics(runs),
+  };
+}
+
+async function collectVitestRun(
+  run: Pick<VitestCollectionRun, "prepared" | "selectedReferences">,
+): Promise<VitestCollectionRun> {
+  const { configuration } = run.prepared;
+  const selectedTests: SelectedVitestTest[] = [
+    ...configuration.additionalTests,
+  ];
+  const selectedSuites: SelectedVitestSuite[] = [];
+  for (const reference of run.selectedReferences) {
+    const target = getVitestTarget(reference.target);
+    if (target.kind === "vitest-suite") {
+      selectedSuites.push({
+        file: resolveTargetFile(configuration.testRoot, target.file),
+        suitePath: [...target.suitePath],
+      });
+    } else {
+      selectedTests.push({
+        file: resolveTargetFile(configuration.testRoot, target.file),
+        name: target.name,
+      });
+    }
+  }
+
+  let result: VitestRunResult;
+  try {
+    result = await executeVitestRun(
+      configuration,
+      uniqueSelectedTests(selectedTests),
+      uniqueSelectedSuites(selectedSuites),
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    result = {
+      complete: false,
+      command: {
+        attempted: false,
+        code: null,
+        signal: null,
+        error: message,
+      },
+      tests: [],
+      issues: [{ code: "vitest-runner-failed", message }],
+    };
+  }
+  return { ...run, result };
+}
+
+function vitestDiagnostics(
+  runs: readonly VitestCollectionRun[],
+): PluginInformation {
+  const data: JsonValue = {
+    runs: runs.map(({ prepared, selectedReferences, result }) => {
+      const selectedIdentities = selectedVitestTestIdentities(
+        selectedReferences,
+        prepared.configuration,
+        result,
+      );
+      return {
+        identity: prepared.identity,
+        configuration: {
+          framework: prepared.configuration.framework,
+          root: prepared.configuration.root,
+          testRoot: prepared.configuration.testRoot,
+          files: [...prepared.configuration.files],
+          additionalTests: prepared.configuration.additionalTests.map(
+            ({ file, name }) => ({ file, name }),
+          ),
+          ...(prepared.configuration.configFile === undefined
+            ? {}
+            : { configFile: prepared.configuration.configFile }),
+          observationKeys: [...prepared.configuration.observationKeys],
+        },
+        references: [...prepared.referenceIds],
+        selectedReferences: selectedReferences.map(({ id }) => id),
+        command: {
+          attempted: result.command.attempted,
+          code: result.command.code,
+          signal: result.command.signal,
+          ...(result.command.error === undefined
+            ? {}
+            : { error: result.command.error }),
+        },
+        testAttempts: result.tests.reduce(
+          (total, test) => total + test.attemptCount,
+          0,
+        ),
+        tests: result.tests
+          .filter((test) => selectedIdentities.has(test.identity))
+          .map((test) => ({
+            identity: test.identity,
+            status: test.status,
+            attemptCount: test.attemptCount,
+            ...(test.message === undefined ? {} : { message: test.message }),
+          })),
+        failures: result.tests
+          .filter((test) => test.status !== "passed")
+          .map((test) => ({
+            identity: test.identity,
+            status: test.status,
+            attemptCount: test.attemptCount,
+            ...(test.message === undefined ? {} : { message: test.message }),
+          })),
+        ...(result.discovery === undefined
+          ? {}
+          : { discoveryCompleteness: result.discovery.completeness }),
+        reads: result.tests.flatMap((test) =>
+          (test.reads ?? []).map((read) => ({
+            testIdentity: test.identity,
+            ...read,
+          })),
+        ),
+        issues: result.issues.map(({ code, message }) => ({ code, message })),
+      };
+    }),
+  };
+  const text = runs.flatMap(({ prepared, result }) => {
+    const command = result.command;
+    const commandStatus = !command.attempted
+      ? "未启动原生命令"
+      : command.signal !== null
+        ? `原生命令收到信号 ${command.signal}`
+        : command.code === 0
+          ? "原生命令退出成功"
+          : `原生命令退出码 ${command.code}`;
+    const lines = [
+      `Vitest 运行 ${prepared.identity}：${result.tests.reduce((total, test) => total + test.attemptCount, 0)} 次测试尝试；${commandStatus}。`,
+      ...result.issues.map(
+        ({ code, message }) =>
+          `Vitest 运行 ${prepared.identity}（${code}）：${message}`,
+      ),
+      ...result.tests
+        .filter((test) => test.status !== "passed")
+        .map(
+          (test) =>
+            `Vitest 测试 ${test.identity}（${test.status}，${test.attemptCount} 次尝试）：${test.message ?? "没有原生测试错误说明。"}`,
+        ),
+      ...result.tests.flatMap((test) =>
+        (test.reads ?? []).map((read) => {
+          const range =
+            read.range === undefined
+              ? ""
+              : `（${read.range.path}:${read.range.start}-${read.range.end}）`;
+          return `测试 ${test.identity} 第 ${read.attempt} 次读取引用 ${read.referenceId}${range}：${JSON.stringify(read.value)}`;
+        }),
+      ),
+    ];
+    return lines;
+  });
+  return { data, text };
+}
+
+function selectedVitestTestIdentities(
+  references: readonly VitestReference[],
+  configuration: VitestRunConfiguration,
+  run: VitestRunResult,
+): Set<string> {
+  const identities = new Set<string>();
+  for (const reference of references) {
+    const target = getVitestTarget(reference.target);
+    const file = relativeTestFile(
+      configuration.testRoot,
+      resolveTargetFile(configuration.testRoot, target.file),
+    );
+    for (const test of run.discovery?.tests ?? []) {
+      if (test.file !== file) continue;
+      if (
+        target.kind === "vitest-suite"
+          ? isWithinSuite(test.suitePath, target.suitePath)
+          : flattenTestName(test.suitePath, test.name) === target.name
+      ) {
+        identities.add(test.identity);
+      }
+    }
+  }
+  return identities;
+}
+
+function requirePrepared(
+  request: PluginRequest<VitestReference, VitestPrepared>,
+): VitestPrepared {
+  if (request.prepared === undefined) {
+    throw new TypeError("Vitest 插件缺少本次完整声明的准备数据。");
+  }
+  return request.prepared;
+}
 
 function normalizeRun(run: VitestRun, root: string): VitestRunConfiguration {
   const testRoot = resolvePath(root, run.testRoot ?? ".");
@@ -610,11 +884,11 @@ function resolveConfigFile(
 
 function factFromVitestRun(
   reference: VitestReference,
-  run: ExecutionRunRecord,
+  run: VitestRunResult,
   testRoot: string,
-): PluginResult {
-  if (run.lifecycle !== "complete" || run.errors.length > 0) {
-    const detail = run.errors.map((error) => error.message).join("；");
+): PluginResult<VitestValue> {
+  if (!run.complete || run.issues.length > 0) {
+    const detail = run.issues.map((error) => error.message).join("；");
     return {
       kind: "error",
       error: {
@@ -630,7 +904,7 @@ function factFromVitestRun(
   }
   const targetFile = resolveTargetFile(testRoot, target.file);
   const relativeFile = relativeTestFile(testRoot, targetFile);
-  const catalogMatches = (run.testCatalog?.tests ?? []).filter(
+  const catalogMatches = (run.discovery?.tests ?? []).filter(
     (test) =>
       test.file === relativeFile &&
       flattenTestName(test.suitePath, test.name) === target.name,
@@ -647,8 +921,8 @@ function factFromVitestRun(
       `没有执行声明的 Vitest 测试：${target.file} / ${target.name}。`,
     );
   }
-  const identity = catalogMatches[0]!.executionId;
-  const matches = run.tests.filter((test) => test.id === identity);
+  const identity = catalogMatches[0]!.identity;
+  const matches = run.tests.filter((test) => test.identity === identity);
   if (matches.length > 1 || matches[0]?.status === "duplicate") {
     return vitestError(
       "duplicate-test-identity",
@@ -685,7 +959,7 @@ function factFromVitestRun(
   }
   const code =
     test.status === "cancelled"
-      ? test.started
+      ? test.attemptCount > 0
         ? "test-cancelled"
         : "test-not-executed"
       : test.status === "skipped"
@@ -707,10 +981,10 @@ function factFromVitestRun(
 
 function factFromVitestSuite(
   target: VitestSuiteTarget,
-  run: ExecutionRunRecord,
+  run: VitestRunResult,
   testRoot: string,
-): PluginResult {
-  const catalog = run.testCatalog;
+): PluginResult<VitestValue> {
+  const catalog = run.discovery;
   if (catalog === undefined) {
     return vitestError(
       "test-catalog-missing",
@@ -751,8 +1025,10 @@ function factFromVitestSuite(
         test.file === file && isWithinSuite(test.suitePath, target.suitePath),
     )
     .map((entry) => {
-      const id = entry.executionId;
-      const matches = run.tests.filter((test) => test.id === entry.executionId);
+      const id = entry.identity;
+      const matches = run.tests.filter(
+        (test) => test.identity === entry.identity,
+      );
       if (matches.length !== 1) {
         return {
           id,
@@ -773,7 +1049,7 @@ function factFromVitestSuite(
         return {
           id,
           error: {
-            code: statusErrorCode(test.status, test.started),
+            code: statusErrorCode(test.status, test.attemptCount > 0),
             message:
               test.message ??
               `组成员 ${entry.name} 的最终状态为 ${test.status}。`,
@@ -815,7 +1091,7 @@ function factFromVitestSuite(
 }
 
 function statusErrorCode(
-  status: ExecutionRunRecord["tests"][number]["status"],
+  status: VitestRunResult["tests"][number]["status"],
   started: boolean,
 ): string {
   if (status === "cancelled")

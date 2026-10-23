@@ -5,8 +5,6 @@ import {
   copyJsonValue,
   readReference,
   type Config,
-  type ExecutionObservationRecord,
-  type ExecutionReadRecord,
   type JsonValue,
   type PluginReadResult,
   type ReadableReferenceOf,
@@ -14,10 +12,15 @@ import {
   type ReferenceValue,
 } from "@ykdz/dock";
 
+import type {
+  VitestObservationRecord,
+  VitestReadRecord,
+} from "./event-mapper.ts";
+
 type AttemptRecord = {
   readonly attempt: number;
-  readonly observations: ExecutionObservationRecord[];
-  readonly reads: ExecutionReadRecord[];
+  readonly observations: VitestObservationRecord[];
+  readonly reads: VitestReadRecord[];
 };
 
 type ActiveAttempt = {

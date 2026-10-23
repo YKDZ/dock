@@ -1,29 +1,64 @@
 import { relative, resolve } from "node:path";
 
-import type {
-  ExecutionObservationRecord,
-  ExecutionReadRecord,
-  ExecutionRunRecord,
-  ExecutionTestRecord,
-  ExecutionTestStatus,
-  ExecutionTestCatalog,
-} from "@ykdz/dock";
+import { isJsonValue } from "@ykdz/dock";
+import type { JsonValue, TextRange } from "@ykdz/dock";
 
-type CandidateTest = {
-  readonly id: string;
-  readonly status: ExecutionTestStatus;
-  readonly started: boolean;
+type VitestTestStatus =
+  | "passed"
+  | "failed"
+  | "skipped"
+  | "todo"
+  | "filtered"
+  | "cancelled"
+  | "not-run"
+  | "duplicate";
+
+export type VitestObservationRecord = {
+  readonly attempt: number;
+  readonly key: string;
+  readonly value: JsonValue;
+};
+
+export type VitestReadRecord = {
+  readonly attempt: number;
+  readonly referenceId: string;
+  readonly value: JsonValue;
+  readonly range?: TextRange;
+};
+
+type VitestTestRecord = {
+  readonly identity: string;
+  readonly status: VitestTestStatus;
   readonly attemptCount: number;
   readonly message?: string;
-  readonly observations?: readonly ExecutionObservationRecord[];
-  readonly reads?: readonly ExecutionReadRecord[];
+  readonly observations?: readonly VitestObservationRecord[];
+  readonly reads?: readonly VitestReadRecord[];
+};
+
+type VitestTestCatalog = {
+  readonly completeness: "complete" | "partial";
+  readonly suites: readonly {
+    readonly file: string;
+    readonly path: string[];
+  }[];
+  readonly tests: readonly {
+    readonly identity: string;
+    readonly file: string;
+    readonly suitePath: string[];
+    readonly name: string;
+  }[];
+};
+
+type VitestIssue = {
+  readonly code: string;
+  readonly message: string;
 };
 
 export type VitestCandidate = {
   readonly version: string;
   readonly completed: boolean;
-  readonly tests: readonly CandidateTest[];
-  readonly catalog: ExecutionTestCatalog;
+  readonly tests: readonly VitestTestRecord[];
+  readonly catalog: VitestTestCatalog;
   readonly errors: readonly string[];
 };
 
@@ -36,8 +71,17 @@ export type VitestReceipt = {
 
 export type VitestProcessResult = {
   readonly code: number | null;
-  readonly signal: NodeJS.Signals | null;
+  readonly signal: string | null;
   readonly error?: string;
+};
+
+/** Vitest 原生记录的本地解释结果，不属于宿主公共执行协议。 */
+export type VitestRunResult = {
+  readonly complete: boolean;
+  readonly command: VitestProcessResult & { readonly attempted: boolean };
+  readonly tests: readonly VitestTestRecord[];
+  readonly discovery?: VitestTestCatalog;
+  readonly issues: readonly VitestIssue[];
 };
 
 type TestModuleLike = {
@@ -80,9 +124,9 @@ export function captureVitestCandidate(
   requestedFiles: readonly string[] = [],
 ): VitestCandidate {
   const errors = list(unhandledValue).map(errorMessage);
-  const tests: CandidateTest[] = [];
-  const catalogSuites: ExecutionTestCatalog["suites"][number][] = [];
-  const catalogTests: ExecutionTestCatalog["tests"][number][] = [];
+  const tests: VitestTestRecord[] = [];
+  const catalogSuites: VitestTestCatalog["suites"][number][] = [];
+  const catalogTests: VitestTestCatalog["tests"][number][] = [];
   const modules = list(modulesValue);
   const discoveredFiles = new Set<string>();
   let catalogComplete =
@@ -183,8 +227,8 @@ export function captureVitestCandidate(
       }
 
       const file = relative(root, modulePath).split("\\").join("/");
-      const executionId = testIdentity(file, suitePath, name);
-      catalogTests.push({ executionId, file, suitePath, name });
+      const identity = testIdentity(file, suitePath, name);
+      catalogTests.push({ identity, file, suitePath, name });
       const result = safeCall(test.result, testValue);
       const metadata = safeCall(test.meta, testValue);
       const diagnostic = safeCall(test.diagnostic, testValue);
@@ -204,9 +248,8 @@ export function captureVitestCandidate(
           ? resultMessage(result)
           : undefined;
       tests.push({
-        id: executionId,
+        identity,
         status,
-        started: attemptCount > 0,
         attemptCount,
         ...(message === undefined ? {} : { message }),
         ...(activity.observations.length === 0
@@ -243,40 +286,40 @@ export function captureVitestCandidate(
   };
 }
 
-/** 将关闭后的 reporter 收据与真实子进程退出状态合并为公共记录。 */
+/** 将 Vitest reporter 收据与真实子进程退出状态合并为本地证据。 */
 export function mapVitestRun(
   receiptValue: unknown,
   processResult: VitestProcessResult,
-): ExecutionRunRecord {
-  const errors: ExecutionRunRecord["errors"][number][] = [];
+): VitestRunResult {
+  const issues: VitestIssue[] = [];
   const supportedVersions = new Set(["4.1.11", "5.0.3"]);
   const receipt = parseReceipt(receiptValue);
   if (receipt === undefined) {
-    errors.push({
+    issues.push({
       code: "vitest-receipt-incomplete",
       message: "Vitest 没有提供完整且结构有效的关闭收据。",
     });
   }
   if (receipt !== undefined && !supportedVersions.has(receipt.version)) {
-    errors.push({
+    issues.push({
       code: "vitest-version-unsupported",
       message: `尚未验证 Vitest ${receipt.version}。`,
     });
   }
   for (const closeError of receipt?.closeErrors ?? []) {
-    errors.push({
+    issues.push({
       code: "vitest-close-failed",
       message: closeError,
     });
   }
   if (processResult.signal !== null) {
-    errors.push({
+    issues.push({
       code: "vitest-process-interrupted",
       message: `Vitest 进程收到信号 ${processResult.signal}。`,
     });
   }
   if (processResult.error !== undefined) {
-    errors.push({
+    issues.push({
       code: "vitest-process-failed",
       message: processResult.error,
     });
@@ -284,36 +327,25 @@ export function mapVitestRun(
   const candidate = receipt?.candidate;
   if (candidate !== undefined) {
     for (const message of candidate.errors) {
-      errors.push({ code: "vitest-run-incomplete", message });
+      issues.push({ code: "vitest-run-incomplete", message });
     }
     if (!candidate.completed) {
-      errors.push({
+      issues.push({
         code: "vitest-run-incomplete",
         message: "Vitest 测试树没有报告完整的单次运行终态。",
       });
     }
   }
 
-  const tests: ExecutionTestRecord[] =
-    candidate?.tests.map((test) => ({
-      id: test.id,
-      status: test.status,
-      started: test.started,
-      attemptCount: test.attemptCount,
-      ...(test.message === undefined ? {} : { message: test.message }),
-      ...(test.observations === undefined
-        ? {}
-        : { observations: test.observations }),
-      ...(test.reads === undefined ? {} : { reads: test.reads }),
-    })) ?? [];
+  const tests = candidate?.tests ?? [];
   const hasFailedTests = tests.some((test) => test.status === "failed");
   if (processResult.code === 0 && hasFailedTests) {
-    errors.push({
+    issues.push({
       code: "vitest-exit-mismatch",
       message: "Vitest 报告了失败测试，但原生进程以成功退出码结束。",
     });
   } else if (processResult.code === 1 && !hasFailedTests) {
-    errors.push({
+    issues.push({
       code: "vitest-exit-unexplained",
       message:
         "Vitest 以失败退出码结束，但完整测试树中没有失败测试可解释该退出。",
@@ -323,32 +355,23 @@ export function mapVitestRun(
     processResult.code !== 0 &&
     processResult.code !== 1
   ) {
-    errors.push({
+    issues.push({
       code: "vitest-exit-abnormal",
       message: `Vitest 进程以异常退出码 ${processResult.code} 结束。`,
     });
   } else if (processResult.code === null && processResult.signal === null) {
-    errors.push({
+    issues.push({
       code: "vitest-exit-missing",
       message: "Vitest 进程没有提供退出状态。",
     });
   }
 
   return {
-    lifecycle: errors.length === 0 ? "complete" : "incomplete",
-    commandAttempts: 1,
-    testExecutions: tests.reduce((total, test) => total + test.attemptCount, 0),
+    complete: issues.length === 0,
+    command: { attempted: true, ...processResult },
     tests,
-    ...(candidate === undefined ? {} : { testCatalog: candidate.catalog }),
-    errors: uniqueExecutionErrors(errors),
-    ...(processResult.code === null && processResult.signal === null
-      ? {}
-      : {
-          commandResult: {
-            exitCode: processResult.code,
-            signal: processResult.signal,
-          },
-        }),
+    ...(candidate === undefined ? {} : { discovery: candidate.catalog }),
+    issues: uniqueIssues(issues),
   };
 }
 
@@ -388,15 +411,12 @@ function parseReceipt(value: unknown): VitestReceipt | undefined {
   };
 }
 
-function isCandidateTest(value: unknown): value is CandidateTest {
+function isCandidateTest(value: unknown): value is VitestTestRecord {
   return (
     isRecord(value) &&
-    typeof value.id === "string" &&
-    value.id.length > 0 &&
-    isExecutionTestStatus(value.status) &&
-    typeof value.started === "boolean" &&
+    isNonEmptyString(value.identity) &&
+    isVitestTestStatus(value.status) &&
     isNonNegativeCount(value.attemptCount) &&
-    value.started === value.attemptCount > 0 &&
     (value.message === undefined || typeof value.message === "string") &&
     (value.observations === undefined ||
       (Array.isArray(value.observations) &&
@@ -406,7 +426,7 @@ function isCandidateTest(value: unknown): value is CandidateTest {
   );
 }
 
-function isCandidateCatalog(value: unknown): value is ExecutionTestCatalog {
+function isCandidateCatalog(value: unknown): value is VitestTestCatalog {
   return (
     isRecord(value) &&
     (value.completeness === "complete" || value.completeness === "partial") &&
@@ -423,7 +443,7 @@ function isCandidateCatalog(value: unknown): value is ExecutionTestCatalog {
     value.tests.every(
       (test) =>
         isRecord(test) &&
-        isNonEmptyString(test.executionId) &&
+        isNonEmptyString(test.identity) &&
         isNonEmptyString(test.file) &&
         isStringList(test.suitePath) &&
         test.suitePath.every(isNonEmptyString) &&
@@ -457,26 +477,28 @@ function nativeSuitePath(
 
 function isCandidateObservation(
   value: unknown,
-): value is ExecutionObservationRecord {
+): value is VitestObservationRecord {
   return (
     isRecord(value) &&
     isPositiveCount(value.attempt) &&
     typeof value.key === "string" &&
     value.key.length > 0 &&
     Object.hasOwn(value, "value") &&
+    isJsonValue(value.value) &&
     Object.keys(value).every(
       (key) => key === "attempt" || key === "key" || key === "value",
     )
   );
 }
 
-function isCandidateRead(value: unknown): value is ExecutionReadRecord {
+function isCandidateRead(value: unknown): value is VitestReadRecord {
   return (
     isRecord(value) &&
     isPositiveCount(value.attempt) &&
     typeof value.referenceId === "string" &&
     value.referenceId.length > 0 &&
     Object.hasOwn(value, "value") &&
+    isJsonValue(value.value) &&
     Object.keys(value).every(
       (key) =>
         key === "attempt" ||
@@ -488,9 +510,7 @@ function isCandidateRead(value: unknown): value is ExecutionReadRecord {
   );
 }
 
-function isTextRange(
-  value: unknown,
-): value is NonNullable<ExecutionReadRecord["range"]> {
+function isTextRange(value: unknown): value is TextRange {
   return (
     isRecord(value) &&
     typeof value.path === "string" &&
@@ -505,7 +525,7 @@ function isTextRange(
   );
 }
 
-function isExecutionTestStatus(value: unknown): value is ExecutionTestStatus {
+function isVitestTestStatus(value: unknown): value is VitestTestStatus {
   return (
     value === "passed" ||
     value === "failed" ||
@@ -583,8 +603,8 @@ function attemptHistory(
   errors: string[],
   name: string,
 ): {
-  readonly observations: ExecutionObservationRecord[];
-  readonly reads: ExecutionReadRecord[];
+  readonly observations: VitestObservationRecord[];
+  readonly reads: VitestReadRecord[];
 } {
   const attempts = isRecord(metadata) ? metadata.dockVitestAttempts : undefined;
   if (attemptCount === 0) {
@@ -601,8 +621,8 @@ function attemptHistory(
     return { observations: [], reads: [] };
   }
 
-  const observations: ExecutionObservationRecord[] = [];
-  const reads: ExecutionReadRecord[] = [];
+  const observations: VitestObservationRecord[] = [];
+  const reads: VitestReadRecord[] = [];
   for (let index = 0; index < attempts.length; index += 1) {
     const attempt = attempts[index];
     if (
@@ -626,7 +646,7 @@ function finalStatus(
   state: unknown,
   mode: unknown,
   attemptCount: number,
-): ExecutionTestStatus {
+): VitestTestStatus {
   if (mode === "todo") return "todo";
   if (state === "passed") return "passed";
   if (state === "failed") return "failed";
@@ -643,14 +663,14 @@ function resultMessage(result: unknown): string | undefined {
   return messages.length === 0 ? undefined : messages.join("；");
 }
 
-function markDuplicateIdentities(tests: CandidateTest[]): void {
+function markDuplicateIdentities(tests: VitestTestRecord[]): void {
   const counts = new Map<string, number>();
   for (const test of tests) {
-    counts.set(test.id, (counts.get(test.id) ?? 0) + 1);
+    counts.set(test.identity, (counts.get(test.identity) ?? 0) + 1);
   }
   for (let index = 0; index < tests.length; index += 1) {
     const test = tests[index];
-    if (test !== undefined && (counts.get(test.id) ?? 0) > 1) {
+    if (test !== undefined && (counts.get(test.identity) ?? 0) > 1) {
       tests[index] = { ...test, status: "duplicate" };
     }
   }
@@ -660,9 +680,7 @@ function uniqueMessages(values: readonly string[]): string[] {
   return [...new Set(values)];
 }
 
-function uniqueExecutionErrors(
-  values: readonly ExecutionRunRecord["errors"][number][],
-): ExecutionRunRecord["errors"][number][] {
+function uniqueIssues(values: readonly VitestIssue[]): VitestIssue[] {
   const seen = new Set<string>();
   return values.filter((value) => {
     const key = `${value.code}\0${value.message}`;
