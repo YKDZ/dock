@@ -269,6 +269,11 @@ void test("inspect, check, and baseline update share handlers across English tex
     assert.match(updateText.stdout, /Binding doc-policy/);
     assert.doesNotMatch(updateText.stdout, /Current fact:/);
     assert.match(updateText.stdout, /fact-ref \(fact\.txt:1\)/);
+    assert.match(updateText.stdout, /Baseline updated\./);
+    const savedBaseline = await readFile(
+      join(root, "dock.baseline.json"),
+      "utf8",
+    );
 
     const updateStructured = await runCli([
       "baseline",
@@ -392,7 +397,18 @@ void test("inspect, check, and baseline update share handlers across English tex
     assert.equal(rejectedText.stderr, "");
     assert.match(
       rejectedText.stdout,
-      /Update error doc-policy \/ fact-ref \(missing-fact\):/,
+      /Error fact-ref \(missing-fact\): Line 1/,
+    );
+    assert.match(rejectedText.stdout, /Line 2/);
+    assert.equal(
+      rejectedText.stdout.match(/Error fact-ref \(missing-fact\):/g)?.length,
+      1,
+    );
+    assert.doesNotMatch(rejectedText.stdout, /Update error/);
+    assert.match(rejectedText.stdout, /Baseline was not updated\./);
+    assert.equal(
+      await readFile(join(root, "dock.baseline.json"), "utf8"),
+      savedBaseline,
     );
 
     const rejectedStructured = await runCli([
@@ -408,11 +424,35 @@ void test("inspect, check, and baseline update share handlers across English tex
     const rejectedEnvelope = JSON.parse(rejectedStructured.stdout) as {
       kind: string;
       variant: string;
-      data: { errors: { code: string }[] };
+      data: {
+        errors: unknown[];
+        report: {
+          bindings: Array<{
+            consistency?: string;
+            errors?: Array<{ referenceId?: string; code: string }>;
+          }>;
+        };
+      };
     };
     assert.equal(rejectedEnvelope.kind, "data");
     assert.equal(rejectedEnvelope.variant, "rejected");
-    assert.equal(rejectedEnvelope.data.errors[0]?.code, "missing-fact");
+    assert.deepEqual(rejectedEnvelope.data.errors, []);
+    assert.equal(
+      rejectedEnvelope.data.report.bindings[0]?.consistency,
+      undefined,
+    );
+    assert.equal(
+      rejectedEnvelope.data.report.bindings[0]?.errors?.[0]?.referenceId,
+      "fact-ref",
+    );
+    assert.equal(
+      rejectedEnvelope.data.report.bindings[0]?.errors?.[0]?.code,
+      "missing-fact",
+    );
+    assert.equal(
+      await readFile(join(root, "dock.baseline.json"), "utf8"),
+      savedBaseline,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -729,9 +769,13 @@ void test("lists related references with line-based locations, fallbacks, plugin
       /All checked bindings are consistent with baseline\./,
     );
 
-    // 3) Binding with both errors and confirmed changes: displays errors first, then confirmed changes.
+    // 3) Binding with both errors and confirmed changes: displays errors first, then confirmed changes, and rejects updates without writing baseline.
     await writeFile(versionPath, "1.0.0");
     await runCli(["baseline", "update", "--config", configPath]);
+    const baselineBeforeSuiteError = await readFile(
+      join(root, "dock.baseline.json"),
+      "utf8",
+    );
     await writeFile(
       statePath,
       JSON.stringify({
@@ -761,6 +805,94 @@ void test("lists related references with line-based locations, fallbacks, plugin
     assert.ok(errorIndex !== -1, errorAndChangeText.stdout);
     assert.ok(changeIndex !== -1, errorAndChangeText.stdout);
     assert.ok(errorIndex < changeIndex, errorAndChangeText.stdout);
+
+    const errorAndChangeUpdateText = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      configPath,
+    ]);
+    assert.equal(errorAndChangeUpdateText.result.exitCode, 1);
+    assert.equal(errorAndChangeUpdateText.stderr, "");
+    const updateErrorIndex = errorAndChangeUpdateText.stdout.indexOf(
+      "Error suite-ref / a (missing-observation): Missing obs",
+    );
+    const updateChangeIndex = errorAndChangeUpdateText.stdout.indexOf(
+      "Change: suite-ref member b added",
+    );
+    assert.ok(updateErrorIndex !== -1, errorAndChangeUpdateText.stdout);
+    assert.ok(updateChangeIndex !== -1, errorAndChangeUpdateText.stdout);
+    assert.ok(
+      updateErrorIndex < updateChangeIndex,
+      errorAndChangeUpdateText.stdout,
+    );
+    assert.equal(
+      errorAndChangeUpdateText.stdout.match(
+        /Error suite-ref \/ a \(missing-observation\):/g,
+      )?.length,
+      1,
+    );
+    assert.doesNotMatch(errorAndChangeUpdateText.stdout, /Update error/);
+    assert.match(errorAndChangeUpdateText.stdout, /Baseline was not updated\./);
+    assert.equal(
+      await readFile(join(root, "dock.baseline.json"), "utf8"),
+      baselineBeforeSuiteError,
+    );
+
+    const errorAndChangeUpdateStructured = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      configPath,
+      "--output",
+      "structured",
+    ]);
+    assert.equal(errorAndChangeUpdateStructured.result.exitCode, 1);
+    const suiteUpdateEnvelope = JSON.parse(
+      errorAndChangeUpdateStructured.stdout,
+    ) as {
+      variant: string;
+      data: {
+        errors: unknown[];
+        report: {
+          bindings: Array<{
+            bindingId: string;
+            consistency?: string;
+            errors?: Array<{
+              referenceId?: string;
+              memberId?: string;
+              code: string;
+            }>;
+            changes: Array<{
+              kind: string;
+              memberChanges?: Array<{
+                memberId: string;
+                afterPresent: boolean;
+              }>;
+            }>;
+          }>;
+        };
+      };
+    };
+    assert.equal(suiteUpdateEnvelope.variant, "rejected");
+    assert.deepEqual(suiteUpdateEnvelope.data.errors, []);
+    const suiteBinding = suiteUpdateEnvelope.data.report.bindings.find(
+      (binding) => binding.bindingId === "suite-binding",
+    );
+    assert.ok(suiteBinding);
+    assert.equal(suiteBinding.consistency, undefined);
+    assert.equal(suiteBinding.errors?.[0]?.referenceId, "suite-ref");
+    assert.equal(suiteBinding.errors?.[0]?.memberId, "a");
+    assert.equal(suiteBinding.errors?.[0]?.code, "missing-observation");
+    assert.equal(suiteBinding.changes[0]?.memberChanges?.[0]?.memberId, "b");
+    assert.equal(
+      suiteBinding.changes[0]?.memberChanges?.[0]?.afterPresent,
+      true,
+    );
+    assert.equal(
+      await readFile(join(root, "dock.baseline.json"), "utf8"),
+      baselineBeforeSuiteError,
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
@@ -874,6 +1006,220 @@ void test("renders local line-level context hunks for multiline text fact change
       structured.data.report.bindings[0]?.current.references["guide-ref"]
         ?.range,
       { path: "guide.md", start: 0, end: updatedText.length },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("reports empty-selection at top level without claiming consistency, isolates missing-file errors to binding, and reports invalid plugin diagnostics separately", async () => {
+  const { updateBaseline } = await import("@ykdz/dock");
+  const root = await createConfigWorkspace();
+  const emptyConfigPath = join(root, "empty.config.mjs");
+  const fileConfigPath = join(root, "dock.config.mjs");
+  const diagConfigPath = join(root, "diag.config.mjs");
+  const guidePath = join(root, "guide.txt");
+  const baselinePath = join(root, "dock.baseline.json");
+
+  try {
+    await writeFile(
+      emptyConfigPath,
+      [
+        'import { defineConfig } from "@ykdz/dock";',
+        "export default defineConfig({ plugins: [], bindings: [] });",
+      ].join("\n"),
+    );
+
+    const emptyText = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      emptyConfigPath,
+    ]);
+    assert.equal(emptyText.result.exitCode, 1);
+    assert.equal(emptyText.stderr, "");
+    assert.match(emptyText.stdout, /Scope: none/);
+    assert.doesNotMatch(
+      emptyText.stdout,
+      /All checked bindings are consistent with baseline\./,
+    );
+    assert.match(emptyText.stdout, /Update error \(empty-selection\):/);
+    assert.match(emptyText.stdout, /Baseline was not updated\./);
+
+    const emptyStructured = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      emptyConfigPath,
+      "--output",
+      "structured",
+    ]);
+    assert.equal(emptyStructured.result.exitCode, 1);
+    const emptyEnvelope = JSON.parse(emptyStructured.stdout) as {
+      variant: string;
+      data: {
+        errors: Array<{ code: string; message: string }>;
+        report: { scope: string[]; bindings: unknown[] };
+      };
+    };
+    assert.equal(emptyEnvelope.variant, "rejected");
+    assert.deepEqual(emptyEnvelope.data.report.scope, []);
+    assert.deepEqual(emptyEnvelope.data.report.bindings, []);
+    assert.equal(emptyEnvelope.data.errors.length, 1);
+    assert.equal(emptyEnvelope.data.errors[0]?.code, "empty-selection");
+
+    await writeFile(guidePath, "stable guide\n");
+    await writeFile(
+      fileConfigPath,
+      [
+        'import { binding, defineConfig, file } from "@ykdz/dock";',
+        "export default defineConfig({",
+        "  plugins: [file],",
+        '  bindings: [binding("guide-policy", [file.from("guide.txt").reference("guide-ref")])],',
+        "});",
+      ].join("\n"),
+    );
+
+    const initial = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      fileConfigPath,
+    ]);
+    assert.equal(initial.result.exitCode, 0);
+    assert.match(initial.stdout, /Baseline updated\./);
+    const savedBaseline = await readFile(baselinePath, "utf8");
+
+    await rm(guidePath);
+
+    const jsOutcome = await updateBaseline(fileConfigPath);
+    assert.equal(jsOutcome.status, "rejected");
+    if (jsOutcome.status !== "rejected") return;
+    assert.deepEqual(jsOutcome.errors, []);
+    assert.equal(jsOutcome.report.bindings[0]?.consistency, undefined);
+    assert.equal(
+      jsOutcome.report.bindings[0]?.errors?.[0]?.code,
+      "missing-file",
+    );
+    assert.equal(await readFile(baselinePath, "utf8"), savedBaseline);
+
+    const missingFileText = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      fileConfigPath,
+    ]);
+    assert.equal(missingFileText.result.exitCode, 1);
+    assert.equal(
+      missingFileText.stdout.match(/Error guide-ref \(missing-file\):/g)
+        ?.length,
+      1,
+    );
+    assert.doesNotMatch(missingFileText.stdout, /Update error/);
+    assert.match(missingFileText.stdout, /Baseline was not updated\./);
+    assert.equal(await readFile(baselinePath, "utf8"), savedBaseline);
+
+    const missingFileStructured = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      fileConfigPath,
+      "--output",
+      "structured",
+    ]);
+    assert.equal(missingFileStructured.result.exitCode, 1);
+    const missingFileEnvelope = JSON.parse(missingFileStructured.stdout) as {
+      variant: string;
+      data: {
+        errors: unknown[];
+        report: {
+          bindings: Array<{
+            bindingId: string;
+            errors?: Array<{ referenceId?: string; code: string }>;
+          }>;
+        };
+      };
+    };
+    assert.equal(missingFileEnvelope.variant, "rejected");
+    assert.deepEqual(missingFileEnvelope.data.errors, []);
+    assert.equal(
+      missingFileEnvelope.data.report.bindings[0]?.errors?.[0]?.code,
+      "missing-file",
+    );
+    assert.equal(await readFile(baselinePath, "utf8"), savedBaseline);
+
+    await writeFile(
+      diagConfigPath,
+      [
+        'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+        "const plugin = definePlugin({",
+        '  id: "fixture:bad-diag",',
+        "  validate() {},",
+        "  collect(request) {",
+        "    return {",
+        "      results: request.selectedReferences.map((reference) => ({",
+        "        referenceId: reference.id,",
+        '        kind: "value",',
+        '        value: "valid-fact",',
+        "      })),",
+        '      diagnostics: { data: new Date(), text: ["ignored"] },',
+        "    };",
+        "  },",
+        "});",
+        "export default defineConfig({",
+        "  plugins: [plugin],",
+        '  bindings: [binding("diag-policy", [createReference("fixture:bad-diag", "diag-ref", "target")])],',
+        "});",
+      ].join("\n"),
+    );
+
+    const diagUpdateText = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      diagConfigPath,
+    ]);
+    assert.equal(diagUpdateText.result.exitCode, 0);
+    assert.match(
+      diagUpdateText.stdout,
+      /Plugin fixture:bad-diag error \(invalid-plugin-diagnostics\):/,
+    );
+    assert.match(diagUpdateText.stdout, /Baseline updated\./);
+
+    const diagUpdateStructured = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      diagConfigPath,
+      "--output",
+      "structured",
+    ]);
+    assert.equal(diagUpdateStructured.result.exitCode, 0);
+    const diagEnvelope = JSON.parse(diagUpdateStructured.stdout) as {
+      variant: string;
+      data: {
+        report: {
+          pluginErrors: Array<{ pluginId: string; code: string }>;
+          bindings: Array<{
+            consistency?: string;
+            current?: { references: Record<string, { value: unknown }> };
+          }>;
+        };
+      };
+    };
+    assert.equal(diagEnvelope.variant, "updated");
+    assert.equal(
+      diagEnvelope.data.report.pluginErrors[0]?.code,
+      "invalid-plugin-diagnostics",
+    );
+    assert.equal(
+      diagEnvelope.data.report.bindings[0]?.consistency,
+      "consistent",
+    );
+    assert.equal(
+      diagEnvelope.data.report.bindings[0]?.current?.references["diag-ref"]
+        ?.value,
+      "valid-fact",
     );
   } finally {
     await rm(root, { recursive: true, force: true });

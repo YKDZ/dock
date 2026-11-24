@@ -156,7 +156,11 @@ export type CheckReport = {
   bindings: BindingCheckResult[];
 };
 
-export type BaselineUpdateIssue = CheckError & { bindingId?: string };
+/** Operation-level rejection reason (such as empty-selection); binding errors live on report.bindings. */
+export type BaselineUpdateIssue = {
+  code: string;
+  message: string;
+};
 export type BaselineUpdateOutcome =
   | { status: "updated"; baseline: Baseline; report: CheckReport }
   | { status: "rejected"; errors: BaselineUpdateIssue[]; report: CheckReport };

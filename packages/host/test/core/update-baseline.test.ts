@@ -139,20 +139,16 @@ void test("invalid facts block the selected batch while unrelated bindings can s
     const rejected = updateBaseline(current);
     assert.equal(rejected.status, "rejected");
     if (rejected.status !== "rejected") return;
+    assert.deepEqual(rejected.errors, []);
+    const invalidBinding = rejected.report.bindings.find(
+      (binding) => binding.bindingId === "invalid-binding",
+    );
+    assert.ok(invalidBinding && "errors" in invalidBinding);
     assert.deepEqual(
-      rejected.errors.map((error) => [
-        error.bindingId,
-        error.referenceId,
-        error.code,
-      ]),
-      [["invalid-binding", "invalid", "invalid-fact"]],
+      invalidBinding.errors.map((error) => [error.referenceId, error.code]),
+      [["invalid", "invalid-fact"]],
     );
-    assert.equal(
-      rejected.report.bindings.find(
-        (binding) => binding.bindingId === "invalid-binding",
-      )?.consistency,
-      undefined,
-    );
+    assert.equal(invalidBinding.consistency, undefined);
     assert.equal(JSON.stringify(initial.baseline), before);
 
     const selected: CheckInput = { ...current, scope: ["valid-binding"] };
@@ -212,15 +208,19 @@ void test("invalid values inside members preserve member errors without creating
   const rejected = updateBaseline(current);
   assert.equal(rejected.status, "rejected");
   if (rejected.status !== "rejected") return;
+  assert.deepEqual(rejected.errors, []);
+  const groupBinding = rejected.report.bindings[0];
+  assert.ok(groupBinding && "errors" in groupBinding);
   assert.deepEqual(
-    rejected.errors.map((error) => [
+    groupBinding.errors.map((error) => [
       error.referenceId,
       error.memberId,
       error.code,
     ]),
     [["group", "invalid", "invalid-fact"]],
   );
-  assert.deepEqual(rejected.report.bindings[0]?.changes, [
+  assert.equal(groupBinding.consistency, undefined);
+  assert.deepEqual(groupBinding.changes, [
     {
       kind: "fact",
       referenceId: "group",
@@ -264,11 +264,14 @@ void test("invalid values in a reference definition are evidence errors or corru
     const rejected = updateBaseline(current);
     assert.equal(rejected.status, "rejected");
     if (rejected.status !== "rejected") return;
+    assert.deepEqual(rejected.errors, []);
+    const bindingResult = rejected.report.bindings[0];
+    assert.ok(bindingResult && "errors" in bindingResult);
     assert.deepEqual(
-      rejected.errors.map((error) => [error.referenceId, error.code]),
+      bindingResult.errors.map((error) => [error.referenceId, error.code]),
       [["setting", "invalid-reference-definition"]],
     );
-    assert.equal(rejected.report.bindings[0]?.consistency, undefined);
+    assert.equal(bindingResult.consistency, undefined);
 
     const damaged = structuredClone(initial.baseline);
     damaged.bindings.configuration!.references.setting!.definition = definition;
@@ -279,3 +282,113 @@ void test("invalid values in a reference definition are evidence errors or corru
     );
   }
 });
+
+void test("rejected updates keep binding errors in report.bindings and allow callers to count binding and operation issues once", () => {
+  const input: CheckInput = {
+    references: [{ id: "suite", target: "suite-target" }],
+    bindings: [{ id: "suite-binding", references: ["suite"] }],
+    facts: [
+      {
+        referenceId: "suite",
+        collection: {
+          completeness: "complete",
+          members: [{ id: "a", value: { status: "passed" } }],
+        },
+      },
+    ],
+  };
+  const initial = updateBaseline(input);
+  assert.equal(initial.status, "updated");
+  if (initial.status !== "updated") return;
+  const savedBaseline = JSON.stringify(initial.baseline);
+
+  const next = updateBaseline({
+    ...input,
+    baseline: initial.baseline,
+    facts: [
+      {
+        referenceId: "suite",
+        collection: {
+          completeness: "complete",
+          members: [
+            {
+              id: "a",
+              error: {
+                code: "missing-observation",
+                message: "Observation was not recorded.",
+              },
+            },
+            { id: "b", value: { status: "passed" } },
+          ],
+        },
+      },
+    ],
+  });
+  assert.equal(next.status, "rejected");
+  if (next.status !== "rejected") return;
+  assert.deepEqual(next.errors, []);
+  const suiteBinding = next.report.bindings[0];
+  assert.ok(suiteBinding && "errors" in suiteBinding);
+  assert.equal(suiteBinding.consistency, undefined);
+  assert.deepEqual(suiteBinding.errors, [
+    {
+      referenceId: "suite",
+      memberId: "a",
+      code: "missing-observation",
+      message: "Observation was not recorded.",
+    },
+  ]);
+  assert.deepEqual(suiteBinding.changes, [
+    {
+      kind: "fact",
+      referenceId: "suite",
+      memberChanges: [
+        {
+          memberId: "b",
+          beforePresent: false,
+          afterPresent: true,
+          after: { status: "passed" },
+        },
+      ],
+      beforeKind: "member-collection",
+      afterKind: "member-collection",
+    },
+  ]);
+  assert.equal(JSON.stringify(initial.baseline), savedBaseline);
+
+  assert.deepEqual(collectAllIssues(next), [
+    {
+      scope: "binding",
+      bindingId: "suite-binding",
+      code: "missing-observation",
+    },
+  ]);
+  const emptyOutcome = updateBaseline({
+    references: [],
+    bindings: [],
+    facts: [],
+    baseline: initial.baseline,
+    scope: [],
+  });
+  assert.deepEqual(collectAllIssues(emptyOutcome), [
+    { scope: "operation", code: "empty-selection" },
+  ]);
+});
+
+function collectAllIssues(outcome: ReturnType<typeof updateBaseline>) {
+  if (outcome.status !== "rejected") return [];
+  const bindingIssues = outcome.report.bindings.flatMap((binding) =>
+    "errors" in binding
+      ? binding.errors.map((error) => ({
+          scope: "binding" as const,
+          bindingId: binding.bindingId,
+          code: error.code,
+        }))
+      : [],
+  );
+  const operationIssues = outcome.errors.map((error) => ({
+    scope: "operation" as const,
+    code: error.code,
+  }));
+  return [...bindingIssues, ...operationIssues];
+}
