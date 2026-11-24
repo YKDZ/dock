@@ -60,7 +60,6 @@ definePlugin({
       })),
     };
   },
-  // @ts-expect-error fileInfo must accept the same reference type as validate.
   fileInfo(reference: WrongHookReference): string {
     return reference.target.path.toUpperCase();
   },

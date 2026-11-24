@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import {
+  chmod,
   mkdtemp,
   mkdir,
+  readdir,
   readFile,
   rm,
   symlink,
@@ -782,6 +784,178 @@ void test("host check and updateBaseline keep accepted inputs, reports, and base
     );
     assert.equal(pluginPayload.summary.items[0], "plugin-mutated-after");
     assert.equal(callerTarget.meta.tags[0], "caller-mutated-after");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("real filesystem baseline write and read failures preserve existing content and clean temporary files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-baseline-fs-failure-"));
+
+  try {
+    await writeFile(join(root, "guide.txt"), "Original fact\n", "utf8");
+
+    // 1) Existing directory at baseline path triggers baseline-read-failed without altering contents.
+    const dirConflictPath = join(root, "baseline-dir");
+    const sentinelPath = join(dirConflictPath, "sentinel.txt");
+    await mkdir(dirConflictPath);
+    await writeFile(sentinelPath, "preserve-sentinel\n", "utf8");
+    const dirConflictConfig = defineConfig({
+      root,
+      baseline: "baseline-dir",
+      plugins: [file],
+      bindings: [
+        binding("dir-policy", [file.from("guide.txt").reference("guide")]),
+      ],
+    });
+    await assert.rejects(check(dirConflictConfig), (error: unknown) => {
+      assert.ok(error instanceof MaintenanceError);
+      assert.equal(error.code, "baseline-read-failed");
+      return true;
+    });
+    assert.equal(await readFile(sentinelPath, "utf8"), "preserve-sentinel\n");
+
+    // 2) Rename conflict during atomic write triggers baseline-write-failed (even as uid 0) and cleans temp files.
+    const lateDirPath = join(root, "late-baseline-dir");
+    const lateSentinelPath = join(lateDirPath, "sentinel.txt");
+    const lateConflictPlugin = definePlugin({
+      id: "fixture:late-dir-conflict",
+      validate() {},
+      async collect(request) {
+        await mkdir(lateDirPath, { recursive: true });
+        await writeFile(lateSentinelPath, "preserve-late-sentinel\n", "utf8");
+        return {
+          results: request.selectedReferences.map((reference) => ({
+            referenceId: reference.id,
+            kind: "value" as const,
+            value: "collected-fact",
+          })),
+        };
+      },
+    });
+    const lateConflictConfig = defineConfig({
+      root,
+      baseline: "late-baseline-dir",
+      plugins: [lateConflictPlugin],
+      bindings: [
+        binding("late-dir-policy", [
+          createReference("fixture:late-dir-conflict", "late-ref", "target"),
+        ]),
+      ],
+    });
+    await assert.rejects(
+      updateBaseline(lateConflictConfig),
+      (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "baseline-write-failed");
+        return true;
+      },
+    );
+    assert.equal(
+      await readFile(lateSentinelPath, "utf8"),
+      "preserve-late-sentinel\n",
+    );
+    assert.equal(
+      (await readdir(root)).some((name) => name.endsWith(".dock-baseline.tmp")),
+      false,
+    );
+
+    // 3) Parent-is-file conflict during atomic write triggers baseline-write-failed (even as uid 0).
+    const fileParentPath = join(root, "occupied-parent");
+    const parentConflictPlugin = definePlugin({
+      id: "fixture:parent-file-conflict",
+      validate() {},
+      async collect(request) {
+        await writeFile(fileParentPath, "preserve-parent-file\n", "utf8");
+        return {
+          results: request.selectedReferences.map((reference) => ({
+            referenceId: reference.id,
+            kind: "value" as const,
+            value: "collected-fact",
+          })),
+        };
+      },
+    });
+    const fileParentConfig = defineConfig({
+      root,
+      baseline: "occupied-parent/dock.baseline.json",
+      plugins: [parentConflictPlugin],
+      bindings: [
+        binding("parent-policy", [
+          createReference(
+            "fixture:parent-file-conflict",
+            "parent-ref",
+            "target",
+          ),
+        ]),
+      ],
+    });
+    await assert.rejects(updateBaseline(fileParentConfig), (error: unknown) => {
+      assert.ok(error instanceof MaintenanceError);
+      assert.equal(error.code, "baseline-write-failed");
+      return true;
+    });
+    assert.equal(
+      await readFile(fileParentPath, "utf8"),
+      "preserve-parent-file\n",
+    );
+    assert.equal(
+      (await readdir(root)).some((name) => name.endsWith(".dock-baseline.tmp")),
+      false,
+    );
+
+    // 4) Read-only directory and unreadable baseline permission checks when running non-root.
+    if (process.getuid?.() !== 0) {
+      const restrictedDir = join(root, "restricted");
+      const targetPath = join(restrictedDir, "guide.txt");
+      const baselinePath = join(restrictedDir, "dock.baseline.json");
+      await mkdir(restrictedDir);
+      await writeFile(targetPath, "Initial fact\n", "utf8");
+      const restrictedConfig = defineConfig({
+        root: restrictedDir,
+        plugins: [file],
+        bindings: [
+          binding("restricted-policy", [
+            file.from("guide.txt").reference("guide"),
+          ]),
+        ],
+      });
+      const initial = await updateBaseline(restrictedConfig);
+      assert.equal(initial.status, "updated");
+      const originalBytes = await readFile(baselinePath);
+
+      await writeFile(targetPath, "Updated fact\n", "utf8");
+      await chmod(baselinePath, 0o444);
+      await chmod(restrictedDir, 0o555);
+      try {
+        await assert.rejects(
+          updateBaseline(restrictedConfig),
+          (error: unknown) => {
+            assert.ok(error instanceof MaintenanceError);
+            assert.equal(error.code, "baseline-write-failed");
+            return true;
+          },
+        );
+        assert.deepEqual(await readFile(baselinePath), originalBytes);
+        assert.equal(
+          (await readdir(restrictedDir)).some((name) =>
+            name.endsWith(".dock-baseline.tmp"),
+          ),
+          false,
+        );
+
+        await chmod(baselinePath, 0);
+        await assert.rejects(check(restrictedConfig), (error: unknown) => {
+          assert.ok(error instanceof MaintenanceError);
+          assert.equal(error.code, "baseline-read-failed");
+          return true;
+        });
+      } finally {
+        await chmod(restrictedDir, 0o755).catch(() => undefined);
+        await chmod(baselinePath, 0o644).catch(() => undefined);
+      }
+      assert.deepEqual(await readFile(baselinePath), originalBytes);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

@@ -174,14 +174,11 @@ export default defineConfig({
     { cwd: process.cwd(), encoding: "utf8" },
   );
   assert.equal(textResult.status, 0, textResult.stderr);
-  assert.match(
+  assert.equal(
     textResult.stdout,
-    /Plugin @fixture\/cli-first: Execution completed/u,
+    "Scope: cli-first-policy, cli-second-policy\nAll checked bindings are consistent with baseline.\n",
   );
-  assert.match(
-    textResult.stdout,
-    /Plugin @fixture\/cli-second: Execution completed/u,
-  );
+  assert.doesNotMatch(textResult.stdout, /Execution completed/u);
 
   const jsonResult = spawnSync(
     process.execPath,

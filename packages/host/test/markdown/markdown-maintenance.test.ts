@@ -158,6 +158,53 @@ void test("six node selectors and table cell row key selection preserve Markdown
     assert.equal(source[empty.range!.start - 1], " ");
     assert.equal(source[empty.range!.end], "|");
   });
+
+  const emptyCellEdgeCases = [
+    {
+      name: "quoted-table",
+      source: "> | 名称 | 值 |\n> | --- | --- |\n> | api |  |\n",
+    },
+    {
+      name: "unmatched-backtick",
+      source:
+        "| 名称 | 文本 | 值 |\n| --- | --- | --- |\n| api | `未闭合 |  |\n",
+    },
+    {
+      name: "code-pipe-delimiter",
+      source:
+        "| 名称 | A | B | 值 |\n| --- | --- | --- | --- |\n| api | `a|b` |  |\n",
+    },
+  ] as const;
+  for (const edgeCase of emptyCellEdgeCases) {
+    await withDocument(edgeCase.source, async (root, config) => {
+      const cell = markdown
+        .from("guide.md")
+        .tableCell({ column: "值", row: { column: "名称", value: "api" } })
+        .reference("cell");
+      const read = await readReference(config, cell);
+      assert.equal(read.value, "", edgeCase.name);
+      assert.equal(
+        read.range?.start,
+        edgeCase.source.indexOf("|  |") + 3,
+        edgeCase.name,
+      );
+      assert.equal(read.range?.end, read.range?.start, edgeCase.name);
+      assert.equal(edgeCase.source[read.range.start - 1], " ", edgeCase.name);
+      assert.equal(edgeCase.source[read.range.end], "|", edgeCase.name);
+
+      const batchConfig = defineConfig({
+        root,
+        plugins: [markdown],
+        bindings: [binding("policy", [cell])],
+      });
+      const report = await check(batchConfig);
+      assert.equal(
+        report.bindings[0]?.current?.references.cell?.value,
+        "",
+        edgeCase.name,
+      );
+    });
+  }
 });
 
 void test("duplicate heading paths, table columns, and row keys explicitly report ambiguity", async () => {

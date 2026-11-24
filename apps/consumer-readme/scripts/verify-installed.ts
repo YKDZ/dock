@@ -115,6 +115,21 @@ try {
 
   const baselinePath = join(consumer, "dock.baseline.json");
   const baseline = await readFile(baselinePath);
+  assert.equal(
+    (JSON.parse(baseline.toString("utf8")) as { version?: unknown }).version,
+    3,
+    "README bootstrap baseline must use version 3.",
+  );
+
+  const textChecked = run(bin("dock"), ["check", "--config", "dock.config.ts"]);
+  assert.equal(textChecked.status, 0, textChecked.stdout + textChecked.stderr);
+  assert.equal(textChecked.stderr, "");
+  assert.equal(
+    textChecked.stdout,
+    "Scope: readme-extension, readme-workflow\nAll checked bindings are consistent with baseline.\n",
+  );
+  assert.deepEqual(await readFile(baselinePath), baseline);
+
   const checked = run(bin("dock"), [
     "check",
     "--config",
@@ -171,6 +186,20 @@ try {
     [["check"], "errors"],
     [["baseline", "update"], "rejected"],
   ] as const) {
+    const failedText = run(bin("dock"), [
+      ...command,
+      "--config",
+      "dock.config.ts",
+    ]);
+    assert.equal(failedText.status, 1, failedText.stdout + failedText.stderr);
+    assert.equal(failedText.stderr, "");
+    assert.match(failedText.stdout, /Error readme-example \(test-failed\):/);
+    if (variant === "rejected") {
+      assert.match(failedText.stdout, /Baseline was not updated\./);
+      assert.doesNotMatch(failedText.stdout, /Update error/);
+    }
+    assert.deepEqual(await readFile(baselinePath), baseline);
+
     const failed = run(bin("dock"), [
       ...command,
       "--config",
@@ -179,7 +208,11 @@ try {
       "structured",
     ]);
     assert.equal(failed.status, 1, failed.stdout + failed.stderr);
-    const failure = readReport(failed.stdout, variant);
+    const failure = readReport(
+      failed.stdout,
+      variant,
+      command[0] === "baseline",
+    );
     assert.deepEqual(failure.pluginErrors, []);
     assert.ok(
       failure.bindings.some((binding) =>
@@ -197,18 +230,25 @@ try {
   await rm(repository, { recursive: true, force: true });
 }
 
-function readReport(output: string, variant: string): Report {
+function readReport(
+  output: string,
+  variant: string,
+  checkEmptyTopLevelErrors = false,
+): Report {
   const envelope = JSON.parse(output) as {
     schemaVersion?: unknown;
     outputMode?: unknown;
     kind?: unknown;
     variant?: unknown;
-    data?: { report?: Report };
+    data?: { errors?: unknown[]; report?: Report };
   };
   assert.equal(envelope.schemaVersion, "3", output);
   assert.equal(envelope.outputMode, "structured", output);
   assert.equal(envelope.kind, "data", output);
   assert.equal(envelope.variant, variant, output);
+  if (checkEmptyTopLevelErrors) {
+    assert.deepEqual(envelope.data?.errors, [], output);
+  }
   assert.ok(envelope.data?.report, output);
   return envelope.data.report;
 }
