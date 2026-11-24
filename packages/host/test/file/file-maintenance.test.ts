@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   binding,
@@ -870,6 +871,156 @@ void test("batch collection on multiple references to the same file preserves pe
       start: secondSource.indexOf("8080"),
       end: secondSource.indexOf("8080") + 4,
     });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("file.at and file.from(URL) keep module-relative targets stable across declaration moves while root switches and invalid scope queries fail explicitly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-file-paths-scope-"));
+  const workspaceA = join(root, "workspace-a");
+  const workspaceB = join(root, "workspace-b");
+  const sharedDir = join(workspaceA, "shared");
+  const movedDir = join(workspaceA, "nested", "deep");
+  const baselinePath = join(root, "portable.baseline.json");
+
+  try {
+    await mkdir(join(workspaceA, "packages", "alpha"), { recursive: true });
+    await mkdir(join(workspaceB, "packages", "alpha"), { recursive: true });
+    await mkdir(sharedDir, { recursive: true });
+    await mkdir(movedDir, { recursive: true });
+
+    const localTarget = join(workspaceA, "packages", "alpha", "local.md");
+    await writeFile(localTarget, "Module-adjacent body\n", "utf8");
+    await writeFile(
+      join(workspaceA, "packages", "alpha", "guide.md"),
+      "Same fact\n",
+      "utf8",
+    );
+    await writeFile(
+      join(workspaceB, "packages", "alpha", "guide.md"),
+      "Same fact\n",
+      "utf8",
+    );
+
+    const buildConfig = (
+      activeRoot: string,
+      declarationFile: string,
+      relativeToDeclaration: string,
+    ) => {
+      const moduleUrl = pathToFileURL(declarationFile);
+      return defineConfig({
+        root: activeRoot,
+        baseline: baselinePath,
+        plugins: [file],
+        bindings: [
+          binding("documents", [
+            file.from("packages/alpha/guide.md").reference("guide"),
+            file
+              .at(moduleUrl)
+              .from(relativeToDeclaration)
+              .reference("local-at"),
+            file
+              .from(new URL(relativeToDeclaration, moduleUrl))
+              .reference("local-url"),
+          ]),
+        ],
+      });
+    };
+
+    const initialConfig = buildConfig(
+      workspaceA,
+      join(sharedDir, "declarations.mjs"),
+      "../packages/alpha/local.md",
+    );
+    const updated = await updateBaseline(initialConfig);
+    assert.equal(updated.status, "updated");
+
+    // Moving declaration module directory without changing resolved targets stays consistent.
+    const movedDeclarationConfig = buildConfig(
+      workspaceA,
+      join(movedDir, "declarations.mjs"),
+      "../../packages/alpha/local.md",
+    );
+    const afterDeclarationMove = await check(movedDeclarationConfig);
+    assert.equal(afterDeclarationMove.bindings[0]?.consistency, "consistent");
+
+    // Switching root to workspaceB with identical content detects reference-definition changes.
+    const switchedRootConfig = defineConfig({
+      root: workspaceB,
+      baseline: baselinePath,
+      plugins: [file],
+      bindings: [
+        binding("documents", [
+          file.from("packages/alpha/guide.md").reference("guide"),
+        ]),
+      ],
+    });
+    const rootSwitchReport = await check(switchedRootConfig);
+    assert.equal(rootSwitchReport.bindings[0]?.consistency, "inconsistent");
+    assert.equal(
+      rootSwitchReport.bindings[0]?.changes.some(
+        (change) =>
+          change.kind === "reference-definition" &&
+          change.referenceId === "guide",
+      ),
+      true,
+    );
+
+    // Historical file selector matches prior baseline target even after root switched.
+    const historicalSelection = await check(switchedRootConfig, {
+      file: [join(workspaceA, "packages", "alpha", "guide.md")],
+    });
+    assert.deepEqual(historicalSelection.scope, ["documents"]);
+
+    // Unmatched scope selector fails with scope-selector-unmatched.
+    await assert.rejects(
+      check(switchedRootConfig, { file: ["missing.md"] }),
+      (error: unknown) =>
+        error instanceof MaintenanceError &&
+        error.code === "scope-selector-unmatched",
+    );
+
+    // Baseline missing fileInfo rejects file-based scope lookup with scope-history-unexplainable.
+    const legacyBaselinePath = join(root, "legacy-no-fileinfo.json");
+    await writeFile(
+      legacyBaselinePath,
+      JSON.stringify({
+        version: 3,
+        bindings: {
+          legacy: {
+            definition: { id: "legacy", references: ["legacy-ref"] },
+            references: {
+              "legacy-ref": {
+                definition: {
+                  id: "legacy-ref",
+                  target: {
+                    pluginId: filePluginId,
+                    target: "legacy.txt",
+                  },
+                },
+                value: "legacy",
+              },
+            },
+          },
+        },
+      }),
+      "utf8",
+    );
+    await assert.rejects(
+      check(
+        defineConfig({
+          root,
+          baseline: legacyBaselinePath,
+          plugins: [file],
+          bindings: [],
+        }),
+        { file: ["legacy.txt"] },
+      ),
+      (error: unknown) =>
+        error instanceof MaintenanceError &&
+        error.code === "scope-history-unexplainable",
+    );
   } finally {
     await rm(root, { recursive: true, force: true });
   }
