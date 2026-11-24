@@ -19,6 +19,61 @@ export class TextSelectionError extends Error {
   }
 }
 
+/** Validates a shared plain text selection step's allowed fields and value types. */
+export function assertTextSelectionStep(
+  value: unknown,
+): asserts value is TextSelectionStep {
+  if (!isPlainRecord(value) || typeof value.kind !== "string") {
+    throw new TypeError(
+      "Text selection step must be a plain object with a kind.",
+    );
+  }
+
+  switch (value.kind) {
+    case "quote": {
+      assertAllowedKeys(value, ["kind", "text"], "quote");
+      if (typeof value.text !== "string") {
+        throw new TypeError(
+          'Quote selection step requires string field "text".',
+        );
+      }
+      return;
+    }
+    case "match": {
+      assertAllowedKeys(value, ["kind", "pattern", "group"], "match");
+      if (typeof value.pattern !== "string") {
+        throw new TypeError(
+          'Match selection step requires string field "pattern".',
+        );
+      }
+      if (
+        Object.hasOwn(value, "group") &&
+        (typeof value.group !== "number" ||
+          !Number.isInteger(value.group) ||
+          value.group < 0)
+      ) {
+        throw new TypeError(
+          'Match selection step field "group" must be a non-negative integer.',
+        );
+      }
+      return;
+    }
+    case "region": {
+      assertAllowedKeys(value, ["kind", "name"], "region");
+      if (typeof value.name !== "string") {
+        throw new TypeError(
+          'Region selection step requires string field "name".',
+        );
+      }
+      return;
+    }
+    default:
+      throw new TypeError(
+        `Unsupported text selection step kind: ${JSON.stringify(value.kind)}.`,
+      );
+  }
+}
+
 /** Narrows an existing UTF-16 range within source text by one step and returns the new range. */
 export function selectTextRange(
   source: string,
@@ -215,6 +270,24 @@ function range(
     start: input.start + relativeStart,
     end: input.start + relativeEnd,
   };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function assertAllowedKeys(
+  value: Record<string, unknown>,
+  allowed: readonly string[],
+  stepKind: string,
+): void {
+  for (const key of Object.keys(value)) {
+    if (!allowed.includes(key)) {
+      throw new TypeError(
+        `Unexpected field "${key}" in ${stepKind} selection step.`,
+      );
+    }
+  }
 }
 
 function fail(code: string, message: string): never {

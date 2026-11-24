@@ -313,3 +313,281 @@ void test("batch collection isolates symbol errors and skips unselected files", 
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("typescript preflight rejects misspelled, missing, and mistyped text selector fields and extra selection fields with reference ID", () => {
+  const sharedMisspelledMatch = {
+    kind: "match",
+    pattern: "port=(\\d+)",
+    gropu: 1,
+  };
+  const invalidSelections: readonly unknown[] = [
+    {
+      kind: "typescript",
+      steps: [{ kind: "symbol", name: ["calculate"] }, sharedMisspelledMatch],
+    },
+    {
+      kind: "typescript",
+      steps: [{ kind: "symbol", name: ["calculate"] }, { kind: "quote" }],
+    },
+    {
+      kind: "typescript",
+      steps: [
+        { kind: "symbol", name: ["calculate"] },
+        { kind: "quote", text: 42 },
+      ],
+    },
+    {
+      kind: "typescript",
+      steps: [
+        { kind: "symbol", name: ["calculate"] },
+        { kind: "quote", text: "ok", extra: true },
+      ],
+    },
+    {
+      kind: "typescript",
+      steps: [{ kind: "symbol", name: ["calculate"] }, { kind: "match" }],
+    },
+    {
+      kind: "typescript",
+      steps: [
+        { kind: "symbol", name: ["calculate"] },
+        { kind: "match", pattern: 42 },
+      ],
+    },
+    {
+      kind: "typescript",
+      steps: [
+        { kind: "symbol", name: ["calculate"] },
+        { kind: "match", pattern: "port=(\\d+)", group: -1 },
+      ],
+    },
+    {
+      kind: "typescript",
+      steps: [
+        { kind: "symbol", name: ["calculate"] },
+        { kind: "match", pattern: "port=(\\d+)", group: 1.5 },
+      ],
+    },
+    {
+      kind: "typescript",
+      steps: [
+        { kind: "symbol", name: ["calculate"] },
+        { kind: "match", pattern: "port=(\\d+)", group: "1" },
+      ],
+    },
+    {
+      kind: "typescript",
+      steps: [{ kind: "symbol", name: ["calculate"] }, { kind: "region" }],
+    },
+    {
+      kind: "typescript",
+      steps: [
+        { kind: "symbol", name: ["calculate"] },
+        { kind: "region", name: 42 },
+      ],
+    },
+    {
+      kind: "typescript",
+      steps: [
+        { kind: "symbol", name: ["calculate"] },
+        { kind: "region", name: "env", extra: true },
+      ],
+    },
+    {
+      kind: "typescript",
+      steps: [{ kind: "symbol", name: ["calculate"] }],
+      extra: 1,
+    },
+  ];
+
+  for (const [index, selection] of invalidSelections.entries()) {
+    const referenceId = `invalid-ts-step-${index}`;
+    const reference = {
+      id: referenceId,
+      pluginId: typescriptPluginId,
+      target: "symbol-source.ts",
+      selection,
+    };
+    assert.throws(
+      () => Reflect.apply(typescript.validate, typescript, [reference]),
+      (error: unknown) =>
+        error instanceof Error && error.message.includes(referenceId),
+      `typescript.validate should reject selection ${JSON.stringify(selection)} with referenceId`,
+    );
+    assert.throws(
+      () =>
+        Reflect.apply(defineConfig, undefined, [
+          {
+            plugins: [typescript],
+            bindings: [{ id: "invalid-policy", references: [reference] }],
+          },
+        ]),
+      (error: unknown) =>
+        error instanceof Error && error.message.includes(referenceId),
+      `defineConfig should reject selection ${JSON.stringify(selection)} with referenceId`,
+    );
+  }
+
+  assert.throws(
+    () =>
+      typescript
+        .from("symbol-source.ts")
+        .symbol("calculate")
+        .match("port=(\\d+)", -1),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      typescript
+        .from("symbol-source.ts")
+        .symbol("calculate")
+        .match("port=(\\d+)", 1.5),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      typescript
+        .from("symbol-source.ts")
+        .symbol("calculate")
+        .quote(JSON.parse("42")),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      typescript
+        .from("symbol-source.ts")
+        .symbol("calculate")
+        .region(JSON.parse("42")),
+    TypeError,
+  );
+});
+
+void test("typescript symbol steps compose with quote, capture-group match, and region while scoping and preserving symbol errors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-typescript-text-steps-"));
+  try {
+    const source = [
+      'export const badge = "😀";',
+      "export function primary() {",
+      "  /*",
+      "  #region settings",
+      "  const port = 4173;",
+      "  #endregion settings",
+      "  */",
+      "  return 'primary';",
+      "}",
+      "export function secondary() {",
+      "  /*",
+      "  #region settings",
+      "  const port = 5173;",
+      "  #endregion settings",
+      "  #region secondary-only",
+      "  const mode = 'strict';",
+      "  #endregion secondary-only",
+      "  */",
+      "  return 'secondary';",
+      "}",
+    ].join("\n");
+    await writeFile(join(root, "ports.ts"), source, "utf8");
+
+    const quoted = typescript
+      .from("ports.ts")
+      .symbol("primary", "function")
+      .quote("return 'primary';")
+      .reference("primary-return");
+    const matched = typescript
+      .from("ports.ts")
+      .symbol("secondary", "function")
+      .match("const port = (\\d+);", 1)
+      .reference("secondary-port");
+    const regional = typescript
+      .from("ports.ts")
+      .symbol("secondary", "function")
+      .region("settings")
+      .reference("secondary-settings");
+    const chained = typescript
+      .from("ports.ts")
+      .symbol("secondary", "function")
+      .region("secondary-only")
+      .match("mode = '([^']+)'", 1)
+      .reference("secondary-mode");
+
+    const config = defineConfig({
+      root,
+      plugins: [typescript],
+      bindings: [
+        binding("ts-text-steps", [quoted, matched, regional, chained]),
+      ],
+    });
+
+    const readQuoted = await readReference(config, quoted);
+    assert.equal(readQuoted.value, "return 'primary';");
+    assert.deepEqual(readQuoted.range, {
+      path: "ports.ts",
+      start: source.indexOf("return 'primary';"),
+      end: source.indexOf("return 'primary';") + "return 'primary';".length,
+    });
+
+    const readMatched = await readReference(config, matched);
+    assert.equal(readMatched.value, "5173");
+    const secondaryStart = source.indexOf("export function secondary");
+    const matchedPortOffset = source.indexOf("5173", secondaryStart);
+    assert.deepEqual(readMatched.range, {
+      path: "ports.ts",
+      start: matchedPortOffset,
+      end: matchedPortOffset + 4,
+    });
+
+    const readRegional = await readReference(config, regional);
+    assert.equal(readRegional.value, "  const port = 5173;\n");
+    const secondaryRegionBodyStart =
+      source.indexOf("  #region settings\n", secondaryStart) +
+      "  #region settings\n".length;
+    assert.deepEqual(readRegional.range, {
+      path: "ports.ts",
+      start: secondaryRegionBodyStart,
+      end: source.indexOf("  #endregion settings", secondaryStart),
+    });
+
+    const report = await check(config);
+    const checked = report.bindings[0];
+    assert.ok(checked && "current" in checked);
+    assert.equal(checked.current.references["secondary-mode"]?.value, "strict");
+    assert.deepEqual(checked.current.references["secondary-mode"]?.range, {
+      path: "ports.ts",
+      start: source.indexOf("strict"),
+      end: source.indexOf("strict") + "strict".length,
+    });
+
+    await assert.rejects(
+      readReference(
+        config,
+        typescript
+          .from("ports.ts")
+          .symbol("primary", "function")
+          .region("secondary-only")
+          .reference("out-of-symbol-region"),
+      ),
+      { code: "missing-region" },
+    );
+
+    await assert.rejects(
+      readReference(
+        config,
+        typescript
+          .from("ports.ts")
+          .symbol("missingFn", "function")
+          .match("port = (\\d+)", 1)
+          .reference("missing-symbol-chained"),
+      ),
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "missing-symbol" &&
+        error instanceof Error &&
+        /missingFn/u.test(error.message),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
