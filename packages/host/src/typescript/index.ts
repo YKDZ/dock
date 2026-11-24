@@ -129,27 +129,37 @@ const implementation = definePlugin({
     request: PluginRequest<TypeScriptReference>,
     context: PluginContext,
   ): Promise<PluginBatchResult<string>> {
-    const results: PluginReferenceResult<string>[] = [];
-    for (const reference of request.selectedReferences) {
-      try {
-        const result = await readTypeScriptReference(reference, context.root);
-        results.push({
-          referenceId: reference.id,
-          kind: "value",
-          value: result.value,
-          ...(result.range === undefined ? {} : { range: result.range }),
-        });
-      } catch (error) {
-        const range =
-          error instanceof TypeScriptReferenceError ? error.range : undefined;
-        results.push({
-          referenceId: reference.id,
-          kind: "error",
-          error: { code: errorCode(error), message: errorMessage(error) },
-          ...(range === undefined ? {} : { range }),
-        });
-      }
-    }
+    const loader = createBatchSourceLoader();
+    const results = await Promise.all(
+      request.selectedReferences.map(
+        async (reference): Promise<PluginReferenceResult<string>> => {
+          try {
+            const result = await readTypeScriptReference(
+              reference,
+              context.root,
+              loader,
+            );
+            return {
+              referenceId: reference.id,
+              kind: "value",
+              value: result.value,
+              ...(result.range === undefined ? {} : { range: result.range }),
+            };
+          } catch (error) {
+            const range =
+              error instanceof TypeScriptReferenceError
+                ? error.range
+                : undefined;
+            return {
+              referenceId: reference.id,
+              kind: "error",
+              error: { code: errorCode(error), message: errorMessage(error) },
+              ...(range === undefined ? {} : { range }),
+            };
+          }
+        },
+      ),
+    );
     return { results };
   },
   async read(
@@ -239,9 +249,110 @@ function createTextBuilder(
   };
 }
 
+type SettledResult<Value> =
+  | { readonly ok: true; readonly value: Value }
+  | { readonly ok: false; readonly error: TypeScriptReferenceError };
+
+type SourceLoader = {
+  readSourceText(absolutePath: string, displayPath: string): Promise<string>;
+  parseSourceFile(
+    sourceText: string,
+    absolutePath: string,
+    displayPath: string,
+  ): ts.SourceFile;
+};
+
+async function readSourceTextUncached(
+  absolutePath: string,
+  displayPath: string,
+): Promise<string> {
+  try {
+    return await readFile(absolutePath, "utf8");
+  } catch (error) {
+    throw new TypeScriptReferenceError(
+      "typescript-file-read-failed",
+      `Cannot read TypeScript file ${displayPath}: ${errorMessage(error)}`,
+      undefined,
+      { cause: error },
+    );
+  }
+}
+
+function createUncachedSourceLoader(): SourceLoader {
+  return {
+    readSourceText: readSourceTextUncached,
+    parseSourceFile: parseSource,
+  };
+}
+
+function toTypeScriptReferenceError(error: unknown): TypeScriptReferenceError {
+  if (error instanceof TypeScriptReferenceError) return error;
+  return new TypeScriptReferenceError(
+    errorCode(error),
+    errorMessage(error),
+    undefined,
+    { cause: error },
+  );
+}
+
+/**
+ * Shares file reads, parsed ASTs, and syntax error outcomes by absolute path within
+ * a single collect() call while never retaining state across independent checks.
+ */
+function createBatchSourceLoader(): SourceLoader {
+  const sourceTexts = new Map<string, Promise<SettledResult<string>>>();
+  const parsedFiles = new Map<string, SettledResult<ts.SourceFile>>();
+
+  return {
+    async readSourceText(
+      absolutePath: string,
+      displayPath: string,
+    ): Promise<string> {
+      let pending = sourceTexts.get(absolutePath);
+      if (pending === undefined) {
+        pending = readSourceTextUncached(absolutePath, displayPath).then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({
+            ok: false as const,
+            error: toTypeScriptReferenceError(error),
+          }),
+        );
+        sourceTexts.set(absolutePath, pending);
+      }
+      const settled = await pending;
+      if (!settled.ok) throw settled.error;
+      return settled.value;
+    },
+    parseSourceFile(
+      sourceText: string,
+      absolutePath: string,
+      displayPath: string,
+    ): ts.SourceFile {
+      let cached = parsedFiles.get(absolutePath);
+      if (cached === undefined) {
+        try {
+          cached = {
+            ok: true,
+            value: parseSource(sourceText, absolutePath, displayPath),
+          };
+        } catch (error) {
+          cached = {
+            ok: false,
+            error: toTypeScriptReferenceError(error),
+          };
+        }
+        parsedFiles.set(absolutePath, cached);
+      }
+      if (!cached.ok) throw cached.error;
+      return cached.value;
+    },
+  };
+}
+
 async function readTypeScriptReference(
   reference: TypeScriptReference,
   root: string,
+  loader: SourceLoader = createUncachedSourceLoader(),
 ): Promise<PluginReadResult<string>> {
   let absolutePath: string;
   try {
@@ -257,17 +368,8 @@ async function readTypeScriptReference(
     );
   }
 
-  let sourceText: string;
-  try {
-    sourceText = await readFile(absolutePath, "utf8");
-  } catch (error) {
-    throw new TypeScriptReferenceError(
-      "typescript-file-read-failed",
-      `Cannot read TypeScript file ${displayTarget(absolutePath, root)}: ${errorMessage(error)}`,
-      undefined,
-      { cause: error },
-    );
-  }
+  const path = displayTarget(absolutePath, root);
+  const sourceText = await loader.readSourceText(absolutePath, path);
 
   let selection: TypeScriptSelection;
   try {
@@ -282,8 +384,7 @@ async function readTypeScriptReference(
     );
   }
 
-  const path = displayTarget(absolutePath, root);
-  const sourceFile = parseSource(sourceText, absolutePath, path);
+  const sourceFile = loader.parseSourceFile(sourceText, absolutePath, path);
   let range = {
     path,
     start: 0,

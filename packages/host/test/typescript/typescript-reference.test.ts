@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { pathToFileURL } from "node:url";
 
 import { binding, check, defineConfig, readReference } from "@ykdz/dock";
 import { typescript, typescriptPluginId } from "@ykdz/dock/typescript";
@@ -586,6 +587,323 @@ void test("typescript symbol steps compose with quote, capture-group match, and 
         error.code === "missing-symbol" &&
         error instanceof Error &&
         /missingFn/u.test(error.message),
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("batch collection reads multiple symbols including nested paths and chained text steps from one file", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-typescript-multi-symbol-"));
+  try {
+    const source = [
+      'export const badge = "🚀";',
+      'export const version = "0.3.0";',
+      "export function greet(name: string) {",
+      "  /*",
+      "  #region body",
+      "  return `hello ${name}`;",
+      "  #endregion body",
+      "  */",
+      "  return `hello ${name}`;",
+      "}",
+      "export class Registry {",
+      "  items = { count: 2 };",
+      "  lookup(id: string) { return id; }",
+      "}",
+    ].join("\n");
+    const modulePath = join(root, "module.ts");
+    await writeFile(modulePath, source, "utf8");
+
+    const versionRef = typescript
+      .from("module.ts")
+      .symbol("version", "variable")
+      .reference("version-ref");
+    const lookupRef = typescript
+      .from("./module.ts")
+      .symbol(["Registry", "lookup"], "method")
+      .reference("lookup-ref");
+    const greetTextRef = typescript
+      .from("module.ts")
+      .symbol("greet", "function")
+      .region("body")
+      .quote("hello ${name}")
+      .reference("greet-text-ref");
+    const nestedCountRef = typescript
+      .from(pathToFileURL(modulePath))
+      .symbol(["Registry", "items", "count"], "property")
+      .reference("nested-count-ref");
+
+    const config = defineConfig({
+      root,
+      plugins: [typescript],
+      bindings: [
+        binding("multi-symbol", [
+          versionRef,
+          lookupRef,
+          greetTextRef,
+          nestedCountRef,
+        ]),
+      ],
+    });
+
+    const report = await check(config);
+    const result = report.bindings[0];
+    assert.ok(result !== undefined && result.current !== undefined);
+
+    const expected = [
+      ["version-ref", 'version = "0.3.0"'],
+      ["lookup-ref", "lookup(id: string) { return id; }"],
+      ["greet-text-ref", "hello ${name}"],
+      ["nested-count-ref", "count: 2"],
+    ] as const;
+
+    for (const [id, value] of expected) {
+      assert.equal(result.current.references[id]?.value, value);
+      const start = source.indexOf(value);
+      assert.deepEqual(result.current.references[id]?.range, {
+        path: "module.ts",
+        start,
+        end: start + value.length,
+      });
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("batch collection reports per-reference syntax and read errors while collecting valid files in the same batch", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-typescript-syntax-batch-"));
+  try {
+    await writeFile(
+      join(root, "broken.ts"),
+      "const first = 1;\nexport function broken( {\n",
+      "utf8",
+    );
+    const validSource = [
+      "export const port = 4173;",
+      "export class Server { start() { return port; } }",
+    ].join("\n");
+    await writeFile(join(root, "valid.ts"), validSource, "utf8");
+
+    const config = defineConfig({
+      root,
+      plugins: [typescript],
+      bindings: [
+        binding("broken-policy", [
+          typescript
+            .from("broken.ts")
+            .symbol("first", "variable")
+            .reference("broken-first"),
+          typescript
+            .from("broken.ts")
+            .symbol("broken", "function")
+            .reference("broken-fn"),
+        ]),
+        binding("missing-policy", [
+          typescript
+            .from("missing.ts")
+            .symbol("alpha", "variable")
+            .reference("missing-alpha"),
+          typescript
+            .from("missing.ts")
+            .symbol("beta", "function")
+            .reference("missing-beta"),
+        ]),
+        binding("valid-policy", [
+          typescript
+            .from("valid.ts")
+            .symbol("port", "variable")
+            .reference("valid-port"),
+          typescript
+            .from("valid.ts")
+            .symbol(["Server", "start"], "method")
+            .reference("valid-start"),
+        ]),
+      ],
+    });
+
+    const report = await check(config);
+    assert.deepEqual(report.pluginErrors, []);
+
+    const brokenBinding = report.bindings.find(
+      ({ bindingId }) => bindingId === "broken-policy",
+    );
+    assert.ok(brokenBinding && "errors" in brokenBinding);
+    assert.deepEqual(
+      brokenBinding.errors.map(({ referenceId, code }) => ({
+        referenceId,
+        code,
+      })),
+      [
+        { referenceId: "broken-first", code: "typescript-syntax-error" },
+        { referenceId: "broken-fn", code: "typescript-syntax-error" },
+      ],
+    );
+    for (const error of brokenBinding.errors) {
+      assert.match(error.message, /broken\.ts \(\d+:\d+\):/u);
+    }
+
+    const missingBinding = report.bindings.find(
+      ({ bindingId }) => bindingId === "missing-policy",
+    );
+    assert.ok(missingBinding && "errors" in missingBinding);
+    assert.deepEqual(
+      missingBinding.errors.map(({ referenceId, code }) => ({
+        referenceId,
+        code,
+      })),
+      [
+        { referenceId: "missing-alpha", code: "typescript-file-read-failed" },
+        { referenceId: "missing-beta", code: "typescript-file-read-failed" },
+      ],
+    );
+
+    const validBinding = report.bindings.find(
+      ({ bindingId }) => bindingId === "valid-policy",
+    );
+    assert.ok(validBinding && "current" in validBinding);
+    assert.equal(
+      validBinding.current.references["valid-port"]?.value,
+      "port = 4173",
+    );
+    assert.deepEqual(validBinding.current.references["valid-port"]?.range, {
+      path: "valid.ts",
+      start: validSource.indexOf("port = 4173"),
+      end: validSource.indexOf("port = 4173") + "port = 4173".length,
+    });
+    assert.equal(
+      validBinding.current.references["valid-start"]?.value,
+      "start() { return port; }",
+    );
+    assert.deepEqual(validBinding.current.references["valid-start"]?.range, {
+      path: "valid.ts",
+      start: validSource.indexOf("start() { return port; }"),
+      end:
+        validSource.indexOf("start() { return port; }") +
+        "start() { return port; }".length,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("independent checks observe symbol edits and syntax error fixes without stale caching", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-typescript-fresh-runs-"));
+  try {
+    const targetPath = join(root, "target.ts");
+    const recoverablePath = join(root, "recoverable.ts");
+
+    const initialTarget = [
+      'export const greeting = "before";',
+      "export function compute() { return 1; }",
+    ].join("\n");
+    await writeFile(targetPath, initialTarget, "utf8");
+    await writeFile(recoverablePath, "export function broken( {\n", "utf8");
+
+    const config = defineConfig({
+      root,
+      plugins: [typescript],
+      bindings: [
+        binding("target-policy", [
+          typescript
+            .from("target.ts")
+            .symbol("greeting", "variable")
+            .reference("greeting-ref"),
+          typescript
+            .from("target.ts")
+            .symbol("compute", "function")
+            .reference("compute-ref"),
+        ]),
+        binding("recoverable-policy", [
+          typescript
+            .from("recoverable.ts")
+            .symbol("broken", "function")
+            .reference("broken-ref"),
+          typescript
+            .from("recoverable.ts")
+            .symbol("status", "variable")
+            .reference("status-ref"),
+        ]),
+      ],
+    });
+
+    const first = await check(config);
+    const firstTarget = first.bindings.find(
+      ({ bindingId }) => bindingId === "target-policy",
+    );
+    const firstRecoverable = first.bindings.find(
+      ({ bindingId }) => bindingId === "recoverable-policy",
+    );
+    assert.ok(firstTarget && "current" in firstTarget);
+    assert.equal(
+      firstTarget.current.references["greeting-ref"]?.value,
+      'greeting = "before"',
+    );
+    assert.equal(
+      firstTarget.current.references["greeting-ref"]?.range?.start,
+      initialTarget.indexOf('greeting = "before"'),
+    );
+    assert.ok(firstRecoverable && "errors" in firstRecoverable);
+    assert.deepEqual(
+      firstRecoverable.errors.map(({ code }) => code),
+      ["typescript-syntax-error", "typescript-syntax-error"],
+    );
+
+    const updatedTarget = [
+      "// shifted header",
+      'export const greeting = "after-edit";',
+      "export function compute() { return 2; }",
+    ].join("\n");
+    const fixedRecoverable = [
+      'export function broken() { return "fixed"; }',
+      'export const status = "ok";',
+    ].join("\n");
+    await writeFile(targetPath, updatedTarget, "utf8");
+    await writeFile(recoverablePath, fixedRecoverable, "utf8");
+
+    const second = await check(config);
+    const secondTarget = second.bindings.find(
+      ({ bindingId }) => bindingId === "target-policy",
+    );
+    const secondRecoverable = second.bindings.find(
+      ({ bindingId }) => bindingId === "recoverable-policy",
+    );
+    assert.ok(secondTarget && "current" in secondTarget);
+    assert.equal(
+      secondTarget.current.references["greeting-ref"]?.value,
+      'greeting = "after-edit"',
+    );
+    assert.deepEqual(secondTarget.current.references["greeting-ref"]?.range, {
+      path: "target.ts",
+      start: updatedTarget.indexOf('greeting = "after-edit"'),
+      end:
+        updatedTarget.indexOf('greeting = "after-edit"') +
+        'greeting = "after-edit"'.length,
+    });
+    assert.equal(
+      secondTarget.current.references["compute-ref"]?.value,
+      "export function compute() { return 2; }",
+    );
+    assert.ok(secondRecoverable && "current" in secondRecoverable);
+    assert.equal(
+      secondRecoverable.current.references["broken-ref"]?.value,
+      'export function broken() { return "fixed"; }',
+    );
+    assert.equal(
+      secondRecoverable.current.references["status-ref"]?.value,
+      'status = "ok"',
+    );
+
+    await writeFile(recoverablePath, "export const status = ;\n", "utf8");
+    const third = await check(config);
+    const thirdRecoverable = third.bindings.find(
+      ({ bindingId }) => bindingId === "recoverable-policy",
+    );
+    assert.ok(thirdRecoverable && "errors" in thirdRecoverable);
+    assert.deepEqual(
+      thirdRecoverable.errors.map(({ code }) => code),
+      ["typescript-syntax-error", "typescript-syntax-error"],
     );
   } finally {
     await rm(root, { recursive: true, force: true });
