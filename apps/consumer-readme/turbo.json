@@ -1,6 +1,5 @@
 {
   "extends": ["//"],
-  "tags": ["dock-reference"],
   "tasks": {
     "format:check": {
       "outputs": [],

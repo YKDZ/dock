@@ -2,12 +2,12 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { binding, defineConfig } from "@ykdz/dock";
-import { markdown } from "@ykdz/dock-reference-markdown";
+import { markdown } from "@ykdz/dock/markdown";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestStatus,
-} from "@ykdz/dock-reference-node-test";
+} from "@ykdz/dock/node-test";
 
 const root = dirname(fileURLToPath(import.meta.resolve("dock/README.md")));
 const consumer = dirname(fileURLToPath(import.meta.url));
@@ -15,10 +15,10 @@ const consumer = dirname(fileURLToPath(import.meta.url));
 export const readme = markdown.from("README.md");
 export const exampleTest = {
   file: relative(root, join(consumer, "scripts/readme.test.ts")),
-  name: "README 示例完成检查与基线更新",
+  name: "README example completes check and baseline update",
 };
 
-const run = defineNodeTestRun("README 示例", {
+const run = defineNodeTestRun("README example", {
   files: [exampleTest.file],
 });
 const example = nodeTestStatus("readme-example", run, exampleTest);

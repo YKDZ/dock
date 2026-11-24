@@ -38,11 +38,13 @@ dock baseline update --config dock.config.ts
 
 目前原生支持以下类型：
 
-- [文件](references/file/)：检查文件是否存在，选取全文或文本片段。
-- [Markdown 文档](references/markdown/)：选取章节、表格等结构化内容或标记范围。
-- [TypeScript 代码](references/typescript/)：按符号和声明路径选取代码。
-- [Node.js 测试](references/node-test/)：取得原生测试状态及测试中记录的结果。
-- [Vitest 测试](references/vitest/)：取得测试或测试组的状态及测试中记录的结果。
+- 文件（`@ykdz/dock`）：检查文件是否存在，选取全文或文本片段。
+- Markdown 文档（`@ykdz/dock/markdown`）：选取章节、表格等结构化内容或标记范围。
+- TypeScript 代码（`@ykdz/dock/typescript`）：按符号和声明路径选取代码。
+- Node.js 测试（`@ykdz/dock/node-test`）：取得原生测试状态及测试中记录的结果。
+- Vitest 测试（`@ykdz/dock/vitest`）：取得测试或测试组的状态及测试中记录的结果。
+
+核对内核由 `@ykdz/dock/core` 导出，可单独用于纯数据比较与基线计算。
 
 例如，某个项目在 `package.json` 中声明 Node.js 版本要求：
 
@@ -61,14 +63,14 @@ import {
   createReference,
   defineConfig,
   definePlugin,
+  file,
 } from "@ykdz/dock";
-import { file } from "@ykdz/dock-reference-file";
 
 const nodeEngine = definePlugin({
   id: "node-engine",
   validate({ target }) {
     if (typeof target !== "string") {
-      throw new Error("请指定包清单的路径。");
+      throw new Error("Specify the package manifest path.");
     }
   },
   async collect(request, { root }) {
@@ -76,7 +78,7 @@ const nodeEngine = definePlugin({
     for (const reference of request.selectedReferences) {
       const target = reference.target;
       if (typeof target !== "string") {
-        throw new Error("包清单路径必须是文本。");
+        throw new Error("Package manifest path must be a string.");
       }
       const data = JSON.parse(await readFile(resolve(root, target), "utf8"));
       const value = data.engines?.node;
@@ -88,7 +90,8 @@ const nodeEngine = definePlugin({
               kind: "error",
               error: {
                 code: "node-version-missing",
-                message: "请在包清单中用 engines.node 声明版本要求。",
+                message:
+                  "Declare the version requirement with engines.node in package.json.",
               },
             },
       );

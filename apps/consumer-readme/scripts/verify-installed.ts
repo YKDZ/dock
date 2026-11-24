@@ -36,14 +36,18 @@ type NodeRunDiagnostic = {
 };
 
 const artifacts = process.argv.slice(2);
-assert.equal(artifacts.length, 5, "README 自举需要同批五个正式包制品。");
+assert.equal(
+  artifacts.length,
+  1,
+  "README bootstrap verification requires the @ykdz/dock package tarball.",
+);
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
 const repository = await mkdtemp(join(tmpdir(), "dock-readme-installed-"));
 const consumer = join(repository, "apps", "consumer-readme");
 
 try {
-  // 沿用工作区消费者的目录布局，配置、测试和基线均原样复制。
+  // Mirror the workspace consumer directory layout and copy config, test, and baseline verbatim.
   await mkdir(join(consumer, "scripts"), { recursive: true });
   await copyFile(
     fileURLToPath(import.meta.resolve("dock/README.md")),
@@ -81,11 +85,31 @@ try {
   for (const path of [
     "dock.config.ts",
     "dock.baseline.json",
-    "tsconfig.json",
     "scripts/readme.test.ts",
   ]) {
     await copyFile(join(packageDirectory, path), join(consumer, path));
   }
+  await writeFile(
+    join(consumer, "tsconfig.json"),
+    JSON.stringify({
+      compilerOptions: {
+        allowImportingTsExtensions: true,
+        erasableSyntaxOnly: true,
+        exactOptionalPropertyTypes: true,
+        isolatedModules: true,
+        module: "nodenext",
+        moduleResolution: "nodenext",
+        noEmit: true,
+        noUncheckedIndexedAccess: true,
+        skipLibCheck: false,
+        strict: true,
+        target: "es2024",
+        types: ["node"],
+        verbatimModuleSyntax: true,
+      },
+      include: ["dock.config.ts", "scripts/**/*.ts"],
+    }),
+  );
   const typed = run(bin("tsc"), ["-p", "tsconfig.json", "--pretty", "false"]);
   assert.equal(typed.status, 0, typed.stdout + typed.stderr);
 
@@ -108,20 +132,29 @@ try {
   const nodePlugin = report.pluginDiagnostics.find(
     ({ pluginId }) => pluginId === "@ykdz/dock-reference-node-test",
   );
-  assert.ok(nodePlugin, "README JSON 必须保留 Node 插件来源和诊断。");
+  assert.ok(
+    nodePlugin,
+    "README structured output must retain node-test plugin diagnostics.",
+  );
   const diagnostic = nodePlugin.data as NodeDiagnosticData;
   const nodeRun = diagnostic.runs[0];
-  assert.ok(nodeRun, "README JSON 必须包含 Node 运行诊断。");
-  assert.equal(nodeRun.identity, "README 示例");
+  assert.ok(nodeRun, "README structured output must include a Node run entry.");
+  assert.equal(nodeRun.identity, "README example");
   assert.equal(nodeRun.commandAttempts, 1);
   assert.equal(nodeRun.testExecutions, 1);
   assert.equal(nodeRun.failedCommands, 0);
   assert.ok(nodePlugin.text.length > 0);
   const reads = nodeRun.reads;
-  assert.ok(reads && reads.length > 0, "README 验收必须产生原生测试读取证据。");
+  assert.ok(
+    reads && reads.length > 0,
+    "README verification must produce native test read evidence.",
+  );
   for (const read of reads) {
     const identity = JSON.parse(read.testId) as { name?: unknown };
-    assert.equal(identity.name, "README 示例完成检查与基线更新");
+    assert.equal(
+      identity.name,
+      "README example completes check and baseline update",
+    );
   }
   assert.deepEqual(await readFile(baselinePath), baseline);
 
@@ -152,13 +185,13 @@ try {
       failure.bindings.some((binding) =>
         binding.errors?.some((error) => error.code === "test-failed"),
       ),
-      "改错 README 插件后必须报告原生测试失败。",
+      "Broken README example plugin must report a native test failure.",
     );
     assert.deepEqual(await readFile(baselinePath), baseline);
   }
 
   process.stdout.write(
-    "README 正式制品、自举基线及错误示例拒绝更新验收通过。\n",
+    "README installed package, bootstrap baseline, and broken-example rejection verification passed.\n",
   );
 } finally {
   await rm(repository, { recursive: true, force: true });
@@ -196,6 +229,6 @@ function run(command: string, args: readonly string[]) {
     timeout: 120_000,
     maxBuffer: 8 * 1024 * 1024,
   });
-  assert.equal(result.error, undefined, `执行 ${command} 失败。`);
+  assert.equal(result.error, undefined, `Failed to execute ${command}.`);
   return result;
 }

@@ -6,34 +6,14 @@
           "allow": ["library"]
         }
       },
-      "dock-core": {
-        "dependencies": {
-          "allow": ["dock-tooling"]
-        }
-      },
       "dock-host": {
         "dependencies": {
-          "allow": ["dock-core", "dock-tooling"]
-        }
-      },
-      "dock-reference": {
-        "dependencies": {
-          "allow": ["dock-core", "dock-host", "dock-tooling", "dock-reference"]
+          "allow": ["dock-tooling"]
         }
       },
       "dock-tooling": {
         "dependencies": {
           "allow": ["dock-tooling"]
-        }
-      },
-      "dock-node-test": {
-        "dependencies": {
-          "deny": ["dock-vitest"]
-        }
-      },
-      "dock-vitest": {
-        "dependencies": {
-          "deny": ["dock-node-test"]
         }
       }
     }
@@ -49,15 +29,7 @@
       "tags": ["quality:entry"]
     },
     "//#check:install": {
-      "dependsOn": [
-        "@ykdz/dock-core#pack",
-        "@ykdz/dock#pack",
-        "@ykdz/dock-reference-file#pack",
-        "@ykdz/dock-reference-markdown#pack",
-        "@ykdz/dock-reference-node-test#pack",
-        "@ykdz/dock-reference-vitest#pack",
-        "@ykdz/dock-reference-typescript#pack"
-      ],
+      "dependsOn": ["@ykdz/dock#pack"],
       "cache": false,
       "outputs": [],
       "tags": ["quality:heavy"]

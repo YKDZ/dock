@@ -8,16 +8,13 @@
     "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix . --fix",
     "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false",
-    "dock:check": "node --input-type=module -e 'import \"@ykdz/dock/cli\"' -- dock check --config dock.config.ts",
-    "dock:baseline": "node --input-type=module -e 'import \"@ykdz/dock/cli\"' -- dock baseline update --config dock.config.ts && oxfmt --write dock.baseline.json"
+    "dock:check": "dock check --config dock.config.ts",
+    "dock:baseline": "dock baseline update --config dock.config.ts && oxfmt --write dock.baseline.json"
   },
   "devDependencies": {
     "@dock/tooling-config": "workspace:*",
     "@types/node": "catalog:",
     "@ykdz/dock": "workspace:*",
-    "@ykdz/dock-reference-file": "workspace:*",
-    "@ykdz/dock-reference-markdown": "workspace:*",
-    "@ykdz/dock-reference-node-test": "workspace:*",
     "dock": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
