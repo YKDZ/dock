@@ -97,6 +97,7 @@ export interface ReferencePlugin<
 > {
   readonly id: PluginId;
   readonly validate: BivariantHandler<[reference: Ref], void>;
+  /** Collects current facts for `request.selectedReferences`; shared reads or executions stay scoped to this single call and may report operational diagnostics. */
   readonly collect: BivariantHandler<
     [request: PluginRequest<Ref, Prepared>, context: PluginContext],
     Awaitable<PluginBatchResult<Value>>

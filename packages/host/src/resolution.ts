@@ -67,8 +67,6 @@ export type ResolvedPluginRuntime = {
 export type ResolvedOperation = {
   readonly model: ResolvedMaintenance;
   readonly runtime: {
-    readonly plugins: ReadonlyMap<string, Config["plugins"][number]>;
-    readonly references: readonly NormalizedReference[];
     readonly collectors: readonly ResolvedPluginRuntime[];
   };
 };
@@ -117,7 +115,7 @@ export async function resolveMaintenance(
   const selectedIds = new Set(
     selection.references.map((reference) => reference.id),
   );
-  const pluginViews = await Promise.all(
+  const resolvedPlugins = await Promise.all(
     preparedPlugins.map(async (preparedPlugin) => {
       const selectedReferences = Object.freeze(
         preparedPlugin.references.filter((reference) =>
@@ -129,7 +127,7 @@ export async function resolveMaintenance(
         selectedReferences,
         config.root,
       );
-      return {
+      const view: ResolvedPlugin = {
         id: preparedPlugin.plugin.id,
         references: Object.freeze(
           preparedPlugin.references.map(({ id }) => id),
@@ -138,21 +136,20 @@ export async function resolveMaintenance(
           selectedReferences.map(({ id }) => id),
         ),
         ...(description === undefined ? {} : { description }),
-      } satisfies ResolvedPlugin;
+      };
+      const collector: ResolvedPluginRuntime = {
+        plugin: preparedPlugin.plugin,
+        references: preparedPlugin.references,
+        selectedReferences,
+        ...(preparedPlugin.prepared === undefined
+          ? {}
+          : { prepared: preparedPlugin.prepared }),
+      };
+      return { view, collector };
     }),
   );
-  const collectors = preparedPlugins.map((preparedPlugin) => ({
-    plugin: preparedPlugin.plugin,
-    references: preparedPlugin.references,
-    selectedReferences: Object.freeze(
-      preparedPlugin.references.filter((reference) =>
-        selectedIds.has(reference.id),
-      ),
-    ),
-    ...(preparedPlugin.prepared === undefined
-      ? {}
-      : { prepared: preparedPlugin.prepared }),
-  }));
+  const pluginViews = resolvedPlugins.map(({ view }) => view);
+  const collectors = resolvedPlugins.map(({ collector }) => collector);
   const context: CheckContext = {
     references: referenceDefinitions(config, fileInfo),
     bindings: config.bindings,
@@ -184,8 +181,6 @@ export async function resolveMaintenance(
       declarationSources: config.declarationSources,
     },
     runtime: {
-      plugins: config.plugins,
-      references: selection.references,
       collectors: Object.freeze(collectors),
     },
   };

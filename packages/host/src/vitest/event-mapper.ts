@@ -12,12 +12,14 @@ type VitestTestStatus =
   | "not-run"
   | "duplicate";
 
+/** Business observation attributed to a specific Vitest attempt (`attempt`); only the final passing attempt supplies the checked fact. */
 export type VitestObservationRecord = {
   readonly attempt: number;
   readonly key: string;
   readonly value: JsonValue;
 };
 
+/** Reference read recorded during a specific Vitest attempt (`attempt`) to explain what value and range the test observed across retries. */
 export type VitestReadRecord = {
   readonly attempt: number;
   readonly referenceId: string;
@@ -25,6 +27,7 @@ export type VitestReadRecord = {
   readonly range?: TextRange;
 };
 
+/** Single test record mapped from Vitest attempts; `attemptCount`, `observations`, and `reads` explain retry outcomes and missing observations. */
 type VitestTestRecord = {
   readonly identity: string;
   readonly status: VitestTestStatus;

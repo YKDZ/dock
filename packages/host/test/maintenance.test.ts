@@ -19,6 +19,7 @@ import {
   defineConfig,
   definePlugin,
   file,
+  type FileReference,
   inspect,
   MaintenanceError,
   type PluginBatchResult,
@@ -359,6 +360,167 @@ void test("comparableTarget projects baseline definition while prepare, describe
         return true;
       },
     );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("inspect, check, and updateBaseline share consistent scope and required references while preserving out-of-scope baseline entries", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-consistent-scope-"));
+  const baselinePath = join(root, "dock.baseline.json");
+
+  try {
+    await writeFile(join(root, "shared.md"), "shared v1\n", "utf8");
+    await writeFile(join(root, "alpha.md"), "alpha v1\n", "utf8");
+    await writeFile(join(root, "beta.md"), "beta v1\n", "utf8");
+
+    const describeSelections: string[][] = [];
+    const collectSelections: string[][] = [];
+    const trackedFilePlugin = definePlugin({
+      id: file.id,
+      validate: file.validate,
+      ...(file.fileInfo === undefined ? {} : { fileInfo: file.fileInfo }),
+      describe(request: PluginRequest<FileReference>) {
+        describeSelections.push(
+          request.selectedReferences.map((reference) => reference.id),
+        );
+        return {
+          data: {
+            selected: request.selectedReferences.map(
+              (reference) => reference.id,
+            ),
+          },
+          text: [],
+        };
+      },
+      collect(request: PluginRequest<FileReference>, context: PluginContext) {
+        collectSelections.push(
+          request.selectedReferences.map((reference) => reference.id),
+        );
+        return file.collect(request, context);
+      },
+    });
+
+    const config = defineConfig({
+      root,
+      plugins: [trackedFilePlugin],
+      bindings: [
+        binding("alpha-policy", [
+          file.from("shared.md").reference("shared-doc"),
+          file.from("alpha.md").reference("alpha-doc"),
+        ]),
+        binding("beta-policy", [
+          file.from("shared.md").reference("shared-doc"),
+          file.from("beta.md").reference("beta-doc"),
+        ]),
+      ],
+    });
+
+    const fullInspected = await inspect(config);
+    const fullChecked = await check(config);
+    const fullUpdated = await updateBaseline(config);
+
+    assert.deepEqual(fullInspected.context.scope, [
+      "alpha-policy",
+      "beta-policy",
+    ]);
+    assert.deepEqual(fullChecked.scope, ["alpha-policy", "beta-policy"]);
+    assert.deepEqual(fullUpdated.report.scope, ["alpha-policy", "beta-policy"]);
+    assert.deepEqual(fullInspected.plugins[0]?.references, [
+      "shared-doc",
+      "alpha-doc",
+      "beta-doc",
+    ]);
+    assert.deepEqual(fullInspected.plugins[0]?.selectedReferences, [
+      "shared-doc",
+      "alpha-doc",
+      "beta-doc",
+    ]);
+    assert.deepEqual(describeSelections, [
+      ["shared-doc", "alpha-doc", "beta-doc"],
+      ["shared-doc", "alpha-doc", "beta-doc"],
+      ["shared-doc", "alpha-doc", "beta-doc"],
+    ]);
+    assert.deepEqual(collectSelections, [
+      ["shared-doc", "alpha-doc", "beta-doc"],
+      ["shared-doc", "alpha-doc", "beta-doc"],
+    ]);
+    assert.equal(fullUpdated.status, "updated");
+
+    describeSelections.length = 0;
+    collectSelections.length = 0;
+    await writeFile(join(root, "alpha.md"), "alpha v2\n", "utf8");
+    await writeFile(join(root, "beta.md"), "beta v2\n", "utf8");
+
+    const singleScope = { binding: ["alpha-policy"] } as const;
+    const scopedInspected = await inspect(config, singleScope);
+    const scopedChecked = await check(config, singleScope);
+    const scopedUpdated = await updateBaseline(config, singleScope);
+
+    assert.deepEqual(scopedInspected.context.scope, ["alpha-policy"]);
+    assert.deepEqual(scopedChecked.scope, ["alpha-policy"]);
+    assert.deepEqual(scopedUpdated.report.scope, ["alpha-policy"]);
+    assert.deepEqual(scopedChecked.declaration, {
+      completeness: "complete",
+      bindingIds: ["alpha-policy", "beta-policy"],
+    });
+    assert.deepEqual(scopedUpdated.report.declaration, {
+      completeness: "complete",
+      bindingIds: ["alpha-policy", "beta-policy"],
+    });
+    assert.deepEqual(scopedInspected.plugins[0]?.references, [
+      "shared-doc",
+      "alpha-doc",
+      "beta-doc",
+    ]);
+    assert.deepEqual(scopedInspected.plugins[0]?.selectedReferences, [
+      "shared-doc",
+      "alpha-doc",
+    ]);
+    assert.deepEqual(describeSelections, [
+      ["shared-doc", "alpha-doc"],
+      ["shared-doc", "alpha-doc"],
+      ["shared-doc", "alpha-doc"],
+    ]);
+    assert.deepEqual(collectSelections, [
+      ["shared-doc", "alpha-doc"],
+      ["shared-doc", "alpha-doc"],
+    ]);
+    assert.deepEqual(
+      scopedChecked.bindings.map((entry) => entry.bindingId),
+      ["alpha-policy"],
+    );
+    assert.equal(scopedUpdated.status, "updated");
+    if (scopedUpdated.status !== "updated") return;
+
+    assert.equal(
+      scopedUpdated.baseline.bindings["alpha-policy"]?.references["alpha-doc"]
+        ?.value,
+      "alpha v2\n",
+    );
+    assert.equal(
+      scopedUpdated.baseline.bindings["beta-policy"]?.references["beta-doc"]
+        ?.value,
+      "beta v1\n",
+    );
+    const savedBaseline = JSON.parse(
+      await readFile(baselinePath, "utf8"),
+    ) as typeof scopedUpdated.baseline;
+    assert.equal(
+      savedBaseline.bindings["beta-policy"]?.references["beta-doc"]?.value,
+      "beta v1\n",
+    );
+
+    const outOfScopeCheck = await check(config, { binding: ["beta-policy"] });
+    assert.equal(outOfScopeCheck.bindings[0]?.consistency, "inconsistent");
+    assert.deepEqual(outOfScopeCheck.bindings[0]?.changes, [
+      {
+        kind: "fact",
+        referenceId: "beta-doc",
+        before: "beta v1\n",
+        after: "beta v2\n",
+      },
+    ]);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

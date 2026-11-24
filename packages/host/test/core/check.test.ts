@@ -1122,6 +1122,14 @@ void test("partial declarations do not prove untracking; complete declarations r
     partial.bindings.map((result) => result.bindingId),
     ["preview-port"],
   );
+  const partialUpdate = updateBaseline(partialInput);
+  assert.equal(partialUpdate.status, "updated");
+  if (partialUpdate.status === "updated") {
+    assert.equal(
+      Object.hasOwn(partialUpdate.baseline.bindings, "preview-port-copy"),
+      true,
+    );
+  }
 
   const omittedFromPartialInput: CheckInput = {
     references,
