@@ -162,7 +162,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
 
   const initialCheck = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(initialCheck.code, 1, initialCheck.stderr);
@@ -171,7 +171,14 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
 
   const initialUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(initialUpdate.code, 0, initialUpdate.stderr);
@@ -179,7 +186,15 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   const initialBaseline = await readFile(baselinePath);
   const unmatchedFile = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--file", "missing.ts", "--json"],
+    [
+      "check",
+      "--config",
+      "dock.config.mjs",
+      "--file",
+      "missing.ts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(unmatchedFile.code, 1, unmatchedFile.stderr);
@@ -189,7 +204,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assert.deepEqual(await readFile(baselinePath), initialBaseline);
   const consistent = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(consistent.code, 0, consistent.stderr);
@@ -204,7 +219,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assert.equal(changedRead.value, "input + 2");
   const drift = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(drift.code, 1, drift.stderr);
@@ -213,7 +228,14 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assertReportSelection(drift.stdout, changedRead);
   const validUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(validUpdate.code, 0, validUpdate.stderr);
@@ -226,7 +248,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assert.ok(movedRead.range.start > changedRead.range.start);
   const movedCheck = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(movedCheck.code, 0, movedCheck.stderr);
@@ -242,7 +264,8 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
       "dock.config.mjs",
       "--file",
       "symbol-source.ts",
-      "--json",
+      "--output",
+      "structured",
     ],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts" },
@@ -263,7 +286,14 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assertReportSelection(targetChange.stdout, copyRead);
   const targetUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts" },
   );
@@ -277,7 +307,8 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
       "dock.config.mjs",
       "--file",
       "symbol-copy.ts",
-      "--json",
+      "--output",
+      "structured",
     ],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts" },
@@ -288,7 +319,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
 
   const selectionChange = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts", DOCK_SYMBOL_MODE: "quote" },
   );
@@ -301,7 +332,14 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assertReportSelection(selectionChange.stdout, copyRead);
   const selectionUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts", DOCK_SYMBOL_MODE: "quote" },
   );
@@ -310,7 +348,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
 
   const missing = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts", DOCK_SYMBOL_MODE: "missing" },
   );
@@ -319,7 +357,14 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assertReferenceError(missing.stdout, "missing-symbol");
   const rejectedMissing = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts", DOCK_SYMBOL_MODE: "missing" },
   );
@@ -334,7 +379,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   );
   const syntaxError = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts", DOCK_SYMBOL_MODE: "quote" },
   );
@@ -343,7 +388,14 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assertReferenceError(syntaxError.stdout, "typescript-syntax-error");
   const rejectedSyntax = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
     { DOCK_SYMBOL_TARGET: "symbol-copy.ts", DOCK_SYMBOL_MODE: "quote" },
   );
@@ -447,6 +499,8 @@ function assertReferenceError(output: string, code: string): void {
 function parseEnvelope(output: string): RecordValue {
   const value: unknown = JSON.parse(output);
   assert.ok(isRecord(value));
+  assert.equal(value.schemaVersion, "3", output);
+  assert.equal(value.outputMode, "structured", output);
   return value;
 }
 

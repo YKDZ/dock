@@ -272,8 +272,8 @@ importers:
   packages/host:
     dependencies:
       '@ykdz/cli-contract':
-        specifier: 0.3.0
-        version: 0.3.0
+        specifier: 0.7.0
+        version: 0.7.0
       '@ykdz/dock-core':
         specifier: workspace:*
         version: link:../core
@@ -1042,9 +1042,9 @@ packages:
   '@vitest/utils@4.1.11':
     resolution: {integrity: sha512-zTCVGpyFsGWBhllOyKlTw/vnr6D9qxsfSDyfbyZmTyjHw5N/VuvzHpHoQjm2ZJzn4RJgx5w4r7V0er69CmLgPQ==}
 
-  '@ykdz/cli-contract@0.3.0':
-    resolution: {integrity: sha512-0SYE3OHjAmDpqS54yPOUgBqkF6ywJ5CNZ86BACGAWpMx9q5+m8au8xx2SyLoj956SjqrkzOtzUujQ2MvlThivQ==}
-    engines: {node: '>=24'}
+  '@ykdz/cli-contract@0.7.0':
+    resolution: {integrity: sha512-GXeDBtkSTZ/AoKKvfqZVAWmZ5ENZ0NhD+oDsumMm6poFXvI7N0DGkHzJijwKm4Jk/hKdYvW3cI+rXN+m4XWjYw==}
+    engines: {node: ^26.13.0}
 
   assertion-error@2.0.1:
     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
@@ -1875,10 +1875,9 @@ snapshots:
       convert-source-map: 2.0.0
       tinyrainbow: 3.2.0
 
-  '@ykdz/cli-contract@0.3.0':
+  '@ykdz/cli-contract@0.7.0':
     dependencies:
       '@standard-schema/spec': 1.1.0
-      '@types/node': 24.19.2
 
   assertion-error@2.0.1: {}
 

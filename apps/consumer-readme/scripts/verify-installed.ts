@@ -95,7 +95,8 @@ try {
     "check",
     "--config",
     "dock.config.ts",
-    "--json",
+    "--output",
+    "structured",
   ]);
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
   const report = readReport(checked.stdout, "consistent");
@@ -141,7 +142,8 @@ try {
       ...command,
       "--config",
       "dock.config.ts",
-      "--json",
+      "--output",
+      "structured",
     ]);
     assert.equal(failed.status, 1, failed.stdout + failed.stderr);
     const failure = readReport(failed.stdout, variant);
@@ -164,9 +166,15 @@ try {
 
 function readReport(output: string, variant: string): Report {
   const envelope = JSON.parse(output) as {
+    schemaVersion?: unknown;
+    outputMode?: unknown;
+    kind?: unknown;
     variant?: unknown;
     data?: { report?: Report };
   };
+  assert.equal(envelope.schemaVersion, "3", output);
+  assert.equal(envelope.outputMode, "structured", output);
+  assert.equal(envelope.kind, "data", output);
   assert.equal(envelope.variant, variant, output);
   assert.ok(envelope.data?.report, output);
   return envelope.data.report;

@@ -172,7 +172,14 @@ async function verifyInstalledScope(consumer: string): Promise<void> {
 
   const initial = await runDock(
     bin,
-    ["baseline", "update", "--config", "scope.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "scope.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
     { DOCK_MARKDOWN_SCOPE_TARGET: oldTarget },
   );
@@ -181,7 +188,15 @@ async function verifyInstalledScope(consumer: string): Promise<void> {
 
   const historical = await runDock(
     bin,
-    ["check", "--config", "scope.config.mjs", "--file", oldTarget, "--json"],
+    [
+      "check",
+      "--config",
+      "scope.config.mjs",
+      "--file",
+      oldTarget,
+      "--output",
+      "structured",
+    ],
     consumer,
     { DOCK_MARKDOWN_SCOPE_TARGET: newTarget },
   );
@@ -193,7 +208,15 @@ async function verifyInstalledScope(consumer: string): Promise<void> {
 
   const current = await runDock(
     bin,
-    ["check", "--config", "scope.config.mjs", "--file", newTarget, "--json"],
+    [
+      "check",
+      "--config",
+      "scope.config.mjs",
+      "--file",
+      newTarget,
+      "--output",
+      "structured",
+    ],
     consumer,
     { DOCK_MARKDOWN_SCOPE_TARGET: newTarget },
   );
@@ -210,7 +233,8 @@ async function verifyInstalledScope(consumer: string): Promise<void> {
       "scope.config.mjs",
       "--file",
       oldTarget,
-      "--json",
+      "--output",
+      "structured",
     ],
     consumer,
     { DOCK_MARKDOWN_SCOPE_TARGET: newTarget },
@@ -222,7 +246,15 @@ async function verifyInstalledScope(consumer: string): Promise<void> {
 
   const consistent = await runDock(
     bin,
-    ["check", "--config", "scope.config.mjs", "--file", newTarget, "--json"],
+    [
+      "check",
+      "--config",
+      "scope.config.mjs",
+      "--file",
+      newTarget,
+      "--output",
+      "structured",
+    ],
     consumer,
     { DOCK_MARKDOWN_SCOPE_TARGET: newTarget },
   );
@@ -332,7 +364,7 @@ async function verifyInstalledInlineScript(consumer: string): Promise<void> {
 
   const baselineUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--json"],
+    ["baseline", "update", "--config", config, "--output", "structured"],
     consumer,
   );
   assert.equal(baselineUpdate.code, 0, baselineUpdate.stderr);
@@ -351,7 +383,7 @@ async function verifyInstalledInlineScript(consumer: string): Promise<void> {
 
   const check = await runDock(
     bin,
-    ["check", "--config", config, "--json"],
+    ["check", "--config", config, "--output", "structured"],
     consumer,
   );
   assert.equal(check.code, 1, check.stderr);
@@ -359,7 +391,7 @@ async function verifyInstalledInlineScript(consumer: string): Promise<void> {
   assertReferenceError(check.stdout, "missing-selection", "sample");
   const rejectedUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--json"],
+    ["baseline", "update", "--config", config, "--output", "structured"],
     consumer,
   );
   assert.equal(rejectedUpdate.code, 1, rejectedUpdate.stderr);
@@ -510,7 +542,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   const initialReads = await installedRuntime(consumer);
   const initial = await runDock(
     bin,
-    ["check", "--config", config, "--json"],
+    ["check", "--config", config, "--output", "structured"],
     consumer,
   );
   assert.equal(initial.code, 1, initial.stderr);
@@ -530,7 +562,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
 
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--json"],
+    ["baseline", "update", "--config", config, "--output", "structured"],
     consumer,
   );
   assert.equal(update.code, 0, update.stderr);
@@ -538,7 +570,15 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   const originalBaseline = await readFile(baselinePath);
   const guideScope = await runDock(
     bin,
-    ["check", "--config", config, "--file", "guide.md", "--json"],
+    [
+      "check",
+      "--config",
+      config,
+      "--file",
+      "guide.md",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(guideScope.code, 0, guideScope.stderr);
@@ -549,14 +589,21 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
 
   const invalidConfig = await runDock(
     bin,
-    ["check", "--config", "invalid-config.mjs", "--json"],
+    ["check", "--config", "invalid-config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(invalidConfig.code, 1, invalidConfig.stderr);
   assert.match(`${invalidConfig.stdout}\n${invalidConfig.stderr}`, /language/u);
   const invalidConfigUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", "invalid-config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "invalid-config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(invalidConfigUpdate.code, 1, invalidConfigUpdate.stderr);
@@ -572,7 +619,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   await writeFile(join(consumer, "guide.md"), changedSource, "utf8");
   const changed = await runDock(
     bin,
-    ["check", "--config", config, "--json"],
+    ["check", "--config", config, "--output", "structured"],
     consumer,
   );
   assert.equal(changed.code, 1, changed.stderr);
@@ -605,7 +652,16 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   );
   const localUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--file", "guide.md", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      config,
+      "--file",
+      "guide.md",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(localUpdate.code, 0, localUpdate.stderr);
@@ -625,7 +681,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   );
   const changedUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--json"],
+    ["baseline", "update", "--config", config, "--output", "structured"],
     consumer,
   );
   assert.equal(changedUpdate.code, 0, changedUpdate.stderr);
@@ -635,7 +691,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   await writeFile(join(consumer, "guide.md"), movedSource, "utf8");
   const moved = await runDock(
     bin,
-    ["check", "--config", config, "--json"],
+    ["check", "--config", config, "--output", "structured"],
     consumer,
   );
   assert.equal(moved.code, 1, moved.stderr);
@@ -678,7 +734,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
 
   const changedChoice = await runDock(
     bin,
-    ["check", "--config", config, "--json"],
+    ["check", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -701,7 +757,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   );
   const choiceUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--json"],
+    ["baseline", "update", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -712,7 +768,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   await writeFile(join(consumer, "guide.md"), withoutHeading, "utf8");
   const missing = await runDock(
     bin,
-    ["check", "--config", config, "--json"],
+    ["check", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -721,7 +777,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assertReferenceError(missing.stdout, "missing-selection");
   const rejectedMissing = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--json"],
+    ["baseline", "update", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -733,7 +789,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   await writeFile(join(consumer, "guide.md"), ambiguousSource, "utf8");
   const ambiguous = await runDock(
     bin,
-    ["check", "--config", config, "--json"],
+    ["check", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -742,7 +798,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   assertReferenceError(ambiguous.stdout, "ambiguous-selection");
   const rejectedAmbiguous = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--json"],
+    ["baseline", "update", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -757,7 +813,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   await writeFile(join(consumer, "guide.md"), missingMarkerSource, "utf8");
   const missingMarker = await runDock(
     bin,
-    ["check", "--config", config, "--json"],
+    ["check", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -789,7 +845,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   );
   const rejectedMissingMarker = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--json"],
+    ["baseline", "update", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -801,7 +857,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   await writeFile(join(consumer, "guide.md"), duplicateMarkerSource, "utf8");
   const duplicateMarker = await runDock(
     bin,
-    ["check", "--config", config, "--json"],
+    ["check", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -814,7 +870,7 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
   );
   const rejectedDuplicateMarker = await runDock(
     bin,
-    ["baseline", "update", "--config", config, "--json"],
+    ["baseline", "update", "--config", config, "--output", "structured"],
     consumer,
     { DOCK_MARKDOWN_SHORT_SECTION: "1" },
   );
@@ -827,7 +883,13 @@ async function verifyInstalledCli(consumer: string): Promise<void> {
 
   const invalidMarkerConfig = await runDock(
     bin,
-    ["check", "--config", "invalid-marker-config.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "invalid-marker-config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(invalidMarkerConfig.code, 1, invalidMarkerConfig.stderr);
@@ -950,6 +1012,8 @@ function referenceErrorMessage(
 function parseEnvelope(output: string): RecordValue {
   const value: unknown = JSON.parse(output);
   assert.ok(isRecord(value));
+  assert.equal(value.schemaVersion, "3", output);
+  assert.equal(value.outputMode, "structured", output);
   return value;
 }
 
