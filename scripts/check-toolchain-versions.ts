@@ -2,16 +2,16 @@ import { spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 
-/** 与根 check 的其它入口一样，仓库根以 realpath 为准。 */
+/** Like other root check entrypoints, resolve repository root with realpath. */
 const repositoryRoot = realpathSync.native(process.cwd());
 
-/** 根形状门文法与 Foundation 加包接受的根声明一致。 */
+/** Root version shape gates match the root declarations accepted by package addition. */
 const exactNodeVersion = /^\d+\.\d+\.\d+$/u;
 const exactPnpmPin = /^pnpm@\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
-/** CI 里 pnpm --version 的输出形制，与根 pin 去掉工具名前缀后同一文法。 */
+/** Format of `pnpm --version` in CI, matching the root pin without the tool name prefix. */
 const exactPnpmVersion = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/u;
 
-/** 槽位位置只认识规划器声明的两种形制，检查器不解释文件格式或版本语义。 */
+/** Slot locations only recognize the two planner-declared shapes; the checker does not interpret file formats or version semantics. */
 type MirrorSlotLocation =
   | { readonly kind: "json-pointer"; readonly pointer: string }
   | { readonly kind: "text-anchor"; readonly name: string };
@@ -22,7 +22,7 @@ type MirrorSlot = {
   readonly location: MirrorSlotLocation;
 };
 
-/** 槽位清单由规划器的镜像槽位声明投影（模板变量替换），本文件不维护第二份真源。 */
+/** Slot manifest projected from planner mirror slot declarations; this file does not maintain a second source of truth. */
 const carriedMirrorSlots: unknown = JSON.parse(
   `[
   {
@@ -41,11 +41,11 @@ type SlotReading =
   | { readonly status: "missing"; readonly reason: string }
   | { readonly status: "unexplainable"; readonly reason: string };
 
-/** 读取位置的展示名，供诊断点名槽位所在位置。 */
+/** Display label for a slot location used in diagnostics. */
 function locationLabel(location: MirrorSlotLocation): string {
   return location.kind === "json-pointer"
-    ? `JSON 指针 ${location.pointer}`
-    : `锚点 @template-mirror ${location.name}`;
+    ? `JSON pointer ${location.pointer}`
+    : `anchor @template-mirror ${location.name}`;
 }
 
 function isMirrorSlot(value: unknown): value is MirrorSlot {
@@ -68,14 +68,16 @@ function isMirrorSlot(value: unknown): value is MirrorSlot {
   return fields.kind === "text-anchor" && typeof fields.name === "string";
 }
 
-/** 携带清单形状非法时只报告这一条：清单本身是被检对象，不能静默跳过槽位。 */
+/** Report a single error if the carried manifest shape is invalid rather than silently skipping slots. */
 function readCarriedMirrorSlots(): {
   readonly diagnostics: readonly string[];
   readonly slots: readonly MirrorSlot[];
 } {
   if (!Array.isArray(carriedMirrorSlots)) {
     return {
-      diagnostics: ["检查器携带的槽位清单不是数组：模板变量替换结果非法"],
+      diagnostics: [
+        "Carried mirror slot manifest is not an array: invalid template variable substitution result",
+      ],
       slots: [],
     };
   }
@@ -87,20 +89,20 @@ function readCarriedMirrorSlots(): {
       continue;
     }
     diagnostics.push(
-      `检查器携带的槽位清单第 ${index + 1} 项形状非法：${JSON.stringify(entry)}`,
+      `Carried mirror slot manifest entry ${index + 1} has invalid shape: ${JSON.stringify(entry)}`,
     );
   }
 
   return { diagnostics, slots };
 }
 
-/** 根版本形状门也核对 packageManager，但票 25 之后 pnpm 没有静态副本消费者。 */
+/** Root declaration check also validates packageManager, though pnpm has no static mirror consumer. */
 type RootToolchain = {
   readonly nodeVersion: string;
   readonly packageManagerPin: string;
 };
 
-/** 根声明读取：形状门失败时只报告形状问题，不再报告副本漂移或运行事实。 */
+/** Read root declarations: if the shape gate fails, report shape issues only without checking mirror drift or runtime facts. */
 function readRootToolchain(): {
   readonly diagnostics: readonly string[];
   readonly root: RootToolchain | undefined;
@@ -113,7 +115,7 @@ function readRootToolchain(): {
   } catch (error) {
     return {
       diagnostics: [
-        `根 package.json 无法解析：${error instanceof Error ? error.message : String(error)}；根真源不可读时无法核对任何静态副本，请先修复根 manifest`,
+        `Root package.json could not be parsed: ${error instanceof Error ? error.message : String(error)}; cannot verify static mirrors until the root manifest is fixed`,
       ],
       root: undefined,
     };
@@ -133,7 +135,7 @@ function readRootToolchain(): {
     exactNodeVersion.test(nodeDeclaration);
   if (!isExactNode) {
     diagnostics.push(
-      `根 package.json 的 engines.node 必须是精确三段 Node 版本（形如 "24.16.0"），当前为 ${JSON.stringify(nodeDeclaration ?? null)}；静态镜像槽位按根声明协调，请把根写成已测的精确 patch 版本`,
+      `Root package.json engines.node must be an exact 3-part Node version (e.g. "26.13.1"), got ${JSON.stringify(nodeDeclaration ?? null)}; static mirror slots coordinate on the root declaration, so set the root to a tested exact patch version`,
     );
   }
   const isExactPin =
@@ -141,7 +143,7 @@ function readRootToolchain(): {
     exactPnpmPin.test(packageManagerDeclaration);
   if (!isExactPin) {
     diagnostics.push(
-      `根 package.json 的 packageManager 必须是单个精确 pnpm pin（形如 "pnpm@11.21.0"，不带范围），当前为 ${JSON.stringify(packageManagerDeclaration ?? null)}；请先修正根声明`,
+      `Root package.json packageManager must be a single exact pnpm pin (e.g. "pnpm@12.21.0", no range), got ${JSON.stringify(packageManagerDeclaration ?? null)}; fix the root declaration first`,
     );
   }
   if (diagnostics.length > 0 || !isExactNode || !isExactPin) {
@@ -159,10 +161,10 @@ function readRootToolchain(): {
 
 function parseJsonPointer(pointer: string): readonly string[] {
   if (pointer === "") {
-    throw new Error("镜像槽位不能定位到文档根本身");
+    throw new Error("Mirror slot cannot target the document root itself");
   }
   if (!pointer.startsWith("/")) {
-    throw new Error("JSON Pointer 必须以 '/' 开头");
+    throw new Error("JSON Pointer must start with '/'");
   }
 
   return pointer
@@ -170,7 +172,7 @@ function parseJsonPointer(pointer: string): readonly string[] {
     .split("/")
     .map((token) => {
       if (/~(?:[^01]|$)/u.test(token)) {
-        throw new Error("JSON Pointer 只允许 '~0' 与 '~1' 转义");
+        throw new Error("JSON Pointer only allows '~0' and '~1' escapes");
       }
 
       return token.replaceAll("~1", "/").replaceAll("~0", "~");
@@ -179,7 +181,7 @@ function parseJsonPointer(pointer: string): readonly string[] {
 
 const missingValue = Symbol("missing");
 
-/** RFC 6901 的有限取值：位置不存在时返回 missingValue 哨兵，与类型不符分开报告。 */
+/** Bounded RFC 6901 lookup: returns missingValue when absent so missing paths are reported separately from type mismatches. */
 function readJsonPointer(
   document: unknown,
   segments: readonly string[],
@@ -199,14 +201,14 @@ function readJsonPointer(
   return current;
 }
 
-/** 结构化槽位读取：解析 JSON 后按位置取字符串标量，缩进与键序差异不影响。 */
+/** Structured slot reader: parses JSON and extracts a string scalar so indentation and key order do not matter. */
 function readStructuredSlot(filePath: string, pointer: string): SlotReading {
   let document: unknown;
   try {
     document = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
   } catch (error) {
     return {
-      reason: `文件不是合法 JSON：${error instanceof Error ? error.message : String(error)}`,
+      reason: `file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
       status: "unexplainable",
     };
   }
@@ -221,11 +223,14 @@ function readStructuredSlot(filePath: string, pointer: string): SlotReading {
   }
   const value = readJsonPointer(document, segments);
   if (value === missingValue) {
-    return { reason: "声明位置在文件中不存在", status: "missing" };
+    return {
+      reason: "declared location does not exist in file",
+      status: "missing",
+    };
   }
   if (typeof value !== "string") {
     return {
-      reason: `位置的值必须是字符串标量，实际为 ${JSON.stringify(value)}`,
+      reason: `value at location must be a string scalar, got ${JSON.stringify(value)}`,
       status: "unexplainable",
     };
   }
@@ -238,7 +243,7 @@ type MirrorMarker =
   | { readonly kind: "end" }
   | { readonly kind: "content" };
 
-/** 与 Core 投影一致的成对锚点文法：剥掉注释标点，只认标记本身。 */
+/** Paired anchor grammar matching Core projection: strips comment punctuation and recognizes marker tokens only. */
 function mirrorMarker(line: string): MirrorMarker {
   const stripped = line
     .trim()
@@ -255,7 +260,7 @@ function mirrorMarker(line: string): MirrorMarker {
   return { kind: "content" };
 }
 
-/** 锚点区域必须唯一且恰好承载一行，否则无法定位。 */
+/** Anchor block must be unique and hold exactly one line, otherwise it cannot be located. */
 function locateAnchorCarrier(
   lines: readonly string[],
   name: string,
@@ -290,7 +295,7 @@ function escapeToken(value: string): string {
   return value.replaceAll(/[.$()*?[\]{}+/|^\\]/gu, String.raw`\$&`);
 }
 
-/** 标记不可定位时，承载赋值或引用是否仍在：区分破坏与消费者整体退出该机制。 */
+/** When markers cannot be located, check whether an assignment or reference remains to distinguish corruption from opting out. */
 function usesSlotName(text: string, name: string): boolean {
   const token = escapeToken(name);
 
@@ -309,22 +314,25 @@ function readArgDefault(carrier: string, name: string): string | undefined {
   return match?.[1];
 }
 
-/** 文本锚点槽位读取：只比较区域内那一行 ARG 的默认值 token。 */
+/** Text-anchor slot reader: compares only the default value token of the single ARG line inside the anchor block. */
 function readTextSlot(name: string, text: string): SlotReading {
   const carrier = locateAnchorCarrier(text.split(/\r?\n/u), name);
   if (carrier === undefined) {
     return usesSlotName(text, name)
       ? {
           reason:
-            "锚点区域缺失、重复、不成对或含额外正文，但承载声明或引用仍在",
+            "anchor block is missing, duplicated, unpaired, or contains extra lines while a declaration or reference still exists",
           status: "unexplainable",
         }
-      : { reason: "锚点与承载声明都不在文件中", status: "missing" };
+      : {
+          reason: "neither anchor nor carrier declaration is in the file",
+          status: "missing",
+        };
   }
   const observed = readArgDefault(carrier, name);
   if (observed === undefined) {
     return {
-      reason: `锚点区域内的那一行不是 \`ARG ${name}="..."\` 默认值形式：${carrier.trim()}`,
+      reason: `line inside anchor block is not in \`ARG ${name}="..."\` form: ${carrier.trim()}`,
       status: "unexplainable",
     };
   }
@@ -332,11 +340,11 @@ function readTextSlot(name: string, text: string): SlotReading {
   return { observed, status: "explained" };
 }
 
-/** Rust 静态镜像由根 rust-toolchain.toml 的 [toolchain].channel 拥有，槽位末段 token 绑定该真源。 */
+/** Rust static mirrors are owned by [toolchain].channel in root rust-toolchain.toml, bound by the slot leaf token. */
 const rustChannelSourcePath = "rust-toolchain.toml";
 const rustMirrorSlotToken = "RUST_TOOLCHAIN";
 
-/** 槽位所属根的 token：json-pointer 取末段、text-anchor 取名称，与规划器声明同一位置形制。 */
+/** Slot root token: last segment for json-pointer or name for text-anchor, matching the planner declaration shape. */
 function mirrorSlotRootToken(slot: MirrorSlot): string {
   return slot.location.kind === "json-pointer"
     ? (slot.location.pointer.split("/").at(-1) ?? "")
@@ -349,10 +357,8 @@ type RootChannelReading =
   | { readonly reason: string; readonly status: "unexplainable" };
 
 /**
- * 结构化读取根 rust-toolchain.toml 的 [toolchain].channel：与 Foundation 加包路径复用同一 smol-toml 语义，
- * 两个生产接缝对同一根声明给出一致判断——单引号 literal、行尾注释等合法 TOML 写法都按 TOML 解析，
- * 非法 TOML 与非字符串/空 channel 判为不可解释，缺失 [toolchain].channel 判为 missing。
- * 只有清单确实携带 Rust 槽位时才惰性 import 并读取，非 Rust 仓库既不触碰 rust-toolchain.toml，也不加载解析依赖。
+ * Structured reader for root rust-toolchain.toml [toolchain].channel.
+ * Lazily imports smol-toml only when the manifest carries a Rust slot so non-Rust repos never touch rust-toolchain.toml or load the parser.
  */
 async function readRootToolchainChannel(): Promise<RootChannelReading> {
   let text: string;
@@ -363,7 +369,7 @@ async function readRootToolchainChannel(): Promise<RootChannelReading> {
     );
   } catch {
     return {
-      reason: `${rustChannelSourcePath} 不存在`,
+      reason: `${rustChannelSourcePath} does not exist`,
       status: "missing",
     };
   }
@@ -373,7 +379,7 @@ async function readRootToolchainChannel(): Promise<RootChannelReading> {
     declaration = parse(text);
   } catch (error) {
     return {
-      reason: `不是有效 TOML 声明：${error instanceof Error ? error.message : String(error)}`,
+      reason: `not valid TOML: ${error instanceof Error ? error.message : String(error)}`,
       status: "unexplainable",
     };
   }
@@ -387,13 +393,13 @@ async function readRootToolchainChannel(): Promise<RootChannelReading> {
       : undefined;
   if (channel === undefined) {
     return {
-      reason: `${rustChannelSourcePath} 的 [toolchain] 表内没有 channel 声明`,
+      reason: `${rustChannelSourcePath} [toolchain] table has no channel declaration`,
       status: "missing",
     };
   }
   if (typeof channel !== "string" || channel.trim().length === 0) {
     return {
-      reason: `[toolchain].channel 必须是非空字符串，实际为 ${JSON.stringify(channel)}`,
+      reason: `[toolchain].channel must be a non-empty string, got ${JSON.stringify(channel)}`,
       status: "unexplainable",
     };
   }
@@ -411,16 +417,17 @@ function checkMirrorSlot(
   let expected: string;
   if (isRustSlot) {
     if (rustChannel === undefined || rustChannel.status !== "explained") {
-      const detail = rustChannel === undefined ? "未读取" : rustChannel.reason;
+      const detail =
+        rustChannel === undefined ? "not read" : rustChannel.reason;
 
       return [
-        `静态镜像槽位 ${slot.id} 无法核对：根 ${rustChannelSourcePath} [toolchain].channel 真源不可读（${detail}）；请修正根 ${rustChannelSourcePath}，使 [toolchain] 表内声明非空 channel`,
+        `Static mirror slot ${slot.id} cannot be checked: root ${rustChannelSourcePath} [toolchain].channel source is unreadable (${detail}); fix root ${rustChannelSourcePath} so [toolchain] declares a non-empty channel`,
       ];
     }
-    sourceLabel = `根 ${rustChannelSourcePath} [toolchain].channel`;
+    sourceLabel = `root ${rustChannelSourcePath} [toolchain].channel`;
     expected = rustChannel.channel;
   } else {
-    sourceLabel = "根 engines.node";
+    sourceLabel = "root engines.node";
     expected = root.nodeVersion;
   }
   const filePath = path.join(repositoryRoot, slot.path);
@@ -429,7 +436,7 @@ function checkMirrorSlot(
     contents = readFileSync(filePath, "utf8");
   } catch {
     return [
-      `静态镜像槽位 ${slot.id} 缺失：${slot.path} 不存在；${sourceLabel} 真源为 ${JSON.stringify(expected)}；请按根声明补齐该文件`,
+      `Static mirror slot ${slot.id} is missing: ${slot.path} does not exist; ${sourceLabel} is ${JSON.stringify(expected)}; restore the file to match the root declaration`,
     ];
   }
   const reading =
@@ -439,12 +446,12 @@ function checkMirrorSlot(
   const position = locationLabel(slot.location);
   if (reading.status === "missing") {
     return [
-      `静态镜像槽位 ${slot.id} 缺失：${slot.path} 的 ${position} 不在文件中（${reading.reason}）；${sourceLabel} 真源为 ${JSON.stringify(expected)}；请按根声明补齐该位置`,
+      `Static mirror slot ${slot.id} is missing: ${position} in ${slot.path} is absent (${reading.reason}); ${sourceLabel} is ${JSON.stringify(expected)}; restore that location to match the root declaration`,
     ];
   }
   if (reading.status === "unexplainable") {
     return [
-      `静态镜像槽位 ${slot.id} 不可解释：${slot.path} 的 ${position} ${reading.reason}；${sourceLabel} 真源为 ${JSON.stringify(expected)}；请恢复该位置的声明形状（合法 JSON 字符串值，或成对 @template-mirror 锚点内恰好一行 ARG 默认值）`,
+      `Static mirror slot ${slot.id} is unexplainable: ${position} in ${slot.path} ${reading.reason}; ${sourceLabel} is ${JSON.stringify(expected)}; restore a valid declaration (a JSON string value or a single ARG default line inside paired @template-mirror anchors)`,
     ];
   }
   if (reading.observed === expected) {
@@ -452,13 +459,13 @@ function checkMirrorSlot(
   }
 
   return [
-    `静态镜像槽位 ${slot.id} 漂移：${slot.path} 的 ${position} 观测为 ${JSON.stringify(reading.observed)}，${sourceLabel} 真源为 ${JSON.stringify(expected)}；请把这个副本改回根声明，或先修改根声明再由下一次加包协调，不要只改副本`,
+    `Static mirror slot ${slot.id} drifted: ${position} in ${slot.path} is ${JSON.stringify(reading.observed)}, while ${sourceLabel} is ${JSON.stringify(expected)}; update the mirror to match the root declaration, or update the root declaration first`,
   ];
 }
 
 /**
- * 运行事实只在既有 CI 边界核对：工作流按根声明安装 Node 与 pnpm，因此不匹配是真实异常。
- * 非 CI 的开发宿主版本不参与判断，合法的静态配置不因宿主差异被拒。
+ * Runtime facts are checked only at CI boundaries where the workflow installs Node and pnpm from the root manifest.
+ * Local non-CI host versions are ignored so valid static configurations are not rejected due to host differences.
  */
 function ciRuntimeBoundaryApplies(): boolean {
   return /^(?:1|true)$/iu.test(process.env.CI ?? "");
@@ -468,26 +475,26 @@ type RuntimeVersionFact =
   | { readonly observed: string; readonly status: "explained" }
   | { readonly reason: string; readonly status: "unreadable" };
 
-/** 只读取当前环境里 pnpm 自述的版本，不安装、不切换版本、不联网查询。 */
+/** Read the self-reported pnpm version in the current environment without installing, switching, or querying the network. */
 function readPnpmRuntimeVersion(): RuntimeVersionFact {
   const result = spawnSync("pnpm", ["--version"], { encoding: "utf8" });
   if (result.error !== undefined) {
     return {
-      reason: `调用 \`pnpm --version\` 失败：${result.error.message}`,
+      reason: `failed to invoke \`pnpm --version\`: ${result.error.message}`,
       status: "unreadable",
     };
   }
   if (result.status !== 0) {
     const detail = (result.stderr ?? "").trim();
     return {
-      reason: `\`pnpm --version\` 以退出码 ${String(result.status)} 失败：${detail === "" ? "(无 stderr 输出)" : detail}`,
+      reason: `\`pnpm --version\` exited with code ${String(result.status)}: ${detail === "" ? "(no stderr output)" : detail}`,
       status: "unreadable",
     };
   }
   const observed = (result.stdout ?? "").trim();
   if (!exactPnpmVersion.test(observed)) {
     return {
-      reason: `\`pnpm --version\` 的输出不是单个精确版本：${JSON.stringify(observed)}`,
+      reason: `\`pnpm --version\` output is not a single exact version: ${JSON.stringify(observed)}`,
       status: "unreadable",
     };
   }
@@ -500,18 +507,18 @@ function checkRuntimeToolchainFacts(root: RootToolchain): readonly string[] {
   const expectedNode = `v${root.nodeVersion}`;
   if (process.version !== expectedNode) {
     diagnostics.push(
-      `Node 运行版本不匹配：CI 里 process.version 观测为 ${JSON.stringify(process.version)}，根 engines.node 真源为 ${JSON.stringify(root.nodeVersion)}；工作流应按根声明安装 Node（setup-node 的 node-version-file 指向 package.json），请修正 CI 的安装来源或先改根声明，不要在脚本里另写版本`,
+      `Node runtime version mismatch: observed process.version ${JSON.stringify(process.version)} in CI, while root engines.node is ${JSON.stringify(root.nodeVersion)}; ensure CI installs Node from package.json rather than overriding it`,
     );
   }
   const pinnedVersion = root.packageManagerPin.slice("pnpm@".length);
   const pnpmFact = readPnpmRuntimeVersion();
   if (pnpmFact.status === "unreadable") {
     diagnostics.push(
-      `pnpm 运行版本获取失败：${pnpmFact.reason}；根 packageManager 真源为 ${JSON.stringify(root.packageManagerPin)}；请恢复 CI 环境中可用的 pnpm（action-setup 按根 packageManager 安装），本核对不能静默跳过`,
+      `Failed to read pnpm runtime version: ${pnpmFact.reason}; root packageManager is ${JSON.stringify(root.packageManagerPin)}; restore pnpm in CI`,
     );
   } else if (pnpmFact.observed !== pinnedVersion) {
     diagnostics.push(
-      `pnpm 运行版本不匹配：CI 里 \`pnpm --version\` 观测为 ${JSON.stringify(pnpmFact.observed)}，根 packageManager 真源为 ${JSON.stringify(root.packageManagerPin)}；请让 CI 用根 pin 的 pnpm 执行本任务，不要放宽根声明迁就环境`,
+      `pnpm runtime version mismatch: observed \`pnpm --version\` ${JSON.stringify(pnpmFact.observed)} in CI, while root packageManager is ${JSON.stringify(root.packageManagerPin)}; ensure CI uses the pinned pnpm version`,
     );
   }
 
@@ -528,7 +535,7 @@ async function runToolchainMirrorCheck(): Promise<readonly string[]> {
     return toolchain.diagnostics;
   }
   const root = toolchain.root;
-  // 仅在清单确实携带 Rust 槽位时才惰性 import 结构化解析器并读取 rust-toolchain.toml，非 Rust 仓库永不触碰该文件。
+  // Lazily import the TOML parser and read rust-toolchain.toml only when the manifest carries a Rust slot.
   const carriesRustSlot = carried.slots.some(
     (slot) => mirrorSlotRootToken(slot) === rustMirrorSlotToken,
   );
@@ -541,7 +548,7 @@ async function runToolchainMirrorCheck(): Promise<readonly string[]> {
   }
   if (diagnostics.length === 0) {
     process.stdout.write(
-      `工具链静态镜像槽位一致：根 Node ${root.nodeVersion}，清单 ${carried.slots.length} 项\n`,
+      `Toolchain static mirror slots match: root Node ${root.nodeVersion}, ${carried.slots.length} slot(s)\n`,
     );
   }
   if (ciRuntimeBoundaryApplies()) {
@@ -549,7 +556,7 @@ async function runToolchainMirrorCheck(): Promise<readonly string[]> {
     diagnostics.push(...runtimeDiagnostics);
     if (runtimeDiagnostics.length === 0) {
       process.stdout.write(
-        `工具链运行事实一致：CI 按根 Node ${root.nodeVersion} 与 ${root.packageManagerPin} 核对了当前进程\n`,
+        `Toolchain runtime facts match: CI verified current process against root Node ${root.nodeVersion} and ${root.packageManagerPin}\n`,
       );
     }
   }
