@@ -155,10 +155,15 @@ const implementation = definePlugin({
     request: PluginRequest<MarkdownReference>,
     context: PluginContext,
   ): Promise<PluginBatchResult<string>> {
+    const loadSource = createMarkdownBatchLoader();
     const results: PluginReferenceResult<string>[] = [];
     for (const reference of request.selectedReferences) {
       try {
-        const result = await readMarkdownReference(reference, context.root);
+        const result = await readMarkdownReference(
+          reference,
+          context.root,
+          loadSource,
+        );
         results.push({
           referenceId: reference.id,
           kind: "value",
@@ -182,7 +187,11 @@ const implementation = definePlugin({
     reference: MarkdownReference,
     context: PluginContext,
   ): Promise<PluginReadResult<string>> {
-    return await readMarkdownReference(reference, context.root);
+    return await readMarkdownReference(
+      reference,
+      context.root,
+      directMarkdownLoader,
+    );
   },
 });
 
@@ -277,9 +286,112 @@ function createBuilder<Selection extends JsonValue>(
   };
 }
 
+type CachedOutcome<Value> =
+  | { readonly ok: true; readonly value: Value }
+  | { readonly ok: false; readonly error: unknown };
+
+type MarkdownFileState = {
+  readonly source: string;
+  parseRange(start: number, end: number): MarkdownRoot;
+  markers(): readonly MarkdownMarker[];
+};
+
+type MarkdownSourceLoader = (
+  absolutePath: string,
+  displayPath: string,
+) => Promise<MarkdownFileState>;
+
+const markerPrefixPattern = /<!--\s*dock:/u;
+
+function createMarkdownFileState(source: string): MarkdownFileState {
+  const astByRange = new Map<string, MarkdownRoot>();
+  let cachedMarkers: CachedOutcome<readonly MarkdownMarker[]> | undefined;
+
+  const parseRange = (start: number, end: number): MarkdownRoot => {
+    const key = `${start}:${end}`;
+    let root = astByRange.get(key);
+    if (root === undefined) {
+      root = parseMarkdown(source.slice(start, end));
+      astByRange.set(key, root);
+    }
+    return root;
+  };
+
+  return {
+    source,
+    parseRange,
+    markers(): readonly MarkdownMarker[] {
+      if (cachedMarkers === undefined) {
+        try {
+          cachedMarkers = {
+            ok: true,
+            value: scanDocumentMarkers(source, () =>
+              parseRange(0, source.length),
+            ),
+          };
+        } catch (error) {
+          cachedMarkers = { ok: false, error };
+        }
+      }
+      if (!cachedMarkers.ok) throw cachedMarkers.error;
+      return cachedMarkers.value;
+    },
+  };
+}
+
+// Scoped to one collect() call so multiple references to the same file share reads, AST ranges, and marker scans.
+function createMarkdownBatchLoader(): MarkdownSourceLoader {
+  const files = new Map<string, Promise<CachedOutcome<MarkdownFileState>>>();
+
+  return async (
+    absolutePath: string,
+    displayPath: string,
+  ): Promise<MarkdownFileState> => {
+    let pending = files.get(absolutePath);
+    if (pending === undefined) {
+      pending = readFile(absolutePath, "utf8").then(
+        (source) => ({
+          ok: true as const,
+          value: createMarkdownFileState(source),
+        }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      files.set(absolutePath, pending);
+    }
+    const outcome = await pending;
+    if (outcome.ok) return outcome.value;
+    throw toMarkdownReadError(displayPath, outcome.error);
+  };
+}
+
+const directMarkdownLoader: MarkdownSourceLoader = async (
+  absolutePath: string,
+  displayPath: string,
+): Promise<MarkdownFileState> => {
+  try {
+    return createMarkdownFileState(await readFile(absolutePath, "utf8"));
+  } catch (error) {
+    throw toMarkdownReadError(displayPath, error);
+  }
+};
+
+function toMarkdownReadError(
+  displayPath: string,
+  error: unknown,
+): MarkdownReferenceError {
+  const code = hasCode(error, "ENOENT") ? "missing-file" : "file-read-failed";
+  return new MarkdownReferenceError(
+    code,
+    `Cannot read Markdown file ${displayPath}: ${errorMessage(error)}`,
+    undefined,
+    { cause: error },
+  );
+}
+
 async function readMarkdownReference(
   reference: MarkdownReference,
   root: string,
+  loadSource: MarkdownSourceLoader,
 ): Promise<PluginReadResult<string>> {
   let absolutePath: string;
   try {
@@ -294,21 +406,10 @@ async function readMarkdownReference(
     );
   }
 
-  let source: string;
   const path = displayTarget(absolutePath, root);
-  try {
-    source = await readFile(absolutePath, "utf8");
-  } catch (error) {
-    const code = hasCode(error, "ENOENT") ? "missing-file" : "file-read-failed";
-    throw new MarkdownReferenceError(
-      code,
-      `Cannot read Markdown file ${path}: ${errorMessage(error)}`,
-      undefined,
-      { cause: error },
-    );
-  }
+  const fileState = await loadSource(absolutePath, path);
 
-  let current: TextRange = { path, start: 0, end: source.length };
+  let current: TextRange = { path, start: 0, end: fileState.source.length };
   let selection: MarkdownSelection | undefined;
   try {
     selection = decodeMarkdownSelection(reference.selection);
@@ -324,7 +425,7 @@ async function readMarkdownReference(
   if (selection !== undefined) {
     for (const step of selection.steps) {
       try {
-        current = selectMarkdownRange(source, current, step);
+        current = selectMarkdownRange(fileState, current, step);
       } catch (error) {
         throw new MarkdownReferenceError(
           errorCode(error),
@@ -336,27 +437,27 @@ async function readMarkdownReference(
     }
   }
 
-  return { value: markdownFact(source, current), range: current };
+  return { value: markdownFact(fileState, current), range: current };
 }
 
 function selectMarkdownRange(
-  source: string,
+  fileState: MarkdownFileState,
   input: TextRange,
   step: MarkdownSelectionStep,
 ): TextRange {
   if (step.kind === "marker") {
-    return selectMarker(source, input, step.id);
+    return selectMarker(fileState.markers(), input, step.id);
   }
   if (
     step.kind === "quote" ||
     step.kind === "match" ||
     step.kind === "region"
   ) {
-    return selectTextRange(source, input, step);
+    return selectTextRange(fileState.source, input, step);
   }
 
-  const current = source.slice(input.start, input.end);
-  const root = parseMarkdown(current);
+  const current = fileState.source.slice(input.start, input.end);
+  const root = fileState.parseRange(input.start, input.end);
   let offsets: NodeOffsets;
   if (step.kind === "section") {
     offsets = selectSection(current, root, step.heading);
@@ -395,9 +496,17 @@ type HtmlNode = {
   } | null;
 };
 
-function documentMarkers(source: string): MarkdownMarker[] {
+function scanDocumentMarkers(
+  source: string,
+  getFullDocumentRoot: () => MarkdownRoot,
+): readonly MarkdownMarker[] {
+  // Skip full-document Markdown + HTML fragment scanning when no dock: comment prefix is present.
+  if (!markerPrefixPattern.test(source)) {
+    return [];
+  }
+
   const markers: MarkdownMarker[] = [];
-  const nodes = allNodes(parseMarkdown(source));
+  const nodes = allNodes(getFullDocumentRoot());
   const masked: string[] = source
     .split("")
     .map((character) =>
@@ -443,10 +552,11 @@ function documentMarkers(source: string): MarkdownMarker[] {
   return markers.sort((left, right) => left.start - right.start);
 }
 
-function markdownFact(source: string, input: TextRange): string {
+function markdownFact(fileState: MarkdownFileState, input: TextRange): string {
+  const { source } = fileState;
   let result = "";
   let cursor = input.start;
-  for (const marker of documentMarkers(source)) {
+  for (const marker of fileState.markers()) {
     if (marker.end <= input.start || marker.start >= input.end) continue;
     const start = Math.max(input.start, marker.start);
     const end = Math.min(input.end, marker.end);
@@ -456,13 +566,17 @@ function markdownFact(source: string, input: TextRange): string {
   return result + source.slice(cursor, input.end);
 }
 
-function selectMarker(source: string, input: TextRange, id: string): TextRange {
+function selectMarker(
+  documentMarkers: readonly MarkdownMarker[],
+  input: TextRange,
+  id: string,
+): TextRange {
   if (!nonBlank(id) || /\s/u.test(id)) {
     throw invalidSelector(
       "Marker ID must be a non-empty single-line string without whitespace.",
     );
   }
-  const markers = documentMarkers(source).filter((marker) => marker.id === id);
+  const markers = documentMarkers.filter((marker) => marker.id === id);
   const opening = one(
     markers.filter((marker) => marker.kind === "start"),
     `start of marker ${id}`,

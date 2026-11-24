@@ -743,3 +743,134 @@ void test("plain file public entry supports quote, match with capture group, and
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("batch collection on multiple references to the same file preserves per-reference ranges, error attribution, and sees subsequent edits", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-file-batch-reuse-"));
+  const target = join(root, "config.env");
+  const firstSource = [
+    "😀header",
+    "#region server",
+    "host=127.0.0.1",
+    "port=4173",
+    "#endregion server",
+    "mode=dev",
+    "",
+  ].join("\n");
+  const secondSource = [
+    "😀updated-header",
+    "#region server",
+    "host=0.0.0.0",
+    "port=8080",
+    "#endregion server",
+    "mode=prod",
+    "",
+  ].join("\n");
+
+  try {
+    await writeFile(target, firstSource, "utf8");
+    const whole = file.from("config.env").reference("whole");
+    const host = file
+      .from("./config.env")
+      .quote("host=127.0.0.1")
+      .reference("host");
+    const port = file
+      .from("config.env")
+      .region("server")
+      .match("port=(\\d+)", 1)
+      .reference("port");
+    const existsA = file.from("config.env").exists().reference("exists-a");
+    const existsB = file.from("./config.env").exists().reference("exists-b");
+    const missingA = file.from("missing.env").quote("x").reference("missing-a");
+    const missingB = file
+      .from("missing.env")
+      .region("env")
+      .reference("missing-b");
+    const missingExists = file
+      .from("missing.env")
+      .exists()
+      .reference("missing-exists");
+
+    const config = defineConfig({
+      root,
+      plugins: [file],
+      bindings: [
+        binding("shared-file", [whole, host, port, existsA, existsB]),
+        binding("missing-file", [missingA, missingB, missingExists]),
+      ],
+    });
+
+    const firstReport = await check(config);
+    const sharedFirst = firstReport.bindings.find(
+      (entry) => entry.bindingId === "shared-file",
+    );
+    assert.ok(sharedFirst && "current" in sharedFirst);
+    assert.equal(sharedFirst.current.references.whole?.value, firstSource);
+    assert.deepEqual(sharedFirst.current.references.whole?.range, {
+      path: "config.env",
+      start: 0,
+      end: firstSource.length,
+    });
+    assert.equal(sharedFirst.current.references.host?.value, "host=127.0.0.1");
+    assert.deepEqual(sharedFirst.current.references.host?.range, {
+      path: "config.env",
+      start: firstSource.indexOf("host=127.0.0.1"),
+      end: firstSource.indexOf("host=127.0.0.1") + "host=127.0.0.1".length,
+    });
+    assert.equal(sharedFirst.current.references.port?.value, "4173");
+    assert.deepEqual(sharedFirst.current.references.port?.range, {
+      path: "config.env",
+      start: firstSource.indexOf("4173"),
+      end: firstSource.indexOf("4173") + 4,
+    });
+    assert.equal(sharedFirst.current.references["exists-a"]?.value, true);
+    assert.equal(sharedFirst.current.references["exists-b"]?.value, true);
+
+    const missingResult = firstReport.bindings.find(
+      (entry) => entry.bindingId === "missing-file",
+    );
+    assert.ok(missingResult && "errors" in missingResult);
+    assert.deepEqual(
+      missingResult.errors.map((error) => ({
+        referenceId: error.referenceId,
+        code: error.code,
+      })),
+      [
+        { referenceId: "missing-a", code: "missing-file" },
+        { referenceId: "missing-b", code: "missing-file" },
+        { referenceId: "missing-exists", code: "missing-file" },
+      ],
+    );
+
+    // Modify file before the next independent check() call; no stale cache may persist.
+    await writeFile(target, secondSource, "utf8");
+    const refreshedConfig = defineConfig({
+      root,
+      plugins: [file],
+      bindings: [
+        binding("shared-file", [
+          whole,
+          file.from("config.env").quote("host=0.0.0.0").reference("host"),
+          port,
+        ]),
+      ],
+    });
+    const secondReport = await check(refreshedConfig);
+    const sharedSecond = secondReport.bindings[0];
+    assert.ok(sharedSecond && "current" in sharedSecond);
+    assert.equal(sharedSecond.current.references.whole?.value, secondSource);
+    assert.equal(sharedSecond.current.references.host?.value, "host=0.0.0.0");
+    assert.deepEqual(sharedSecond.current.references.host?.range, {
+      path: "config.env",
+      start: secondSource.indexOf("host=0.0.0.0"),
+      end: secondSource.indexOf("host=0.0.0.0") + "host=0.0.0.0".length,
+    });
+    assert.equal(sharedSecond.current.references.port?.value, "8080");
+    assert.deepEqual(sharedSecond.current.references.port?.range, {
+      path: "config.env",
+      start: secondSource.indexOf("8080"),
+      end: secondSource.indexOf("8080") + 4,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

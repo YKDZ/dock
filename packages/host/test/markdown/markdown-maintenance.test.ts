@@ -768,3 +768,264 @@ void test("markdown supports quote, match with capture group, and region both di
     );
   });
 });
+
+void test("batch collection reuses file reads, range parses, and marker scans while preserving nested markers, code examples, and refresh after edits", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-reuse-"));
+  const unmarkedPath = join(root, "unmarked.md");
+  const markedPath = join(root, "marked.md");
+  const unmarkedSource = [
+    "😀说明",
+    "",
+    "# Setup",
+    "",
+    "Install step 1.",
+    "",
+    "| Key | Value |",
+    "| --- | --- |",
+    "| port | 4173 |",
+    "",
+    "```ts",
+    "const port = 4173;",
+    "```",
+    "",
+  ].join("\n");
+  const markedSourceV1 = [
+    "😀前言",
+    "",
+    "# Config",
+    "",
+    "<!-- dock:start outer -->",
+    "Header <!-- dock:start inner -->4173<!-- dock:end inner -->",
+    "",
+    "```md",
+    "<!-- dock:start inner -->example<!-- dock:end inner -->",
+    "```",
+    "",
+    "- item A",
+    "<!-- dock:end outer -->",
+    "",
+  ].join("\n");
+  const markedSourceV2 = [
+    "😀更新前言",
+    "",
+    "# Config",
+    "",
+    "<!-- dock:start outer -->",
+    "Header <!-- dock:start inner -->8080<!-- dock:end inner -->",
+    "",
+    "```md",
+    "<!-- dock:start inner -->example<!-- dock:end inner -->",
+    "```",
+    "",
+    "- item B",
+    "<!-- dock:end outer -->",
+    "",
+  ].join("\n");
+
+  try {
+    await writeFile(unmarkedPath, unmarkedSource, "utf8");
+    await writeFile(markedPath, markedSourceV1, "utf8");
+
+    const unmarkedParagraph = markdown
+      .from("unmarked.md")
+      .section("Setup")
+      .node({ type: "paragraph", contains: "Install" })
+      .reference("unmarked-para");
+    const unmarkedCell = markdown
+      .from("./unmarked.md")
+      .section("Setup")
+      .tableCell({ column: "Value", row: { column: "Key", value: "port" } })
+      .reference("unmarked-cell");
+    const unmarkedWhole = markdown
+      .from("unmarked.md")
+      .reference("unmarked-whole");
+
+    const nestedInner = markdown
+      .from("marked.md")
+      .section("Config")
+      .marker("outer")
+      .marker("inner")
+      .reference("nested-inner");
+    const outerExampleQuote = markdown
+      .from("marked.md")
+      .marker("outer")
+      .quote("<!-- dock:start inner -->example<!-- dock:end inner -->")
+      .reference("outer-example-quote");
+    const outerListItem = markdown
+      .from("marked.md")
+      .marker("outer")
+      .node({ type: "listItem", contains: "item" })
+      .reference("outer-item");
+    const markedWhole = markdown.from("marked.md").reference("marked-whole");
+
+    const missingA = markdown
+      .from("missing.md")
+      .section("Any")
+      .reference("missing-a");
+    const missingB = markdown
+      .from("missing.md")
+      .marker("port")
+      .reference("missing-b");
+
+    const config = defineConfig({
+      root,
+      plugins: [markdown],
+      bindings: [
+        binding("unmarked-doc", [
+          unmarkedParagraph,
+          unmarkedCell,
+          unmarkedWhole,
+        ]),
+        binding("marked-doc", [
+          nestedInner,
+          outerExampleQuote,
+          outerListItem,
+          markedWhole,
+        ]),
+        binding("missing-doc", [missingA, missingB]),
+      ],
+    });
+
+    const firstReport = await check(config);
+
+    const unmarkedResult = firstReport.bindings.find(
+      (entry) => entry.bindingId === "unmarked-doc",
+    );
+    assert.ok(unmarkedResult && "current" in unmarkedResult);
+    assert.equal(
+      unmarkedResult.current.references["unmarked-para"]?.value,
+      "Install step 1.",
+    );
+    assert.deepEqual(
+      unmarkedResult.current.references["unmarked-para"]?.range,
+      {
+        path: "unmarked.md",
+        start: unmarkedSource.indexOf("Install step 1."),
+        end:
+          unmarkedSource.indexOf("Install step 1.") + "Install step 1.".length,
+      },
+    );
+    assert.equal(
+      unmarkedResult.current.references["unmarked-cell"]?.value,
+      "4173",
+    );
+    assert.deepEqual(
+      unmarkedResult.current.references["unmarked-cell"]?.range,
+      {
+        path: "unmarked.md",
+        start: unmarkedSource.indexOf("4173"),
+        end: unmarkedSource.indexOf("4173") + 4,
+      },
+    );
+    assert.equal(
+      unmarkedResult.current.references["unmarked-whole"]?.value,
+      unmarkedSource,
+    );
+
+    const markedResult = firstReport.bindings.find(
+      (entry) => entry.bindingId === "marked-doc",
+    );
+    assert.ok(markedResult && "current" in markedResult);
+    assert.equal(
+      markedResult.current.references["nested-inner"]?.value,
+      "4173",
+    );
+    assert.deepEqual(markedResult.current.references["nested-inner"]?.range, {
+      path: "marked.md",
+      start: markedSourceV1.indexOf("4173"),
+      end: markedSourceV1.indexOf("4173") + 4,
+    });
+    assert.equal(
+      markedResult.current.references["outer-example-quote"]?.value,
+      "<!-- dock:start inner -->example<!-- dock:end inner -->",
+    );
+    assert.equal(
+      markedResult.current.references["outer-item"]?.value,
+      "- item A",
+    );
+    assert.equal(
+      markedResult.current.references["marked-whole"]?.value,
+      [
+        "😀前言",
+        "",
+        "# Config",
+        "",
+        "",
+        "Header 4173",
+        "",
+        "```md",
+        "<!-- dock:start inner -->example<!-- dock:end inner -->",
+        "```",
+        "",
+        "- item A",
+        "",
+        "",
+      ].join("\n"),
+    );
+
+    const missingResult = firstReport.bindings.find(
+      (entry) => entry.bindingId === "missing-doc",
+    );
+    assert.ok(missingResult && "errors" in missingResult);
+    assert.deepEqual(
+      missingResult.errors.map((error) => ({
+        referenceId: error.referenceId,
+        code: error.code,
+      })),
+      [
+        { referenceId: "missing-a", code: "missing-file" },
+        { referenceId: "missing-b", code: "missing-file" },
+      ],
+    );
+
+    // Chained marker selection must fail when inner marker lies outside outer marker.
+    await assert.rejects(
+      readReference(
+        config,
+        markdown
+          .from("marked.md")
+          .section("Config")
+          .quote("Header")
+          .marker("inner")
+          .reference("outside-quote"),
+      ),
+      { code: "missing-selection" },
+    );
+
+    // Modify files before the next independent check() call; latest text and positions must be observed.
+    await writeFile(markedPath, markedSourceV2, "utf8");
+    const refreshedConfig = defineConfig({
+      root,
+      plugins: [markdown],
+      bindings: [
+        binding("marked-doc", [nestedInner, outerListItem, markedWhole]),
+      ],
+    });
+    const secondReport = await check(refreshedConfig);
+    const refreshedMarked = secondReport.bindings[0];
+    assert.ok(refreshedMarked && "current" in refreshedMarked);
+    assert.equal(
+      refreshedMarked.current.references["nested-inner"]?.value,
+      "8080",
+    );
+    assert.deepEqual(
+      refreshedMarked.current.references["nested-inner"]?.range,
+      {
+        path: "marked.md",
+        start: markedSourceV2.indexOf("8080"),
+        end: markedSourceV2.indexOf("8080") + 4,
+      },
+    );
+    assert.equal(
+      refreshedMarked.current.references["outer-item"]?.value,
+      "- item B",
+    );
+    assert.deepEqual(refreshedMarked.current.references["outer-item"]?.range, {
+      path: "marked.md",
+      start: markedSourceV2.indexOf("- item B"),
+      end: markedSourceV2.indexOf("- item B") + "- item B".length,
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

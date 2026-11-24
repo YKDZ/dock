@@ -118,11 +118,16 @@ const implementation = definePlugin({
     request: PluginRequest<FileReference>,
     context: PluginContext,
   ): Promise<PluginBatchResult> {
+    const reader = createFileBatchCache();
     return {
       results: await Promise.all(
         request.selectedReferences.map(async (reference) => {
           try {
-            const result = await readFileReference(reference, context.root);
+            const result = await readFileReference(
+              reference,
+              context.root,
+              reader,
+            );
             return {
               referenceId: reference.id,
               kind: "value" as const,
@@ -150,7 +155,7 @@ const implementation = definePlugin({
     reference: FileReference,
     context: PluginContext,
   ): Promise<PluginReadResult> {
-    return await readFileReference(reference, context.root);
+    return await readFileReference(reference, context.root, directFileReader);
   },
 });
 
@@ -316,9 +321,91 @@ class FileReferenceError extends Error {
   }
 }
 
+type FileReader = {
+  readText(absolutePath: string, displayPath: string): Promise<string>;
+  checkExists(absolutePath: string, displayPath: string): Promise<void>;
+};
+
+type CachedOutcome<Value> =
+  | { readonly ok: true; readonly value: Value }
+  | { readonly ok: false; readonly error: unknown };
+
+const directFileReader: FileReader = {
+  async readText(absolutePath: string, displayPath: string): Promise<string> {
+    try {
+      return await readFile(absolutePath, "utf8");
+    } catch (error) {
+      throw toFileReadError(displayPath, error);
+    }
+  },
+  async checkExists(absolutePath: string, displayPath: string): Promise<void> {
+    try {
+      await access(absolutePath);
+    } catch (error) {
+      throw toFileReadError(displayPath, error);
+    }
+  },
+};
+
+// Scoped to one collect() call so multiple references to the same file share one read without caching across runs.
+function createFileBatchCache(): FileReader {
+  const textReads = new Map<string, Promise<CachedOutcome<string>>>();
+  const existenceChecks = new Map<string, Promise<CachedOutcome<void>>>();
+
+  const loadOnce = <Value>(
+    cache: Map<string, Promise<CachedOutcome<Value>>>,
+    absolutePath: string,
+    load: () => Promise<Value>,
+  ): Promise<CachedOutcome<Value>> => {
+    let pending = cache.get(absolutePath);
+    if (pending === undefined) {
+      pending = load().then(
+        (value) => ({ ok: true as const, value }),
+        (error: unknown) => ({ ok: false as const, error }),
+      );
+      cache.set(absolutePath, pending);
+    }
+    return pending;
+  };
+
+  return {
+    async readText(absolutePath: string, displayPath: string): Promise<string> {
+      const outcome = await loadOnce(textReads, absolutePath, () =>
+        readFile(absolutePath, "utf8"),
+      );
+      if (outcome.ok) return outcome.value;
+      throw toFileReadError(displayPath, outcome.error);
+    },
+    async checkExists(
+      absolutePath: string,
+      displayPath: string,
+    ): Promise<void> {
+      const outcome = await loadOnce(existenceChecks, absolutePath, () =>
+        access(absolutePath),
+      );
+      if (outcome.ok) return;
+      throw toFileReadError(displayPath, outcome.error);
+    },
+  };
+}
+
+function toFileReadError(
+  displayPath: string,
+  error: unknown,
+): FileReferenceError {
+  const code = hasCode(error, "ENOENT") ? "missing-file" : "file-read-failed";
+  return new FileReferenceError(
+    code,
+    `Cannot read file ${displayPath}: ${error instanceof Error ? error.message : String(error)}`,
+    undefined,
+    { cause: error },
+  );
+}
+
 async function readFileReference(
   reference: FileReference,
   root: string,
+  reader: FileReader,
 ): Promise<PluginReadResult> {
   let absolutePath: string;
   try {
@@ -347,34 +434,11 @@ async function readFileReference(
 
   const path = displayTarget(absolutePath, root);
   if (selection?.kind === "exists") {
-    try {
-      await access(absolutePath);
-      return { value: true };
-    } catch (error) {
-      const code = hasCode(error, "ENOENT")
-        ? "missing-file"
-        : "file-read-failed";
-      throw new FileReferenceError(
-        code,
-        `Cannot read file ${path}: ${error instanceof Error ? error.message : String(error)}`,
-        undefined,
-        { cause: error },
-      );
-    }
+    await reader.checkExists(absolutePath, path);
+    return { value: true };
   }
 
-  let text: string;
-  try {
-    text = await readFile(absolutePath, "utf8");
-  } catch (error) {
-    const code = hasCode(error, "ENOENT") ? "missing-file" : "file-read-failed";
-    throw new FileReferenceError(
-      code,
-      `Cannot read file ${path}: ${error instanceof Error ? error.message : String(error)}`,
-      undefined,
-      { cause: error },
-    );
-  }
+  const text = await reader.readText(absolutePath, path);
 
   let selectedRange = { path, start: 0, end: text.length };
   if (selection?.kind === "text") {
