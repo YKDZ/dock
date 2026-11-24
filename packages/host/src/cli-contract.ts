@@ -27,14 +27,8 @@ const define = defineCli();
 const checkLineRanges = new WeakMap<object, LineRangeRecord>();
 const reportPayload = z.object({ report: z.unknown() });
 const updateIssueSchema = z.object({
-  bindingId: z.string().optional(),
-  referenceId: z.string().optional(),
-  memberId: z.string().optional(),
   code: z.string(),
   message: z.string(),
-  range: z
-    .object({ path: z.string(), start: z.number(), end: z.number() })
-    .optional(),
 });
 const rejectedUpdatePayload = z.object({
   report: z.unknown(),
@@ -293,7 +287,7 @@ const updateCommand = define.command("update")({
             updated: ({ report }, context) =>
               text.lines(
                 toTextLines(
-                  formatReport(
+                  formatUpdatedUpdate(
                     report as CheckReport,
                     checkLineRanges.get(context.input),
                   ),
@@ -419,11 +413,8 @@ function inputScope(input: {
   };
 }
 
-function formatReport(
-  report: CheckReport,
-  lineRanges?: LineRangeRecord,
-): [string, ...string[]] {
-  const lines = [
+function createReportLines(report: CheckReport): [string, ...string[]] {
+  const lines: [string, ...string[]] = [
     `Scope: ${report.scope.length === 0 ? "none" : report.scope.join(", ")}`,
   ];
   for (const error of report.pluginErrors) {
@@ -431,17 +422,33 @@ function formatReport(
       `Plugin ${error.pluginId} error (${error.code}): ${error.message}`,
     );
   }
-  const activeBindings = report.bindings.filter(
+  return lines;
+}
+
+function activeReportBindings(report: CheckReport): BindingCheckResult[] {
+  return report.bindings.filter(
     (binding) => "errors" in binding || binding.changes.length > 0,
   );
+}
+
+function formatReport(
+  report: CheckReport,
+  lineRanges?: LineRangeRecord,
+): [string, ...string[]] {
+  const lines = createReportLines(report);
+  if (report.scope.length === 0) {
+    lines.push("No bindings in scope.");
+    return lines;
+  }
+  const activeBindings = activeReportBindings(report);
   if (activeBindings.length === 0) {
     lines.push("All checked bindings are consistent with baseline.");
-    return lines as [string, ...string[]];
+    return lines;
   }
   for (const binding of activeBindings) {
     lines.push(...formatBinding(binding, lineRanges));
   }
-  return lines as [string, ...string[]];
+  return lines;
 }
 
 function formatResolution(
@@ -498,20 +505,28 @@ function formatResolution(
   return lines;
 }
 
+function formatUpdatedUpdate(
+  report: CheckReport,
+  lineRanges?: LineRangeRecord,
+): [string, ...string[]] {
+  const lines = formatReport(report, lineRanges);
+  lines.push("Baseline updated.");
+  return lines;
+}
+
 function formatRejectedUpdate(
   report: CheckReport,
   errors: readonly BaselineUpdateIssue[],
   lineRanges?: LineRangeRecord,
 ): [string, ...string[]] {
-  const lines = formatReport(report, lineRanges);
-  for (const error of errors) {
-    const identity = [error.bindingId, error.referenceId, error.memberId]
-      .filter(Boolean)
-      .join(" / ");
-    lines.push(
-      `Update error${identity === "" ? "" : ` ${identity}`} (${error.code})${formatLocationSuffix(error.range, undefined, lineRanges, error.referenceId)}: ${error.message}`,
-    );
+  const lines = createReportLines(report);
+  for (const binding of activeReportBindings(report)) {
+    lines.push(...formatBinding(binding, lineRanges));
   }
+  for (const error of errors) {
+    lines.push(`Update error (${error.code}): ${error.message}`);
+  }
+  lines.push("Baseline was not updated.");
   return lines;
 }
 

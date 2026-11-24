@@ -8,3 +8,11 @@
   2. 移除或替换旧版 `dock.baseline.json` 文件。
   3. 运行 `dock baseline update --config <配置文件>` 生成新版基线。
   4. 运行 `dock check --config <配置文件>` 确认检查通过。
+- 精简 `dock check` 与 `dock baseline update` 的默认文本输出：
+  - 检查范围内所有关联一致且无错误时，仅输出检查范围（`Scope`）与摘要（`All checked bindings are consistent with baseline.`），不再打印例行插件诊断或一致引用的当前事实。
+  - 关联存在变化或核对错误时，先列核对错误，再列已有证据支持的变化；多行文本变化只展开变动附近的局部行级差异，并列出同一关联中其余待核对引用的名称与行号位置（如 `path:10` 或 `path:10-15`）。
+  - 需要完整事实、原始文本范围或例行插件诊断时，改用 `--output structured`。
+- 调整 `updateBaseline` 返回值与 `dock baseline update --output structured`（`variant: "rejected"`）的错误归属，并明确默认文本的更新结果：
+  - 关联核对错误仅保存在所属关联报告 `report.bindings[i].errors` 中，不再复制到顶层 `errors`；顶层 `errors` 仅保留操作级拒绝原因（如 `empty-selection`），`BaselineUpdateIssue` 类型字段调整为 `{ code, message }`。
+  - 默认文本模式下，`dock baseline update` 对每条关联错误只解释一次原因，并在末尾明确输出 `Baseline updated.` 或 `Baseline was not updated.`；选区为空时展示 `Scope: none` 与操作级错误，不再先输出一致摘要。
+  - 迁移读取更新结果的调用方脚本：遍历 `report.bindings` 读取各关联的 `errors` 统计或处理核对错误，同时保留对顶层 `errors` 的检查以处理 `empty-selection` 等操作级拒绝原因。

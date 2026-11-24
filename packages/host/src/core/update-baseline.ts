@@ -10,21 +10,19 @@ import type {
 /** Atomically updates selected bindings with current valid facts without requiring a prior check or zero diffs. */
 export function updateBaseline(input: CheckInput): BaselineUpdateOutcome {
   const report = check(input);
-  const errors: BaselineUpdateIssue[] = report.bindings.flatMap((binding) =>
-    "errors" in binding
-      ? binding.errors.map((error) => ({
-          bindingId: binding.bindingId,
-          ...error,
-        }))
-      : [],
-  );
+  const errors: BaselineUpdateIssue[] = [];
   if (report.scope.length === 0) {
     errors.push({
       code: "empty-selection",
       message: "At least one binding must be selected to update the baseline.",
     });
   }
-  if (errors.length > 0) return { status: "rejected", errors, report };
+  const hasBindingErrors = report.bindings.some(
+    (binding) => "errors" in binding,
+  );
+  if (errors.length > 0 || hasBindingErrors) {
+    return { status: "rejected", errors, report };
+  }
 
   const nextBindings: Record<string, BindingBaseline> = Object.assign(
     Object.create(null) as Record<string, BindingBaseline>,
