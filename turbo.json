@@ -66,25 +66,13 @@
       "outputs": [],
       "tags": ["quality:light"]
     },
-    "//#release:verify": {
-      "cache": false,
-      "tags": ["work:release"]
+    "//#publication:pack": {
+      "tags": ["work:release"],
+      "cache": false
     },
-    "//#release:publish": {
-      "cache": false,
-      "tags": ["work:release"]
-    },
-    "//#release:registry": {
-      "cache": false,
-      "tags": ["work:release"]
-    },
-    "//#release:github": {
-      "cache": false,
-      "tags": ["work:release"]
-    },
-    "//#test:release": {
-      "outputs": [],
-      "tags": ["quality:light"]
+    "//#publication:publish": {
+      "tags": ["work:release"],
+      "cache": false
     }
   },
   "globalDependencies": [

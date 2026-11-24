@@ -19,13 +19,11 @@
     "test:task-gates": "node --conditions=source --test --test-reporter=spec scripts/task-gates.test.ts",
     "check:heavy": "node --conditions=source scripts/task-gates.ts check:heavy",
     "check:full": "node --conditions=source scripts/task-gates.ts check:full",
-    "release:verify": "node scripts/release.ts verify",
-    "release:publish": "node scripts/release.ts publish",
-    "release:registry": "node scripts/release.ts registry",
-    "release:github": "node scripts/release.ts release",
-    "test:release": "node --test scripts/release.test.ts"
+    "publication:pack": "turbo run build && changeset pack --out-dir .changeset/packed",
+    "publication:publish": "changeset publish --from-pack-dir .changeset/packed"
   },
   "devDependencies": {
+    "@changesets/cli": "catalog:",
     "@dock/tooling-config": "workspace:*",
     "@types/node": "catalog:",
     "oxfmt": "catalog:",

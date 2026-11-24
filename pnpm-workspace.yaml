@@ -17,6 +17,7 @@ packages:
   - apps/*
   - packages/*
 catalog:
+  "@changesets/cli": 3.0.3
   "@types/node": ^26.0.0
   oxfmt: ^0.79.0
   oxlint: 1.94.0

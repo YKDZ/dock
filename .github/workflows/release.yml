@@ -1,109 +1,76 @@
-name: 发布
+name: Publish npm packages
 
 on:
   workflow_dispatch:
 
-concurrency:
-  group: dock-release
-  cancel-in-progress: false
-
 permissions: {}
 
+concurrency:
+  group: npm-publication-${{ github.repository }}
+  cancel-in-progress: false
+  queue: max
+
 jobs:
-  verify:
-    if: github.ref == 'refs/heads/main' && github.repository == 'YKDZ/dock'
+  pack:
+    name: Check and pack
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 120
     permissions:
       contents: read
-      actions: read
+    outputs:
+      pack-dir-artifact-id: ${{ steps.pack.outputs.pack-dir-artifact-id }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - name: Read Node version
+        id: node-runtime
+        run: echo "runtime=node@$(jq -er '.engines.node' package.json)" >> "$GITHUB_OUTPUT"
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@731dfb6463bbd11c11fd0ee11fe00ed0e36d48a1 # v3.2.0
         with:
-          node-version-file: package.json
-          package-manager-cache: false
-      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
-      - run: npm install --global npm@12.2.1 --ignore-scripts
-      - id: restore
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: node scripts/release.ts restore
-      - if: steps.restore.outputs.restored != 'true'
+          runtime: ${{ steps.node-runtime.outputs.runtime }}
+          install: false
+          cache: true
+      - name: Install dependencies
         run: pnpm install --frozen-lockfile
-      - run: pnpm release:verify
-      - if: steps.restore.outputs.restored != 'true'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: verified-release
-          path: .artifacts/release/
-          if-no-files-found: error
-          retention-days: 90
-          compression-level: 0
+      - name: Check source
+        run: pnpm run check && pnpm run check:heavy
+      - name: Build packages in dependency order
+        run: pnpm exec turbo run build
+      - name: Pack unpublished versions
+        id: pack
+        uses: changesets/action/pack@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
 
   publish:
-    needs: verify
+    name: Publish npm packages and GitHub Release
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    needs: pack
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    permissions:
-      contents: read
-      id-token: write
-    outputs:
-      receipt-artifact: ${{ steps.receipt.outputs.name }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
-        with:
-          node-version-file: package.json
-          package-manager-cache: false
-      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
-      - run: npm install --global npm@12.2.1 --ignore-scripts
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: verified-release
-          path: .artifacts/release
-      - run: pnpm release:publish
-      - run: pnpm release:registry
-      - id: receipt
-        run: echo "name=registry-acceptance-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: ${{ steps.receipt.outputs.name }}
-          path: .artifacts/release/registry-accepted.json
-          if-no-files-found: error
-          retention-days: 90
-
-  release:
-    needs: publish
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 60
+    environment: npm
     permissions:
       contents: write
+      id-token: write
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - name: Read Node version
+        id: node-runtime
+        run: echo "runtime=node@$(jq -er '.engines.node' package.json)" >> "$GITHUB_OUTPUT"
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@731dfb6463bbd11c11fd0ee11fe00ed0e36d48a1 # v3.2.0
         with:
-          node-version-file: package.json
-          package-manager-cache: false
-      - uses: pnpm/action-setup@d9184bf108216479bc5a137cc391f4d7b14c870b # v6.1.0
-      - run: npm install --global npm@12.2.1 --ignore-scripts
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+          runtime: ${{ steps.node-runtime.outputs.runtime }}
+          install: false
+          cache: false
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Publish packed versions
+        uses: changesets/action/publish@ae32849d5ba541f9ae29e40e22a623bc13562f51 # v2.1.2
         with:
-          name: verified-release
-          path: .artifacts/release
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
-        with:
-          name: ${{ needs.publish.outputs.receipt-artifact }}
-          path: .artifacts/release
-      - run: pnpm release:github
-        env:
-          GH_TOKEN: ${{ github.token }}
+          pack-dir-artifact-id: ${{ needs.pack.outputs.pack-dir-artifact-id }}
