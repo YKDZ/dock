@@ -9,6 +9,7 @@ import { verifyInstalledHost } from "./verify-installed-host.ts";
 import { verifyInstalledMarkdown } from "./verify-installed-markdown.ts";
 import { verifyInstalledNodeTest } from "./verify-installed-node-test.ts";
 import { verifyInstalledTypeScript } from "./verify-installed-typescript.ts";
+import { verifyInstalledVitest } from "./verify-installed-vitest.ts";
 
 async function main(): Promise<void> {
   const artifacts = process.argv.slice(2);
@@ -28,8 +29,9 @@ async function main(): Promise<void> {
   await verifyInstalledMarkdown(dockTarball);
   await verifyInstalledTypeScript(dockTarball);
   await verifyInstalledNodeTest(dockTarball);
+  await verifyInstalledVitest(dockTarball);
   process.stdout.write(
-    "Clean @ykdz/dock installed verification (host, core, file, markdown, typescript, node-test, and CLI) passed.\n",
+    "Clean @ykdz/dock installed verification (host, core, file, markdown, typescript, node-test, vitest, and CLI) passed.\n",
   );
 }
 

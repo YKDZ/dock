@@ -15,6 +15,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { collectInstalledPackageNames } from "./npm-ls.ts";
+
 type ProcessResult = {
   readonly code: number;
   readonly signal: NodeJS.Signals | null;
@@ -1117,8 +1119,9 @@ async function verifyNoFrameworkDependency(consumer: string): Promise<void> {
     consumer,
   );
   assert.equal(listing.code, 0, listing.stderr);
-  const names = new Set<string>();
-  collectPackageNames(JSON.parse(listing.stdout) as unknown, names);
+  const names = collectInstalledPackageNames(
+    JSON.parse(listing.stdout) as unknown,
+  );
   for (const dependency of [
     "vitest",
     "@vitest/runner",
@@ -1278,27 +1281,6 @@ function assertBindingHasNoErrors(
     undefined,
     `Binding ${bindingId} was unexpectedly affected by errors`,
   );
-}
-
-function collectPackageNames(value: unknown, names: Set<string>): void {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return;
-  const packageValue = value as {
-    readonly name?: unknown;
-    readonly dependencies?: unknown;
-  };
-  if (typeof packageValue.name === "string") names.add(packageValue.name);
-  if (
-    typeof packageValue.dependencies !== "object" ||
-    packageValue.dependencies === null ||
-    Array.isArray(packageValue.dependencies)
-  ) {
-    return;
-  }
-  for (const [name, dependency] of Object.entries(packageValue.dependencies)) {
-    names.add(name);
-    collectPackageNames(dependency, names);
-  }
 }
 
 async function main(): Promise<void> {

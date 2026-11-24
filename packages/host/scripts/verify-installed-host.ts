@@ -13,6 +13,8 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { collectInstalledPackageNames } from "./npm-ls.ts";
+
 type ProcessResult = {
   readonly code: number;
   readonly stdout: string;
@@ -96,10 +98,8 @@ export async function verifyInstalledHost(tarball: string): Promise<void> {
       consumer,
     );
     assert.equal(installedPackages.code, 0, installedPackages.stderr);
-    const dependencyNames = new Set<string>();
-    collectPackageNames(
+    const dependencyNames = collectInstalledPackageNames(
       JSON.parse(installedPackages.stdout) as unknown,
-      dependencyNames,
     );
     for (const forbidden of [
       "typescript-7",
@@ -221,22 +221,4 @@ function run(
       resolveResult({ code: code ?? 1, stdout, stderr });
     });
   });
-}
-
-function collectPackageNames(value: unknown, names: Set<string>): void {
-  if (typeof value !== "object" || value === null || Array.isArray(value))
-    return;
-  const packageValue = value as { name?: unknown; dependencies?: unknown };
-  if (typeof packageValue.name === "string") names.add(packageValue.name);
-  const dependencies = packageValue.dependencies;
-  if (
-    typeof dependencies !== "object" ||
-    dependencies === null ||
-    Array.isArray(dependencies)
-  )
-    return;
-  for (const [name, dependency] of Object.entries(dependencies)) {
-    names.add(name);
-    collectPackageNames(dependency, names);
-  }
 }

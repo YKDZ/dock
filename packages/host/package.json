@@ -45,6 +45,11 @@
       "types": "./dist/node-test/index.d.ts",
       "default": "./dist/node-test/index.js"
     },
+    "./vitest": {
+      "source": "./src/vitest/index.ts",
+      "types": "./dist/vitest/index.d.ts",
+      "default": "./dist/vitest/index.js"
+    },
     "./cli": "./dist/cli.js"
   },
   "publishConfig": {
@@ -76,7 +81,16 @@
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "tsrs": "catalog:",
-    "typescript-7": "catalog:"
+    "typescript-7": "catalog:",
+    "vitest": "4.1.11"
+  },
+  "peerDependencies": {
+    "vitest": "4.1.11 || 5.0.3"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   },
   "engines": {
     "node": "^26.13.1"

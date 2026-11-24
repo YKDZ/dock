@@ -317,6 +317,9 @@ importers:
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@26.6.6)
 
   packages/tooling-config:
     devDependencies:
