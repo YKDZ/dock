@@ -16,7 +16,6 @@ overrides: {}
 packages:
   - apps/*
   - packages/*
-  - references/*
 catalog:
   "@types/node": ^26.0.0
   oxfmt: ^0.79.0

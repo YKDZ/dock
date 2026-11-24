@@ -1,18 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import {
-  chmod,
-  mkdir,
-  mkdtemp,
-  readFile,
-  rm,
-  writeFile,
-} from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { nodeTest } from "@ykdz/dock-reference-node-test";
+import { nodeTest } from "@ykdz/dock/node-test";
 
 import config, { exampleTest, readme } from "../dock.config.ts";
 
@@ -51,23 +44,10 @@ await test(exampleTest.name, async () => {
     source[key] = result.value;
   }
 
-  // 临时项目沿用当前消费者已安装的依赖，配置按正常包名解析。
+  // Temporary project reuses the consumer's installed dependencies so package imports resolve normally.
   const project = await mkdtemp(join(consumer, ".dock-readme-"));
-  // 工作区和安装消费者都通过公开入口运行构建后的同一 CLI，命令仍取自 README。
-  const bin = join(project, "bin");
-  await mkdir(bin);
-  const launcher = join(
-    bin,
-    process.platform === "win32" ? "dock.cmd" : "dock",
-  );
-  const node = process.execPath;
-  await writeFile(
-    launcher,
-    process.platform === "win32"
-      ? `@echo off\r\n"${node}" --input-type=module -e "import '@ykdz/dock/cli'" -- dock %*\r\n`
-      : `#!/bin/sh\nexec '${node.replaceAll("'", "'\\''")}' --input-type=module -e 'import "@ykdz/dock/cli"' -- dock "$@"\n`,
-  );
-  await chmod(launcher, 0o755);
+  // Execute the installed dock CLI binary directly using the commands documented in README.
+  const bin = join(consumer, "node_modules", ".bin");
   function runDock(command: string) {
     const result = spawnSync(command, {
       shell: true,
@@ -137,7 +117,7 @@ await test(exampleTest.name, async () => {
     assert.equal(missing.status, 1, missing.stdout);
     assert.match(missing.stdout, /Error node-version/u);
 
-    // “如何使用”里的 TypeScript 配置入口也执行同一份示例。
+    // Run the same example via the TypeScript config entry from the usage section.
     manifest.engines.node = source.nextVersion;
     await writeFile(join(project, "package.json"), JSON.stringify(manifest));
     await writeFile(join(project, "dock.config.ts"), source.config);
