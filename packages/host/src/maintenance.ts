@@ -4,6 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 
+import type { Config, PluginRequest } from "./contracts.ts";
 import {
   check as checkCore,
   copyJsonValue,
@@ -16,9 +17,7 @@ import {
   type ReferenceMemberResult,
   type ReferenceResult,
   type TextRange,
-} from "@ykdz/dock-core";
-
-import type { Config, PluginRequest } from "./contracts.ts";
+} from "./core/index.ts";
 import { MaintenanceError } from "./errors.ts";
 import { ownPluginInformation } from "./owned-data.ts";
 import {
@@ -96,7 +95,7 @@ async function runOperation<Kind extends Operation>(
   return await operateConfig(operation, config, process.cwd(), scope);
 }
 
-/** 配置文件和宿主对象入口在这里汇合，操作不会重新解释解析结果。 */
+/** Config path and host object entries converge here; operations do not reinterpret resolved results. */
 export async function operateConfig<Kind extends Operation>(
   operation: Kind,
   value: unknown,
@@ -187,7 +186,7 @@ function acceptPluginBatch(
   if (shell === undefined) {
     return failedPluginBatch(
       plugin,
-      "无效批量结果外壳",
+      "Invalid batch result shell",
       "invalid-plugin-batch-result",
     );
   }
@@ -202,7 +201,7 @@ function acceptPluginBatch(
       errors.push({
         pluginId: plugin.plugin.id,
         code: "invalid-plugin-diagnostics",
-        message: `插件 ${plugin.plugin.id} 的诊断格式无效：${errorMessage(error)}`,
+        message: `Plugin ${plugin.plugin.id} returned invalid diagnostics format: ${errorMessage(error)}`,
       });
     }
   }
@@ -216,7 +215,7 @@ function acceptPluginBatch(
       errors.push({
         pluginId: plugin.plugin.id,
         code: "unattributed-plugin-result",
-        message: `插件 ${plugin.plugin.id} 返回了没有有效引用身份的结果。`,
+        message: `Plugin ${plugin.plugin.id} returned a result without a valid reference ID.`,
       });
       continue;
     }
@@ -224,7 +223,7 @@ function acceptPluginBatch(
       errors.push({
         pluginId: plugin.plugin.id,
         code: "unexpected-plugin-result",
-        message: `插件 ${plugin.plugin.id} 返回了本次未选中的引用结果：${id}。`,
+        message: `Plugin ${plugin.plugin.id} returned a result for unselected reference: ${id}.`,
       });
       continue;
     }
@@ -240,7 +239,7 @@ function acceptPluginBatch(
         pluginFailure(
           reference.id,
           "missing-plugin-result",
-          `插件 ${plugin.plugin.id} 未返回引用 ${reference.id} 的结果。`,
+          `Plugin ${plugin.plugin.id} did not return a result for reference ${reference.id}.`,
         ),
       );
       continue;
@@ -250,7 +249,7 @@ function acceptPluginBatch(
         pluginFailure(
           reference.id,
           "duplicate-plugin-result",
-          `插件 ${plugin.plugin.id} 对引用 ${reference.id} 返回了多个结果。`,
+          `Plugin ${plugin.plugin.id} returned multiple results for reference ${reference.id}.`,
         ),
       );
       continue;
@@ -275,7 +274,7 @@ function failedPluginBatch(
       pluginFailure(
         reference.id,
         code,
-        `插件 ${plugin.plugin.id} 批量采集失败：${message}`,
+        `Plugin ${plugin.plugin.id} batch collection failed: ${message}`,
       ),
     ),
     diagnostics: [],
@@ -431,7 +430,7 @@ function toMemberResult(value: unknown):
     ) {
       return undefined;
     }
-    // core 按 error 字段判断成员失败，必须保留该错误语义。
+    // Core detects member failures via the error field; preserve that error semantics.
     return {
       id: id.value,
       error: { code: code.value, message: message.value },
@@ -479,7 +478,7 @@ function invalidPluginResult(id: string): ReferenceResult {
   return pluginFailure(
     id,
     "invalid-plugin-result",
-    `插件对引用 ${id} 返回了无效采集结果。`,
+    `Plugin returned an invalid collection result for reference ${id}.`,
   );
 }
 
@@ -538,7 +537,7 @@ function errorMessage(error: unknown): string {
   try {
     return String(error instanceof Error ? error.message : error);
   } catch {
-    return "错误对象无法转换为文本";
+    return "Error value cannot be converted to string";
   }
 }
 
@@ -557,7 +556,7 @@ async function writeBaseline(path: string, baseline: Baseline): Promise<void> {
   } catch (error) {
     throw new MaintenanceError(
       "baseline-write-failed",
-      `无法原子写入基线 ${path}：${errorMessage(error)}`,
+      `Failed to atomically write baseline ${path}: ${errorMessage(error)}`,
       { cause: error },
     );
   } finally {
@@ -571,7 +570,7 @@ function resolveConfigPath(input: string | URL): string {
     if (input.protocol !== "file:") {
       throw new MaintenanceError(
         "config-path-invalid",
-        "配置入口 URL 必须使用 file: 协议。",
+        "Config entry URL must use the file: protocol.",
       );
     }
     return fileURLToPath(input);
@@ -616,7 +615,7 @@ function runConfigWorker<T>(
         rejectResult(
           new MaintenanceError(
             "config-worker-failed",
-            `配置维护 Worker 收尾失败：${errorMessage(error)}`,
+            `Config maintenance worker teardown failed: ${errorMessage(error)}`,
             { cause: error },
           ),
         );
@@ -640,7 +639,7 @@ function runConfigWorker<T>(
         rejectResult(
           new MaintenanceError(
             "config-worker-failed",
-            `配置维护 Worker 失败：${error.message}`,
+            `Config maintenance worker failed: ${error.message}`,
             { cause: error },
           ),
         ),
@@ -652,7 +651,7 @@ function runConfigWorker<T>(
       rejectResult(
         new MaintenanceError(
           "config-worker-failed",
-          `配置维护 Worker 提前退出（${String(code)}）。`,
+          `Config maintenance worker exited unexpectedly (${String(code)}).`,
         ),
       );
     });

@@ -32,7 +32,7 @@ const valid = definePlugin({
 });
 void valid;
 
-// @ts-expect-error 范围筛选项必须使用公开的字符串 ID。
+// @ts-expect-error Scope filters must use string IDs.
 void check({ plugins: [], bindings: [] }, { binding: [42] });
 
 definePlugin({
@@ -47,7 +47,7 @@ definePlugin({
       })),
     };
   },
-  // @ts-expect-error 插件文件信息只能返回路径文本或 file: URL。
+  // @ts-expect-error Plugin fileInfo can only return a path string or file: URL.
   fileInfo(): number {
     return 1;
   },
@@ -68,7 +68,7 @@ const wrongReferenceRequest = {
     return { results: [] };
   },
 };
-// @ts-expect-error collect 必须接受与 validate 相同的引用类型。
+// @ts-expect-error collect must accept the same reference type as validate.
 definePlugin(wrongReferenceRequest);
 
 const wrongPreparedRequest = {
@@ -83,7 +83,7 @@ const wrongPreparedRequest = {
     return { results: [] };
   },
 };
-// @ts-expect-error collect 必须接受 prepare 返回的准备数据类型。
+// @ts-expect-error collect must accept the prepared data type returned by prepare.
 definePlugin(wrongPreparedRequest);
 
 const wrongPluginIdentity = {
@@ -93,7 +93,7 @@ const wrongPluginIdentity = {
     return { results: [] };
   },
 };
-// @ts-expect-error 插件身份必须与引用声明的插件身份一致。
+// @ts-expect-error Plugin ID must match the reference pluginId.
 definePlugin(wrongPluginIdentity);
 
 const wrongFactValue = {
@@ -103,5 +103,5 @@ const wrongFactValue = {
     return { results: [] };
   },
 };
-// @ts-expect-error 批量成功值必须匹配引用事实值类型。
+// @ts-expect-error Batch value must match the reference value type.
 definePlugin(wrongFactValue);

@@ -57,7 +57,7 @@ export const catalogPlugin = definePlugin({
         reference.selection.field !== "title" &&
         reference.selection.field !== "entries")
     ) {
-      throw new TypeError(`无效目录引用：${reference.id}`);
+      throw new TypeError(`Invalid catalog reference: ${reference.id}`);
     }
   },
   collect(
@@ -69,7 +69,10 @@ export const catalogPlugin = definePlugin({
           ? {
               referenceId: reference.id,
               kind: "error",
-              error: { code: "catalog-missing", message: "目录不存在。" },
+              error: {
+                code: "catalog-missing",
+                message: "Catalog does not exist.",
+              },
             }
           : {
               referenceId: reference.id,

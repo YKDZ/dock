@@ -1,13 +1,12 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import type { NormalizedReference } from "./authoring.ts";
 import type {
   Baseline,
   BindingDefinition,
   ReferenceDefinition,
-} from "@ykdz/dock-core";
-
-import type { NormalizedReference } from "./authoring.ts";
+} from "./core/index.ts";
 
 export type MaintenanceScope = {
   readonly binding?: readonly string[];
@@ -39,16 +38,18 @@ export class ScopeResolutionError extends Error {
   }
 }
 
-/** 将插件公开的文件位置与筛选路径按有效 root 归一成绝对路径。 */
+/** Normalizes plugin-reported file locations and scope filter paths to absolute paths under the effective root. */
 export function normalizeFilePath(value: string | URL, root: string): string {
   if (value instanceof URL) {
     if (value.protocol !== "file:") {
-      throw new TypeError("文件目标 URL 必须使用 file: 协议。");
+      throw new TypeError("File target URL must use the file: protocol.");
     }
     return resolve(fileURLToPath(value));
   }
   if (typeof value !== "string" || value.length === 0) {
-    throw new TypeError("文件目标必须是非空路径文本或 file: URL。");
+    throw new TypeError(
+      "File target must be a non-empty path string or file: URL.",
+    );
   }
   if (value.startsWith("file:")) {
     return resolve(fileURLToPath(new URL(value)));
@@ -56,7 +57,7 @@ export function normalizeFilePath(value: string | URL, root: string): string {
   return resolve(root, value);
 }
 
-/** 完整声明和插件预检完成后解析当前及基线历史筛选项。 */
+/** Resolves current and historical baseline scope selectors after full declarations and plugin preflight finish. */
 export function resolveScope(
   input: unknown,
   config: ScopeInput,
@@ -112,7 +113,7 @@ export function resolveScope(
       if (location === undefined) {
         throw new ScopeResolutionError(
           "scope-file-info-unavailable",
-          `引用 ${reference.id} 的文件信息没有完成归一。`,
+          `File info for reference ${reference.id} was not normalized.`,
         );
       }
       if (location !== null && location === expected) {
@@ -159,12 +160,12 @@ export function snapshotScope(input: unknown): {
 } {
   if (input === undefined) return { binding: [], reference: [], file: [] };
   if (!isRecord(input)) {
-    throw invalidScope("范围筛选必须是对象。");
+    throw invalidScope("Scope filter must be an object.");
   }
   const selectors = input;
   const known = new Set(["binding", "reference", "file"]);
   for (const key of Object.keys(selectors)) {
-    if (!known.has(key)) throw invalidScope(`不支持范围筛选项 ${key}。`);
+    if (!known.has(key)) throw invalidScope(`Unsupported scope filter ${key}.`);
   }
   return {
     binding: selectorValues(selectors.binding, "binding"),
@@ -176,12 +177,14 @@ export function snapshotScope(input: unknown): {
 function selectorValues(value: unknown, name: string): readonly string[] {
   if (value === undefined) return [];
   if (!Array.isArray(value)) {
-    throw invalidScope(`范围筛选 ${name} 必须是文本列表。`);
+    throw invalidScope(`Scope filter ${name} must be a list of strings.`);
   }
   const result: string[] = [];
   for (const item of value) {
     if (typeof item !== "string" || item.length === 0) {
-      throw invalidScope(`范围筛选 ${name} 的每项必须是非空文本。`);
+      throw invalidScope(
+        `Each item in scope filter ${name} must be a non-empty string.`,
+      );
     }
     result.push(item);
   }
@@ -194,7 +197,7 @@ function normalizeSelectorFile(file: string, root: string): string {
   } catch (error) {
     throw new ScopeResolutionError(
       "scope-invalid",
-      `范围文件 ${file} 无效：${errorMessage(error)}`,
+      `Invalid scope file ${file}: ${errorMessage(error)}`,
       { cause: error },
     );
   }
@@ -210,15 +213,21 @@ function historicalFileInfo(
     typeof target.pluginId !== "string" ||
     target.pluginId.length === 0
   ) {
-    throw historyUnexplainable(definition.id, "历史定义没有宿主插件身份包装。");
+    throw historyUnexplainable(
+      definition.id,
+      "Historical definition is missing host plugin identity wrapper.",
+    );
   }
   if (!Object.hasOwn(target, "target")) {
-    throw historyUnexplainable(definition.id, "历史定义没有插件目标。");
+    throw historyUnexplainable(
+      definition.id,
+      "Historical definition is missing plugin target.",
+    );
   }
   if (!Object.hasOwn(target, "fileInfo")) {
     throw historyUnexplainable(
       definition.id,
-      "历史定义没有文件目标快照或无文件标记。",
+      "Historical definition is missing file target snapshot or no-file marker.",
     );
   }
   const fileInfo = target.fileInfo;
@@ -226,7 +235,7 @@ function historicalFileInfo(
   if (typeof fileInfo !== "string" || fileInfo.length === 0) {
     throw historyUnexplainable(
       definition.id,
-      "历史定义没有有效的创建时文件目标快照。",
+      "Historical definition is missing a valid creation-time file target snapshot.",
     );
   }
   return normalizeFilePath(fileInfo, baselineDirectory);
@@ -249,7 +258,7 @@ function ownersByReference(
 function unmatched(kind: string, value: string): ScopeResolutionError {
   return new ScopeResolutionError(
     "scope-selector-unmatched",
-    `范围筛选 ${kind} 未命中任何当前或历史关联：${value}`,
+    `Scope selector ${kind} matched no current or historical bindings: ${value}`,
   );
 }
 
@@ -263,7 +272,7 @@ function historyUnexplainable(
 ): ScopeResolutionError {
   return new ScopeResolutionError(
     "scope-history-unexplainable",
-    `无法解释历史引用 ${referenceId} 的文件位置：${message}`,
+    `Cannot resolve file location for historical reference ${referenceId}: ${message}`,
   );
 }
 

@@ -1,5 +1,3 @@
-import { canonicalJson, isJsonValue, type JsonValue } from "@ykdz/dock-core";
-
 import type {
   Binding,
   Config,
@@ -11,6 +9,7 @@ import type {
   ReferenceValue,
   RegisteredReference,
 } from "./contracts.ts";
+import { canonicalJson, isJsonValue, type JsonValue } from "./core/index.ts";
 import { ownReference } from "./owned-data.ts";
 
 export type {
@@ -45,7 +44,7 @@ export function createReference<
     ...options,
   };
   assertReferenceDefinition(result);
-  assertDeclarationSource(result.declaredAt, `引用 ${id}`);
+  assertDeclarationSource(result.declaredAt, `Reference ${id}`);
   return result;
 }
 
@@ -225,7 +224,7 @@ type PluginPreparedContract<Plugin> =
       : never
     : never;
 
-/** 新增的纯预检和文件定位钩子必须接受声明的同一引用类型。 */
+/** Pure preflight and fileInfo hooks must accept the same reference type declared by the plugin. */
 type PluginValueContractForReference<Plugin, Ref extends Reference> = [
   PluginHookReferenceContract<Plugin, Ref>,
 ] extends [never]
@@ -273,7 +272,7 @@ export function binding<
     references.map((reference) => reference.id),
     options.note,
   );
-  assertDeclarationSource(options.declaredAt, `关联 ${id}`);
+  assertDeclarationSource(options.declaredAt, `Binding ${id}`);
   return { id, references, ...options };
 }
 
@@ -306,17 +305,17 @@ export function validateConfig(value: unknown): asserts value is Config {
 
 export function normalizeConfig(value: unknown): NormalizedConfig {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError("配置入口必须导出对象。");
+    throw new TypeError("Config entry must export an object.");
   }
   const config = value as Record<string, unknown>;
   if (!Array.isArray(config.plugins)) {
-    throw new TypeError("配置必须提供 plugins 插件列表。");
+    throw new TypeError("Config must provide a plugins list.");
   }
   const plugins = new Map<string, ReferencePlugin>();
   for (const candidate of config.plugins) {
     assertPlugin(candidate);
     if (plugins.has(candidate.id)) {
-      throw new TypeError(`引用插件身份重复：${candidate.id}`);
+      throw new TypeError(`Duplicate reference plugin ID: ${candidate.id}`);
     }
     const read = "read" in candidate ? candidate.read : undefined;
     const fileInfo = candidate.fileInfo;
@@ -342,26 +341,28 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
   }
 
   if (!Array.isArray(config.bindings)) {
-    throw new TypeError("配置必须提供 bindings 关联列表。");
+    throw new TypeError("Config must provide a bindings list.");
   }
   if (
     config.root !== undefined &&
     (typeof config.root !== "string" || config.root.length === 0)
   ) {
-    throw new TypeError("配置 root 必须是非空路径文本。");
+    throw new TypeError("Config root must be a non-empty path string.");
   }
   if (
     config.baseline !== undefined &&
     (typeof config.baseline !== "string" || config.baseline.length === 0)
   ) {
-    throw new TypeError("配置 baseline 必须是非空路径文本。");
+    throw new TypeError("Config baseline must be a non-empty path string.");
   }
   if (config.declarationSources !== undefined) {
     if (!Array.isArray(config.declarationSources)) {
-      throw new TypeError("配置 declarationSources 必须是来源列表。");
+      throw new TypeError(
+        "Config declarationSources must be a list of sources.",
+      );
     }
     for (const source of config.declarationSources) {
-      assertDeclarationSource(source, "配置 declarationSources");
+      assertDeclarationSource(source, "Config declarationSources");
     }
   }
 
@@ -378,7 +379,7 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
       candidate === null ||
       Array.isArray(candidate)
     ) {
-      throw new TypeError("关联声明必须是对象。");
+      throw new TypeError("Binding declaration must be an object.");
     }
     const current = candidate as Binding;
     assertBindingDefinitionLocal(
@@ -386,11 +387,11 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
       referenceIds(current.references),
       current.note,
     );
-    assertDeclarationSource(current.declaredAt, `关联 ${current.id}`);
+    assertDeclarationSource(current.declaredAt, `Binding ${current.id}`);
     const priorBinding = bindings.get(current.id);
     if (priorBinding !== undefined) {
       throw new TypeError(
-        `关联身份重复：${current.id}${formatDeclarationSources([priorBinding.declaredAt, current.declaredAt])}`,
+        `Duplicate binding ID: ${current.id}${formatDeclarationSources([priorBinding.declaredAt, current.declaredAt])}`,
       );
     }
     bindings.set(current.id, {
@@ -412,7 +413,7 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
       const prior = references.get(reference.id);
       if (prior !== undefined && !sameReferenceDefinition(prior, reference)) {
         throw new TypeError(
-          `引用身份 ${reference.id} 对应多个不同定义${formatDeclarationSources([...prior.declarationSources, reference.declaredAt])}。`,
+          `Reference ID ${reference.id} maps to multiple distinct definitions${formatDeclarationSources([...prior.declarationSources, reference.declaredAt])}.`,
         );
       }
       references.set(
@@ -470,14 +471,14 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     const plugin = plugins.get(reference.pluginId);
     if (plugin === undefined) {
       throw new TypeError(
-        `引用 ${reference.id} 使用了未登记插件：${reference.pluginId}${formatDeclarationSources(reference.declarationSources)}。`,
+        `Reference ${reference.id} uses an unregistered plugin: ${reference.pluginId}${formatDeclarationSources(reference.declarationSources)}.`,
       );
     }
     try {
       plugin.validate(reference);
     } catch (error) {
       throw new TypeError(
-        `插件 ${reference.pluginId} 拒绝引用 ${reference.id} 的声明：${errorMessage(error)}${formatDeclarationSources(reference.declarationSources)}`,
+        `Plugin ${reference.pluginId} rejected declaration of reference ${reference.id}: ${errorMessage(error)}${formatDeclarationSources(reference.declarationSources)}`,
         { cause: error },
       );
     }
@@ -514,7 +515,7 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     "validateReferences" in value
   ) {
     throw new TypeError(
-      "引用插件必须提供非空 id、validate 和 collect 函数；可选的 fileInfo、prepare 与 describe 必须是函数，旧执行协议不再受支持。",
+      "Reference plugin must provide non-empty id, validate, and collect functions; optional fileInfo, prepare, and describe must be functions; legacy execution protocols are unsupported.",
     );
   }
 }
@@ -529,7 +530,9 @@ function referenceIds(value: unknown): unknown {
 
 function assertReference(value: unknown): asserts value is Reference {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new TypeError("关联引用必须由插件提供的引用声明构造器创建。");
+    throw new TypeError(
+      "Binding references must be created by plugin-provided reference builders.",
+    );
   }
   const reference = value as Reference;
   assertReferenceDefinition(reference);
@@ -537,23 +540,27 @@ function assertReference(value: unknown): asserts value is Reference {
     typeof reference.pluginId !== "string" ||
     reference.pluginId.length === 0
   ) {
-    throw new TypeError(`引用 ${reference.id} 缺少插件身份。`);
+    throw new TypeError(`Reference ${reference.id} is missing pluginId.`);
   }
-  assertDeclarationSource(reference.declaredAt, `引用 ${reference.id}`);
+  assertDeclarationSource(reference.declaredAt, `Reference ${reference.id}`);
 }
 
 function assertReferenceDefinition(value: Reference): void {
   if (typeof value.id !== "string" || value.id.length === 0) {
-    throw new TypeError("引用 ID 必须是非空文本。");
+    throw new TypeError("Reference ID must be a non-empty string.");
   }
   if (!Object.hasOwn(value, "target") || !isJsonValue(value.target)) {
-    throw new TypeError(`引用 ${value.id} 的 target 必须是有效 JSON 值。`);
+    throw new TypeError(
+      `Reference ${value.id} target must be a valid JSON value.`,
+    );
   }
   if (value.selection !== undefined && !isJsonValue(value.selection)) {
-    throw new TypeError(`引用 ${value.id} 的 selection 必须是有效 JSON 值。`);
+    throw new TypeError(
+      `Reference ${value.id} selection must be a valid JSON value.`,
+    );
   }
   if (value.note !== undefined && typeof value.note !== "string") {
-    throw new TypeError(`引用 ${value.id} 的 note 必须是文本。`);
+    throw new TypeError(`Reference ${value.id} note must be a string.`);
   }
 }
 
@@ -563,23 +570,27 @@ function assertBindingDefinitionLocal(
   note: unknown,
 ): void {
   if (typeof id !== "string" || id.length === 0) {
-    throw new TypeError("关联 ID 必须是非空文本。");
+    throw new TypeError("Binding ID must be a non-empty string.");
   }
   if (!Array.isArray(referenceIds) || referenceIds.length === 0) {
-    throw new TypeError(`关联 ${id} 的引用集合不能为空。`);
+    throw new TypeError(`Reference list for binding ${id} cannot be empty.`);
   }
   const seen = new Set<string>();
   for (const referenceId of referenceIds) {
     if (typeof referenceId !== "string" || referenceId.length === 0) {
-      throw new TypeError(`关联 ${id} 的引用 ID 必须是非空文本。`);
+      throw new TypeError(
+        `Reference ID in binding ${id} must be a non-empty string.`,
+      );
     }
     if (seen.has(referenceId)) {
-      throw new TypeError(`关联 ${id} 的引用集合包含重复身份：${referenceId}`);
+      throw new TypeError(
+        `Reference list for binding ${id} contains duplicate ID: ${referenceId}`,
+      );
     }
     seen.add(referenceId);
   }
   if (note !== undefined && typeof note !== "string") {
-    throw new TypeError(`关联 ${id} 的 note 必须是文本。`);
+    throw new TypeError(`Binding ${id} note must be a string.`);
   }
 }
 
@@ -614,7 +625,9 @@ function formatDeclarationSources(
   const locations = declarationSources(sources).map((source) =>
     source instanceof URL ? source.href : source,
   );
-  return locations.length === 0 ? "" : `；声明来源：${locations.join("、")}`;
+  return locations.length === 0
+    ? ""
+    : `; declaration sources: ${locations.join(", ")}`;
 }
 
 function errorMessage(error: unknown): string {
@@ -630,6 +643,6 @@ function assertDeclarationSource(
     typeof source !== "string" &&
     !(source instanceof URL)
   ) {
-    throw new TypeError(`${context} 的 declaredAt 必须是路径文本或 URL。`);
+    throw new TypeError(`${context} declaredAt must be a path string or URL.`);
   }
 }

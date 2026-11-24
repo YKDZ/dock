@@ -41,7 +41,7 @@ const plugin = definePlugin({
     return {
       data: { selected: request.selectedReferences.map(({ id }) => id) },
       text: [
-        `声明 ${request.references.length} 条；选中 ${request.selectedReferences.length} 条`,
+        `Declared ${request.references.length}; selected ${request.selectedReferences.length}`,
       ],
     };
   },
@@ -64,7 +64,7 @@ const plugin = definePlugin({
       })),
       diagnostics: {
         data: { collectionCalls },
-        text: ["批量采集完成"],
+        text: ["Batch collection completed"],
       },
     };
   },
@@ -95,7 +95,7 @@ try {
     selectedReferences: ["selected"],
     description: {
       data: { selected: ["selected"] },
-      text: ["声明 2 条；选中 1 条"],
+      text: ["Declared 2; selected 1"],
     },
   });
 
@@ -106,7 +106,7 @@ try {
     {
       pluginId: "fixture:batch",
       data: { collectionCalls: 1 },
-      text: ["批量采集完成"],
+      text: ["Batch collection completed"],
     },
   ]);
   assert.deepEqual(report.pluginErrors, []);
@@ -137,7 +137,7 @@ const makePlugin = (id, value) => definePlugin({
         kind: "value",
         value,
       })),
-      diagnostics: { data: { owner: id }, text: ["执行完成"] },
+      diagnostics: { data: { owner: id }, text: ["Execution completed"] },
     };
   },
 });
@@ -174,8 +174,14 @@ export default defineConfig({
     { cwd: process.cwd(), encoding: "utf8" },
   );
   assert.equal(textResult.status, 0, textResult.stderr);
-  assert.match(textResult.stdout, /Plugin @fixture\/cli-first: 执行完成/u);
-  assert.match(textResult.stdout, /Plugin @fixture\/cli-second: 执行完成/u);
+  assert.match(
+    textResult.stdout,
+    /Plugin @fixture\/cli-first: Execution completed/u,
+  );
+  assert.match(
+    textResult.stdout,
+    /Plugin @fixture\/cli-second: Execution completed/u,
+  );
 
   const jsonResult = spawnSync(
     process.execPath,
@@ -200,7 +206,7 @@ export default defineConfig({
   assert.ok(jsonOutput.includes('"pluginId":"@fixture/cli-second"'));
   assert.ok(jsonOutput.includes('"data":{"owner":"@fixture/cli-first"}'));
   assert.ok(jsonOutput.includes('"data":{"owner":"@fixture/cli-second"}'));
-  assert.ok(jsonOutput.includes('"text":["执行完成"]'));
+  assert.ok(jsonOutput.includes('"text":["Execution completed"]'));
 
   for (const diagnosticKind of ["data", "text"]) {
     const pluginId = `fixture:invalid-object-${diagnosticKind}-diagnostics`;
@@ -210,11 +216,11 @@ export default defineConfig({
       diagnosticKind === "data"
         ? {
             data: { invalid() {} },
-            text: ["有效对象诊断文字"],
+            text: ["Valid object diagnostic text"],
           }
         : {
             data: { valid: true },
-            text: ["有效文本", 42],
+            text: ["Valid text", 42],
           };
     const invalidObjectDiagnostics = definePlugin({
       id: pluginId,
@@ -272,11 +278,11 @@ export default defineConfig({
       diagnosticKind === "data"
         ? `{
         data: { invalid() { return true; } },
-        text: ["有效 Worker 诊断文字"],
+        text: ["Valid worker diagnostic text"],
       }`
         : `{
         data: { valid: true },
-        text: ["有效 Worker 文字", 42],
+        text: ["Valid worker text", 42],
       }`;
     await writeFile(
       workerConfigPath,

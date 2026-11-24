@@ -26,7 +26,9 @@ export const physicalPlugin = definePlugin({
       typeof reference.target.path !== "string" ||
       reference.target.path.length === 0
     ) {
-      throw new TypeError(`无效物理安装引用：${reference.id}`);
+      throw new TypeError(
+        `Invalid physical install reference: ${reference.id}`,
+      );
     }
   },
   collect(

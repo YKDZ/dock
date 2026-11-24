@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { check, updateBaseline } from "@ykdz/dock-core";
+import { check, updateBaseline } from "@ykdz/dock/core";
 
 const seed = {
   references: [{ id: "guide", target: { path: "docs/guide.md" } }],
@@ -9,7 +9,9 @@ const seed = {
 };
 const created = updateBaseline(seed);
 assert.equal(created.status, "updated");
-if (created.status !== "updated") throw new Error("无法建立核对基线。");
+if (created.status !== "updated") {
+  throw new Error("Failed to establish check baseline.");
+}
 
 const checkBaseline = created.baseline;
 const checkInput = {
@@ -24,7 +26,7 @@ assert.equal(JSON.stringify(checkBaseline), baselineBeforeCheck);
 const checkedBinding = checked.bindings[0];
 assert.ok(checkedBinding && "current" in checkedBinding);
 if (!checkedBinding || !("current" in checkedBinding)) {
-  throw new Error("核对报告缺少当前关联。");
+  throw new Error("Check report is missing current binding.");
 }
 const referenceChange = checkedBinding.changes.find(
   (change) => change.kind === "reference-definition",
@@ -41,7 +43,7 @@ if (
   factChange.kind !== "fact" ||
   !("before" in factChange)
 ) {
-  throw new Error("核对报告缺少旧定义或旧事实。");
+  throw new Error("Check report is missing previous definition or fact.");
 }
 
 checkInput.references[0].target.path = "input.md";
@@ -58,7 +60,7 @@ assert.equal(
 
 const oldBinding = checkBaseline.bindings["guide-policy"];
 assert.ok(oldBinding);
-if (!oldBinding) throw new Error("已建立的关联基线缺失。");
+if (!oldBinding) throw new Error("Established binding baseline is missing.");
 oldBinding.definition.references[0] = "input-baseline-reference";
 oldBinding.references.guide.definition.target.path = "input-baseline.md";
 oldBinding.references.guide.value.paragraphs[0] = "input-baseline-fact";
@@ -78,7 +80,7 @@ assert.equal(
 const removalBaselineResult = updateBaseline(seed);
 assert.equal(removalBaselineResult.status, "updated");
 if (removalBaselineResult.status !== "updated") {
-  throw new Error("无法建立取消跟踪基线。");
+  throw new Error("Failed to establish untracking baseline.");
 }
 const removalBaseline = removalBaselineResult.baseline;
 const removal = check({
@@ -90,7 +92,7 @@ const removal = check({
 }).bindings[0];
 assert.ok(removal && "untracked" in removal && removal.untracked);
 if (!removal || !("untracked" in removal) || !removal.untracked) {
-  throw new Error("完整声明未保留取消跟踪说明。");
+  throw new Error("Complete declaration did not preserve untracking details.");
 }
 const removedDefinition = removal.changes[0].before;
 removalBaseline.bindings["guide-policy"].definition.references[0] =
@@ -104,7 +106,9 @@ assert.equal(
 
 const updateSeed = updateBaseline(seed);
 assert.equal(updateSeed.status, "updated");
-if (updateSeed.status !== "updated") throw new Error("无法重建更新基线。");
+if (updateSeed.status !== "updated") {
+  throw new Error("Failed to rebuild update baseline.");
+}
 const updateInput = {
   references: [{ id: "guide", target: { path: "docs/guide-v2.md" } }],
   bindings: [{ id: "guide-policy", references: ["guide"] }],
@@ -113,16 +117,18 @@ const updateInput = {
 };
 const updated = updateBaseline(updateInput);
 assert.equal(updated.status, "updated");
-if (updated.status !== "updated") throw new Error("有效事实未更新基线。");
+if (updated.status !== "updated") {
+  throw new Error("Valid fact did not update baseline.");
+}
 const updatedBinding = updated.report.bindings[0];
 assert.ok(updatedBinding && "current" in updatedBinding);
 if (!updatedBinding || !("current" in updatedBinding)) {
-  throw new Error("更新报告缺少当前关联。");
+  throw new Error("Update report is missing current binding.");
 }
 const reportedReference = updatedBinding.current.references.guide;
 const storedBinding = updated.baseline.bindings["guide-policy"];
 assert.ok(storedBinding);
-if (!storedBinding) throw new Error("更新后的关联基线缺失。");
+if (!storedBinding) throw new Error("Updated binding baseline is missing.");
 const storedReference = storedBinding.references.guide;
 
 updateInput.references[0].target.path = "input-update.md";

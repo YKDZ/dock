@@ -3,6 +3,7 @@ import { spawn } from "node:child_process";
 import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 type ProcessResult = {
   readonly code: number;
@@ -33,7 +34,16 @@ async function main(): Promise<void> {
     resolve(process.cwd(), artifact),
   );
   await Promise.all(tarballs.map((artifact) => access(artifact)));
+  await verifyInstalledCliTarballs(tarballs);
+}
 
+export async function verifyInstalledCli(tarball: string): Promise<void> {
+  await verifyInstalledCliTarballs([resolve(process.cwd(), tarball)]);
+}
+
+async function verifyInstalledCliTarballs(
+  tarballs: readonly string[],
+): Promise<void> {
   const consumer = await mkdtemp(join(tmpdir(), "dock-cli-installed-"));
   try {
     await writeFile(
@@ -316,9 +326,14 @@ function run(
   });
 }
 
-void main().catch((error: unknown) => {
-  process.stderr.write(
-    `Installed CLI verification failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
-  );
-  process.exitCode = 1;
-});
+if (
+  process.argv[1] !== undefined &&
+  resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+) {
+  void main().catch((error: unknown) => {
+    process.stderr.write(
+      `Installed CLI verification failed: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}\n`,
+    );
+    process.exitCode = 1;
+  });
+}

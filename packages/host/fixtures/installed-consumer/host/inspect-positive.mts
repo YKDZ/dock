@@ -10,7 +10,7 @@ import {
   updateBaseline,
   type CheckContext,
   type ReferenceResult,
-} from "@ykdz/dock-core";
+} from "@ykdz/dock/core";
 
 async function consume(config: Config, url: URL): Promise<void> {
   const scope: MaintenanceScope = { reference: ["guide"] };
@@ -24,7 +24,7 @@ async function consume(config: Config, url: URL): Promise<void> {
     plugins[0]?.selectedReferences ?? [];
   const files: readonly { path: string; references: readonly string[] }[] =
     resolution.files;
-  const facts: ReferenceResult[] = [{ referenceId: "guide", value: "正文" }];
+  const facts: ReferenceResult[] = [{ referenceId: "guide", value: "Body" }];
   check({ ...context, facts });
   updateBaseline({ ...context, facts });
   await inspect("dock.config.mjs", { binding: selected });

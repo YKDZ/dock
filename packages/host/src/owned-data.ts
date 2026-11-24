@@ -1,6 +1,5 @@
-import { copyJsonValue, type JsonValue } from "@ykdz/dock-core";
-
 import type { PluginInformation, Reference } from "./contracts.ts";
+import { copyJsonValue, type JsonValue } from "./core/index.ts";
 
 export function ownReference(reference: Reference): Reference {
   return Object.freeze({
@@ -15,7 +14,7 @@ export function ownReference(reference: Reference): Reference {
   });
 }
 
-/** 已接纳的值归本次操作所有，插件与调用方不能再改写它。 */
+/** Accepted values belong exclusively to the current operation; plugins and callers cannot mutate them afterwards. */
 export function ownJsonValue<Value extends JsonValue>(value: Value): Value {
   const owned = copyJsonValue(value);
   freeze(owned);
@@ -28,7 +27,7 @@ export function ownPluginInformation(value: unknown): PluginInformation {
     Object.getOwnPropertySymbols(value).length > 0 ||
     Object.getOwnPropertyNames(value).length !== 2
   ) {
-    throw new TypeError("插件说明必须只包含 data 与 text。");
+    throw new TypeError("Plugin information must contain only data and text.");
   }
   const data = Object.getOwnPropertyDescriptor(value, "data");
   const text = Object.getOwnPropertyDescriptor(value, "text");
@@ -40,12 +39,14 @@ export function ownPluginInformation(value: unknown): PluginInformation {
     !text.enumerable ||
     !("value" in text)
   ) {
-    throw new TypeError("插件说明不能包含访问器属性。");
+    throw new TypeError(
+      "Plugin information cannot contain accessor properties.",
+    );
   }
   const ownedData = copyJsonValue(data.value);
   const ownedText = copyJsonValue(text.value);
   if (!Array.isArray(ownedText) || !ownedText.every(isString)) {
-    throw new TypeError("插件说明 text 必须是字符串数组。");
+    throw new TypeError("Plugin information text must be a string array.");
   }
   freeze(ownedData);
   freeze(ownedText);

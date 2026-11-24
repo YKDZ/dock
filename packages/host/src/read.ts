@@ -1,10 +1,3 @@
-import {
-  copyJsonValue,
-  isJsonValue,
-  type JsonValue,
-  type TextRange,
-} from "@ykdz/dock-core";
-
 import type {
   Config,
   PluginContext,
@@ -14,6 +7,12 @@ import type {
   ReferencePlugin,
   ReferenceValue,
 } from "./contracts.ts";
+import {
+  copyJsonValue,
+  isJsonValue,
+  type JsonValue,
+  type TextRange,
+} from "./core/index.ts";
 import { MaintenanceError } from "./errors.ts";
 import { ownReference } from "./owned-data.ts";
 import { prepareConfig } from "./resolution.ts";
@@ -26,7 +25,7 @@ type RuntimePlugin = {
 
 type RuntimeReader = (reference: Reference, context: PluginContext) => unknown;
 
-/** 读取给定引用的当前选定值，不要求引用属于配置中的关联。 */
+/** Reads the currently selected value for a reference without requiring it to belong to a binding in config. */
 export async function readReference<
   const Plugins extends readonly ReferencePlugin[],
   const Ref extends ReadableReferenceOf<Plugins>,
@@ -43,13 +42,13 @@ export async function readReference<
   if (candidate === undefined) {
     throw new MaintenanceError(
       "plugin-not-registered",
-      `引用 ${reference.id} 的插件未登记：${reference.pluginId}`,
+      `Plugin is not registered for reference ${reference.id}: ${reference.pluginId}`,
     );
   }
   if (typeof candidate.read !== "function") {
     throw new MaintenanceError(
       "reference-not-readable",
-      `引用 ${reference.id} 的插件 ${reference.pluginId} 不支持读取。`,
+      `Plugin ${reference.pluginId} for reference ${reference.id} does not support reading.`,
     );
   }
 
@@ -66,7 +65,7 @@ export async function readReference<
     const message = error instanceof Error ? error.message : String(error);
     throw new MaintenanceError(
       code,
-      `无法读取引用 ${reference.id}：${message}`,
+      `Failed to read reference ${reference.id}: ${message}`,
       { cause: error },
     );
   }
@@ -85,7 +84,7 @@ function assertReference(value: unknown): asserts value is Reference {
   ) {
     throw new MaintenanceError(
       "invalid-reference",
-      "读取目标必须是有效的引用声明。",
+      "Read target must be a valid reference declaration.",
     );
   }
 }
@@ -103,7 +102,7 @@ function validateReadResult<Value extends JsonValue>(
   ) {
     throw new MaintenanceError(
       "invalid-plugin-read-result",
-      `插件对引用 ${referenceId} 返回了无效读取结果。`,
+      `Plugin returned an invalid read result for reference ${referenceId}.`,
     );
   }
 

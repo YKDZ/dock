@@ -16,11 +16,14 @@ const original = defineConfig({
   baseline: "external-plugin.baseline.json",
 });
 const first = await updateBaseline(original);
-assert(first.status === "updated", "外部插件首次基线应成功。");
+assert(
+  first.status === "updated",
+  "External plugin initial baseline should succeed.",
+);
 const stable = await check(original);
 assert(
   stable.bindings[0]?.consistency === "consistent",
-  "外部插件稳定值应与基线一致。",
+  "External plugin stable value should match the baseline.",
 );
 
 const changedSelection = defineConfig({
@@ -40,7 +43,7 @@ assert(
   definitionChange.bindings[0]?.changes.some(
     (change) => change.kind === "reference-definition",
   ),
-  "选择变化必须报告引用定义变化。",
+  "Selection change must report reference-definition diff.",
 );
 
 const brokenTarget = defineConfig({
@@ -59,7 +62,7 @@ const failed = await check(brokenTarget);
 assert(
   JSON.stringify(failed.bindings[0]?.errors?.map((error) => error.code)) ===
     JSON.stringify(["catalog-missing"]),
-  "插件业务错误必须保留在关联错误中。",
+  "Plugin business errors must be preserved in binding errors.",
 );
 
 function assert(condition: unknown, message: string): asserts condition {
