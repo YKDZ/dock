@@ -234,7 +234,7 @@ void test("marker selection reads content between markers and returns source UTF
       start: source.indexOf("4173"),
       end: source.indexOf("4173") + "4173".length,
     });
-    assert.equal(source.slice(read.range!.start, read.range!.end), read.value);
+    assert.equal(source.slice(read.range.start, read.range.end), read.value);
 
     const report = await check(
       defineConfig({
@@ -555,4 +555,216 @@ void test("batch collection isolates read errors and skips unselected references
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+void test("markdown preflight rejects misspelled, missing, and mistyped text selector fields with reference ID", () => {
+  const sharedMisspelledMatch = {
+    kind: "match",
+    pattern: "port=(\\d+)",
+    gropu: 1,
+  };
+  const invalidSteps: readonly unknown[] = [
+    sharedMisspelledMatch,
+    { kind: "quote" },
+    { kind: "quote", text: 42 },
+    { kind: "quote", text: "ok", extra: true },
+    { kind: "match" },
+    { kind: "match", pattern: 42 },
+    { kind: "match", pattern: "port=(\\d+)", group: -1 },
+    { kind: "match", pattern: "port=(\\d+)", group: 1.5 },
+    { kind: "match", pattern: "port=(\\d+)", group: "1" },
+    { kind: "region" },
+    { kind: "region", name: 42 },
+    { kind: "region", name: "env", extra: true },
+  ];
+
+  for (const [index, step] of invalidSteps.entries()) {
+    const referenceId = `invalid-markdown-step-${index}`;
+    const reference = {
+      id: referenceId,
+      pluginId: markdownPluginId,
+      target: "guide.md",
+      selection: { kind: "markdown", steps: [step] },
+    };
+    assert.throws(
+      () => Reflect.apply(markdown.validate, markdown, [reference]),
+      (error: unknown) =>
+        error instanceof Error && error.message.includes(referenceId),
+      `markdown.validate should reject step ${JSON.stringify(step)} with referenceId`,
+    );
+    assert.throws(
+      () =>
+        Reflect.apply(defineConfig, undefined, [
+          {
+            plugins: [markdown],
+            bindings: [{ id: "invalid-policy", references: [reference] }],
+          },
+        ]),
+      (error: unknown) =>
+        error instanceof Error && error.message.includes(referenceId),
+      `defineConfig should reject step ${JSON.stringify(step)} with referenceId`,
+    );
+  }
+
+  assert.throws(
+    () => markdown.from("guide.md").match("port=(\\d+)", -1),
+    TypeError,
+  );
+  assert.throws(
+    () => markdown.from("guide.md").match("port=(\\d+)", 1.5),
+    TypeError,
+  );
+  assert.throws(
+    () => markdown.from("guide.md").quote(JSON.parse("42")),
+    TypeError,
+  );
+  assert.throws(
+    () => markdown.from("guide.md").region(JSON.parse("42")),
+    TypeError,
+  );
+});
+
+void test("markdown supports quote, match with capture group, and region both directly and scoped after Markdown steps", async () => {
+  const source = [
+    "😀说明",
+    "",
+    "# 开发",
+    "",
+    "只在开发出现。",
+    "",
+    "```env",
+    "#region env",
+    "port=4173",
+    "#endregion env",
+    "```",
+    "",
+    "# 生产",
+    "",
+    "| 键 | 值 |",
+    "| --- | --- |",
+    "| port | 生产端口：5173 |",
+    "",
+    "```env",
+    "#region env",
+    "port=5173",
+    "#endregion env",
+    "```",
+    "",
+  ].join("\n");
+
+  await withDocument(source, async (root, config) => {
+    const directQuote = markdown
+      .from("guide.md")
+      .quote("只在开发出现。")
+      .reference("direct-quote");
+    const directMatch = markdown
+      .from("guide.md")
+      .match("生产端口：(\\d+)", 1)
+      .reference("direct-match");
+    const scopedRegionMatch = markdown
+      .from("guide.md")
+      .section("生产")
+      .region("env")
+      .match("port=(\\d+)", 1)
+      .reference("scoped-region-match");
+    const tableCellMatch = markdown
+      .from("guide.md")
+      .section("生产")
+      .tableCell({ column: "值", row: { column: "键", value: "port" } })
+      .match("生产端口：(\\d+)", 1)
+      .reference("table-cell-match");
+
+    const quoteRead = await readReference(config, directQuote);
+    assert.equal(quoteRead.value, "只在开发出现。");
+    assert.deepEqual(quoteRead.range, {
+      path: "guide.md",
+      start: source.indexOf("只在开发出现。"),
+      end: source.indexOf("只在开发出现。") + "只在开发出现。".length,
+    });
+
+    const matchRead = await readReference(config, directMatch);
+    assert.equal(matchRead.value, "5173");
+    assert.deepEqual(matchRead.range, {
+      path: "guide.md",
+      start: source.indexOf("5173"),
+      end: source.indexOf("5173") + 4,
+    });
+
+    const prodSectionOffset = source.indexOf("# 生产");
+    const scopedPortOffset = source.indexOf(
+      "5173",
+      source.indexOf("#region env", prodSectionOffset),
+    );
+    const scopedRead = await readReference(config, scopedRegionMatch);
+    assert.equal(scopedRead.value, "5173");
+    assert.deepEqual(scopedRead.range, {
+      path: "guide.md",
+      start: scopedPortOffset,
+      end: scopedPortOffset + 4,
+    });
+
+    const cellRead = await readReference(config, tableCellMatch);
+    assert.equal(cellRead.value, "5173");
+    assert.deepEqual(cellRead.range, matchRead.range);
+
+    const directRegion = markdown
+      .from("guide.md")
+      .section("开发")
+      .region("env")
+      .reference("dev-region");
+    const report = await check(
+      defineConfig({
+        root,
+        plugins: [markdown],
+        bindings: [
+          binding("markdown-text-steps", [
+            directQuote,
+            directMatch,
+            scopedRegionMatch,
+            directRegion,
+          ]),
+        ],
+      }),
+    );
+    const checked = report.bindings[0];
+    assert.ok(checked && "current" in checked);
+    assert.equal(
+      checked.current.references["dev-region"]?.value,
+      "port=4173\n",
+    );
+    assert.equal(
+      checked.current.references["scoped-region-match"]?.value,
+      "5173",
+    );
+
+    await assert.rejects(
+      readReference(
+        config,
+        markdown
+          .from("guide.md")
+          .section("生产")
+          .quote("只在开发出现。")
+          .reference("out-of-section"),
+      ),
+      { code: "missing-selection" },
+    );
+
+    await assert.rejects(
+      readReference(
+        config,
+        markdown
+          .from("guide.md")
+          .section("不存在的章节")
+          .quote("只在开发出现。")
+          .reference("missing-section"),
+      ),
+      (error: unknown) =>
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === "missing-selection" &&
+        error instanceof Error &&
+        /No matching .*heading/u.test(error.message),
+    );
+  });
 });
