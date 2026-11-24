@@ -1,0 +1,12 @@
+{
+  "compilerOptions": {
+    "exactOptionalPropertyTypes": true,
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "noEmit": true,
+    "strict": true,
+    "target": "ES2024",
+    "types": []
+  },
+  "include": ["text-read-positive.mts", "text-read-negative.mts"]
+}

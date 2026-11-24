@@ -3,11 +3,11 @@ import type {
   MemberDiscoveryCompleteness,
   ReferenceMemberResult,
   TextRange,
-} from "@ykdz/dock-core";
+} from "./core/index.ts";
 
-export type { JsonValue, TextRange } from "@ykdz/dock-core";
+export type { JsonValue, TextRange } from "./core/index.ts";
 
-/** 显式记录的声明出处；它与引用目标和配置加载入口各自独立。 */
+/** Explicitly recorded declaration source, independent of reference target and config entry. */
 export type DeclarationSource = string | URL;
 
 export type Reference<
@@ -23,7 +23,7 @@ export type Reference<
   readonly selection?: Selection;
   readonly note?: string;
   readonly declaredAt?: DeclarationSource;
-  /** 仅供类型推导，不参与运行时定义或领域比较。 */
+  /** Used only for type inference; excluded from runtime definitions and domain comparison. */
   readonly __value?: Value;
 };
 
@@ -47,20 +47,20 @@ export type PluginResult<Value extends JsonValue = JsonValue> =
       readonly range?: TextRange;
     };
 
-/** 插件成员结果沿用 core 的稳定身份与错误形状，并约束成功值类型。 */
+/** Plugin member results reuse core's stable identity and error shape while constraining success value types. */
 export type PluginMemberResult<Value extends JsonValue = JsonValue> =
   | { readonly id: string; readonly value: Value }
   | Extract<ReferenceMemberResult, { readonly error: unknown }>;
 
 export type PluginContext = { readonly root: string };
 
-/** 插件明确提供的声明说明或操作诊断。 */
+/** Declaration description or operational diagnostics explicitly provided by a plugin. */
 export type PluginInformation = {
   readonly data: JsonValue;
   readonly text: readonly string[];
 };
 
-/** 一次批量采集收到的完整声明、本次选定引用和可选准备数据。 */
+/** Complete plugin declarations, currently selected references, and optional prepared data for a batch collection. */
 export type PluginRequest<
   Ref extends Reference = Reference,
   Prepared extends JsonValue = JsonValue,
@@ -70,11 +70,11 @@ export type PluginRequest<
   readonly prepared?: Prepared;
 };
 
-/** 一条结果由插件给出，宿主按当前插件调用补上并核对引用归属。 */
+/** A single result returned by a plugin; the host attaches and verifies reference ownership per plugin call. */
 export type PluginReferenceResult<Value extends JsonValue = JsonValue> =
   PluginResult<Value> & { readonly referenceId: string };
 
-/** 批量采集保持逐引用结果，诊断与事实分别交接。 */
+/** Batch collection keeps per-reference results while handing off diagnostics and facts separately. */
 export type PluginBatchResult<Value extends JsonValue = JsonValue> = {
   readonly results: readonly PluginReferenceResult<Value>[];
   readonly diagnostics?: PluginInformation;
@@ -87,7 +87,7 @@ type BivariantHandler<Arguments extends unknown[], Result> = {
 export type Awaitable<Value> = Value | Promise<Value>;
 
 /**
- * 类别中立的引用插件。目标解释、执行和类别诊断均由插件自己拥有。
+ * Category-neutral reference plugin. Target interpretation, execution, and category diagnostics belong to the plugin itself.
  */
 export interface ReferencePlugin<
   PluginId extends string = string,
@@ -101,17 +101,17 @@ export interface ReferencePlugin<
     [request: PluginRequest<Ref, Prepared>, context: PluginContext],
     Awaitable<PluginBatchResult<Value>>
   >;
-  /** 按插件公开语义提供引用的一个文件目标；不得读取文件内容。 */
+  /** Provides a single file target path for a reference by plugin semantics; must not read file contents. */
   readonly fileInfo?: BivariantHandler<
     [reference: Ref, context: PluginContext],
     string | URL
   >;
-  /** 对插件的完整引用声明执行一次预检，并可返回本次独立准备数据。 */
+  /** Runs one preflight pass over all references of a plugin and may return isolated prepared data. */
   readonly prepare?: BivariantHandler<
     [references: readonly Ref[], context: PluginContext],
     Awaitable<Prepared | undefined>
   >;
-  /** 根据完整声明、选定范围及本次准备数据提供查看信息。 */
+  /** Provides inspection information from complete declarations, selected scope, and prepared data. */
   readonly describe?: BivariantHandler<
     [request: PluginRequest<Ref, Prepared>, context: PluginContext],
     Awaitable<PluginInformation>
@@ -123,7 +123,7 @@ export type PluginReadResult<Value extends JsonValue = JsonValue> = {
   readonly range?: TextRange;
 };
 
-/** 具备稳定引用读取能力的插件。 */
+/** Plugin capable of reading a stable reference directly. */
 export interface ReadableReferencePlugin<
   PluginId extends string = string,
   Ref extends Reference<PluginId> = Reference<PluginId>,
@@ -162,7 +162,7 @@ export type RegisteredReference<Plugins extends readonly ReferencePlugin[]> =
 export type ReferenceValue<Ref extends Reference = Reference> =
   Ref extends Reference<string, string, JsonValue, infer Value> ? Value : never;
 
-/** 静态身份都已收窄时要求插件 ID 与引用处理器 ID 精确一致。 */
+/** Requires plugin ID and reference pluginId to match exactly when both static identities are narrowed. */
 export type PluginIdentityMatches<
   PluginId extends string,
   Ref extends Reference,

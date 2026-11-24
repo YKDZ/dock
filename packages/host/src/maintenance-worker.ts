@@ -21,7 +21,7 @@ async function run(): Promise<WorkerMessage> {
   if (!new Set([".ts", ".mts", ".js", ".mjs"]).has(extname(input.configPath))) {
     throw new MaintenanceError(
       "config-extension-unsupported",
-      `配置入口 ${input.configPath} 必须使用 .ts、.mts、.js 或 .mjs 扩展名。`,
+      `Config entry ${input.configPath} must use a .ts, .mts, .js, or .mjs extension.`,
     );
   }
   let loaded: Record<string, unknown>;
@@ -37,14 +37,14 @@ async function run(): Promise<WorkerMessage> {
       : "config-load-failed";
     throw new MaintenanceError(
       code,
-      `无法加载配置入口 ${input.configPath}：${message}`,
+      `Failed to load config entry ${input.configPath}: ${message}`,
       { cause: error },
     );
   }
   if (!Object.hasOwn(loaded, "default")) {
     throw new MaintenanceError(
       "config-export-missing",
-      `配置入口 ${input.configPath} 必须提供 default 导出。`,
+      `Config entry ${input.configPath} must provide a default export.`,
     );
   }
 
@@ -63,7 +63,7 @@ async function run(): Promise<WorkerMessage> {
     const message = error instanceof Error ? error.message : String(error);
     throw new MaintenanceError(
       "maintenance-failed",
-      `配置入口 ${input.configPath} 的维护操作失败：${message}`,
+      `Maintenance operation failed for config entry ${input.configPath}: ${message}`,
       { cause: error },
     );
   }
@@ -79,7 +79,7 @@ function hasCode(error: unknown, code: string): boolean {
 }
 
 if (parentPort === null) {
-  throw new Error("配置维护 Worker 缺少消息端口。");
+  throw new Error("Config maintenance worker is missing a message port.");
 }
 
 try {

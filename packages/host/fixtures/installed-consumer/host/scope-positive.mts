@@ -33,7 +33,7 @@ const scopePlugin = definePlugin({
   describe(request: PluginRequest<ScopeReference, Prepared>) {
     return {
       data: { selected: request.selectedReferences.map(({ id }) => id) },
-      text: [request.prepared?.paths.join("、") ?? ""],
+      text: [request.prepared?.paths.join(", ") ?? ""],
     };
   },
   collect(
@@ -43,7 +43,7 @@ const scopePlugin = definePlugin({
       results: request.selectedReferences.map((reference) => ({
         referenceId: reference.id,
         kind: "value",
-        value: request.prepared?.paths.join("、") ?? reference.target.path,
+        value: request.prepared?.paths.join(", ") ?? reference.target.path,
       })),
     };
   },

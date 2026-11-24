@@ -1,0 +1,163 @@
+import {
+  binding,
+  createReference,
+  defineConfig,
+  definePlugin,
+  file,
+  type PluginBatchResult,
+  type PluginRequest,
+  type PluginResult,
+  type Reference,
+  type ReferenceValue,
+  type ReferencePlugin,
+} from "@ykdz/dock";
+
+import {
+  catalogPlugin,
+  catalogReference,
+  type CatalogValue,
+} from "./external-plugin.mjs";
+
+type ChangelogReference = Reference<
+  "fixture-plugin",
+  "changelog",
+  { readonly path: string },
+  string
+>;
+
+const fixturePlugin: ReferencePlugin<
+  "fixture-plugin",
+  ChangelogReference,
+  string
+> = definePlugin({
+  id: "fixture-plugin",
+  validate(): void {},
+  fileInfo(reference): string {
+    return reference.target.path;
+  },
+  prepare(references) {
+    for (const reference of references) {
+      if (reference.target.path.length === 0) {
+        throw new TypeError("Path cannot be empty.");
+      }
+    }
+    return undefined;
+  },
+  collect(
+    request: PluginRequest<ChangelogReference>,
+    context,
+  ): PluginBatchResult<string> {
+    return {
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: `${context.root}/${reference.target.path}`,
+      })),
+    };
+  },
+});
+
+type DirectPluginReference = Reference<
+  "direct-plugin",
+  "direct-document",
+  string,
+  string
+>;
+const directPlugin = {
+  id: "direct-plugin",
+  validate(reference: DirectPluginReference): void {
+    void reference;
+  },
+  collect(
+    request: PluginRequest<DirectPluginReference>,
+  ): PluginBatchResult<string> {
+    return {
+      results: request.selectedReferences.map((reference) => ({
+        referenceId: reference.id,
+        kind: "value",
+        value: reference.target,
+      })),
+    };
+  },
+  fileInfo(reference: DirectPluginReference): string {
+    return reference.target;
+  },
+  prepare(references: readonly DirectPluginReference[]) {
+    for (const reference of references) {
+      if (reference.target.length === 0) {
+        throw new TypeError("Target cannot be empty.");
+      }
+    }
+    return undefined;
+  },
+};
+const directDocument = createReference<
+  "direct-plugin",
+  "direct-document",
+  string,
+  string
+>("direct-plugin", "direct-document", "document fact");
+const directConfig = defineConfig({
+  plugins: [directPlugin],
+  bindings: [binding("direct-document", [directDocument])],
+});
+void directConfig;
+
+const changelog = createReference<
+  "fixture-plugin",
+  "changelog",
+  { readonly path: string },
+  string
+>(
+  "fixture-plugin",
+  "changelog",
+  { path: "CHANGELOG.md" },
+  {
+    declaredAt: new URL("./dock.config.mjs", import.meta.url),
+  },
+);
+
+const typedCatalog = catalogReference(
+  "catalog-type-contract",
+  { kind: "catalog", path: "catalog.json" },
+  { field: "title", locale: "zh" },
+);
+declare const catalogValue: ReferenceValue<typeof typedCatalog>;
+const exactCatalogValue: CatalogValue = catalogValue;
+const exactReferenceValue: ReferenceValue<typeof typedCatalog> =
+  exactCatalogValue;
+void exactReferenceValue;
+
+const typedCollection: PluginResult<string> = {
+  kind: "collection",
+  collection: {
+    completeness: "partial",
+    members: [
+      { id: "chapter-1", value: "Chapter 1" },
+      {
+        id: "chapter-2",
+        error: { code: "unavailable", message: "Temporarily unavailable." },
+      },
+    ],
+  },
+};
+void typedCollection;
+
+export const config = defineConfig({
+  plugins: [file, fixturePlugin, catalogPlugin],
+  bindings: [
+    binding("maintained-documents", [
+      file.from("guide.md").reference("guide"),
+      changelog,
+    ]),
+    binding("typed-catalog", [
+      catalogReference(
+        "catalog",
+        { kind: "catalog", path: "catalog.json" },
+        { field: "title", locale: "zh" },
+      ),
+    ]),
+  ],
+});
+
+export const emptyConfig = defineConfig({ plugins: [], bindings: [] });

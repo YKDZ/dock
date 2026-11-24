@@ -36,7 +36,7 @@ function fixtureReference(id: string, path = id): FixtureReference {
   >("fixture-plugin", id, { path });
 }
 
-void test("查看与检查共享批量契约并只在说明中公开明确选择的信息", async () => {
+void test("inspect and check share the batch contract and expose only explicit descriptions", async () => {
   const calls: PluginRequest<FixtureReference, Prepared>[] = [];
   let collections = 0;
   const plugin = definePlugin({
@@ -51,7 +51,7 @@ void test("查看与检查共享批量契约并只在说明中公开明确选择
           preparedToken: request.prepared?.token ?? "",
           selected: request.selectedReferences.map(({ id }) => id),
         },
-        text: ["目录已准备"],
+        text: ["Catalog prepared"],
       };
     },
     collect(
@@ -96,7 +96,7 @@ void test("查看与检查共享批量契约并只在说明中公开明确选择
       selectedReferences: ["first"],
       description: {
         data: { preparedToken: "prepared-2", selected: ["first"] },
-        text: ["目录已准备"],
+        text: ["Catalog prepared"],
       },
     },
   ]);
@@ -121,7 +121,7 @@ void test("查看与检查共享批量契约并只在说明中公开明确选择
   assert.deepEqual(report.pluginErrors, []);
 });
 
-void test("所有插件预检完成后并发采集且单个失败保留其他插件事实", async () => {
+void test("plugins collect concurrently after all preflights finish and single failures preserve other plugin facts", async () => {
   type FirstReference = Reference<
     "first-plugin",
     "first",
@@ -211,7 +211,7 @@ void test("所有插件预检完成后并发采集且单个失败保留其他插
   assert.equal(failed.errors[0]?.code, "plugin-failed");
   assert.equal(
     failed.errors[0]?.message,
-    "插件 first-plugin 批量采集失败：first plugin failed",
+    "Plugin first-plugin batch collection failed: first plugin failed",
   );
   assert.ok(survived && "current" in survived);
   assert.equal(
@@ -220,7 +220,7 @@ void test("所有插件预检完成后并发采集且单个失败保留其他插
   );
 });
 
-void test("插件抛出无法转成文本的值时仍隔离失败并保留其他插件事实", async () => {
+void test("non-stringifiable thrown values still isolate failure and preserve other plugin facts", async () => {
   type UnknownErrorReference = Reference<
     "unknown-error-plugin",
     "unprintable",
@@ -281,13 +281,13 @@ void test("插件抛出无法转成文本的值时仍隔离失败并保留其他
   assert.equal(unknownFailure.errors[0]?.code, "plugin-failed");
   assert.equal(
     unknownFailure.errors[0]?.message,
-    "插件 unknown-error-plugin 批量采集失败：错误对象无法转换为文本",
+    "Plugin unknown-error-plugin batch collection failed: Error value cannot be converted to string",
   );
   assert.ok(goodResult && "current" in goodResult);
   assert.equal(goodResult.current.references.good?.value, "good fact");
 });
 
-void test("逐引用缺失、重复、非法与越界批量结果按归属隔离", async () => {
+void test("missing, duplicate, invalid, and out-of-scope per-reference batch results are isolated by ownership", async () => {
   type FaultReference = Reference<
     "fault-plugin",
     string,
@@ -358,7 +358,7 @@ void test("逐引用缺失、重复、非法与越界批量结果按归属隔离
   ]);
 });
 
-void test("非法诊断单独报告，不阻止有效事实更新基线", async () => {
+void test("invalid diagnostics are reported separately without blocking baseline updates for valid facts", async () => {
   const root = await mkdtemp(join(tmpdir(), "dock-plugin-diagnostic-"));
   const plugin = definePlugin({
     id: "fixture-plugin",
@@ -398,7 +398,7 @@ void test("非法诊断单独报告，不阻止有效事实更新基线", async 
         pluginId: "fixture-plugin",
         code: "invalid-plugin-diagnostics",
         message:
-          "插件 fixture-plugin 的诊断格式无效：值必须是无循环、无特殊属性的普通 JSON 数据。",
+          "Plugin fixture-plugin returned invalid diagnostics format: Value must be plain JSON data without cycles or special properties.",
       },
     ]);
     assert.match(
@@ -410,7 +410,7 @@ void test("非法诊断单独报告，不阻止有效事实更新基线", async 
   }
 });
 
-void test("操作在异步预检前复制引用输入与插件准备结果", async () => {
+void test("operations copy reference inputs and plugin prepared results before async preflight", async () => {
   const target = { path: "before" };
   const reference = createReference<
     "fixture-plugin",
@@ -466,7 +466,7 @@ void test("操作在异步预检前复制引用输入与插件准备结果", asy
   );
 });
 
-void test("成员同时含事实与错误时保留采集失败并拒绝基线更新", async () => {
+void test("members containing both value and error preserve collection failure and reject baseline update", async () => {
   const root = await mkdtemp(join(tmpdir(), "dock-member-error-batch-"));
   const plugin = definePlugin({
     id: "fixture-plugin",
@@ -484,7 +484,10 @@ void test("成员同时含事实与错误时保留采集失败并拒绝基线更
               {
                 id: "member",
                 value: 1,
-                error: { code: "member-failed", message: "成员采集失败" },
+                error: {
+                  code: "member-failed",
+                  message: "Member collection failed",
+                },
               },
             ],
           },

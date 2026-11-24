@@ -7,13 +7,13 @@ import {
   versionCapability,
   text,
 } from "@ykdz/cli-contract";
+import { z } from "zod";
+
 import type {
   BaselineUpdateIssue,
   BindingCheckResult,
   TextRange,
-} from "@ykdz/dock-core";
-import { z } from "zod";
-
+} from "./core/index.ts";
 import {
   check,
   inspect,

@@ -1,4 +1,4 @@
-export { canonicalJson, copyJsonValue, isJsonValue } from "@ykdz/dock-core";
+export { canonicalJson, copyJsonValue, isJsonValue } from "./core/index.ts";
 export type {
   Baseline,
   BindingChange,
@@ -9,7 +9,7 @@ export type {
   ReferenceResult,
   TextRange,
   JsonValue,
-} from "@ykdz/dock-core";
+} from "./core/index.ts";
 export type {
   Binding,
   Config,
@@ -51,3 +51,22 @@ export type {
   MaintenanceConfig,
 } from "./maintenance.ts";
 export { readReference } from "./read.ts";
+export {
+  file,
+  filePluginId,
+  selectTextRange,
+  TextSelectionError,
+} from "./file/index.ts";
+export type {
+  FileTextSelection,
+  FileExistsSelection,
+  FileSelection,
+  FileReference,
+  FileReferenceBuilder,
+  FileReferenceLocation,
+  FileTextReferenceBuilder,
+  FileExistsReferenceBuilder,
+  FileReferenceOptions,
+  FilePlugin,
+  TextSelectionStep,
+} from "./file/index.ts";

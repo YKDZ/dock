@@ -1,16 +1,6 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
-import {
-  check as checkCore,
-  resolveCheckScope,
-  type Baseline,
-  type BindingDefinition,
-  type CheckContext,
-  type JsonValue,
-  type ReferenceDefinition,
-} from "@ykdz/dock-core";
-
 import { normalizeConfig, type NormalizedReference } from "./authoring.ts";
 import type {
   Config,
@@ -19,6 +9,15 @@ import type {
   PluginRequest,
   ReferencePlugin,
 } from "./contracts.ts";
+import {
+  check as checkCore,
+  resolveCheckScope,
+  type Baseline,
+  type BindingDefinition,
+  type CheckContext,
+  type JsonValue,
+  type ReferenceDefinition,
+} from "./core/index.ts";
 import { MaintenanceError } from "./errors.ts";
 import { ownJsonValue, ownPluginInformation } from "./owned-data.ts";
 import {
@@ -36,7 +35,7 @@ export type ResolvedPlugin = {
   readonly description?: PluginInformation;
 };
 
-/** 查看结果包含完整声明、历史状态和各插件明确公开的说明。 */
+/** Inspection result containing complete declarations, historical baseline state, and plugin descriptions. */
 export type ResolvedMaintenance = {
   readonly context: CheckContext & {
     readonly declarationCompleteness: "complete";
@@ -46,7 +45,7 @@ export type ResolvedMaintenance = {
   readonly baselinePath: string;
   readonly configPath?: string;
   readonly plugins: readonly ResolvedPlugin[];
-  /** 完整当前声明的直接文件目标，不表示传递依赖或文件已经存在。 */
+  /** Direct file targets from complete current declarations; does not imply transitive dependencies or file existence. */
   readonly files: readonly {
     readonly path: string;
     readonly references: readonly string[];
@@ -89,7 +88,7 @@ type PreparedPlugin = {
   readonly prepared?: JsonValue;
 };
 
-/** 三种维护操作共用完整预检、文件定位、基线读取及范围解释。 */
+/** All three maintenance operations share full preflight, file target resolution, baseline loading, and scope resolution. */
 export async function resolveMaintenance(
   value: unknown,
   defaultRoot: string,
@@ -258,7 +257,7 @@ async function preparePlugins(
       } catch (error) {
         throw new MaintenanceError(
           "plugin-prepare-failed",
-          `插件 ${plugin.id} 完整配置预检失败：${errorMessage(error)}`,
+          `Plugin ${plugin.id} full-config preflight failed: ${errorMessage(error)}`,
           { cause: error },
         );
       }
@@ -285,7 +284,7 @@ async function describePlugin(
   } catch (error) {
     throw new MaintenanceError(
       "plugin-description-invalid",
-      `插件 ${preparedPlugin.plugin.id} 返回了无效查看说明：${errorMessage(error)}`,
+      `Plugin ${preparedPlugin.plugin.id} returned an invalid inspection description: ${errorMessage(error)}`,
       { cause: error },
     );
   }
@@ -353,7 +352,7 @@ function currentFileInfo(config: PreparedConfig): Map<string, string | null> {
     if (plugin === undefined) {
       throw new MaintenanceError(
         "plugin-not-registered",
-        `引用 ${reference.id} 的插件未登记：${reference.pluginId}`,
+        `Plugin is not registered for reference ${reference.id}: ${reference.pluginId}`,
       );
     }
     if (plugin.fileInfo === undefined) {
@@ -371,7 +370,7 @@ function currentFileInfo(config: PreparedConfig): Map<string, string | null> {
     } catch (error) {
       throw new MaintenanceError(
         "plugin-file-info-failed",
-        `插件 ${plugin.id} 无法说明引用 ${reference.id} 的文件目标：${errorMessage(error)}`,
+        `Plugin ${plugin.id} failed to describe file target for reference ${reference.id}: ${errorMessage(error)}`,
         { cause: error },
       );
     }
@@ -410,7 +409,7 @@ async function readBaseline(path: string): Promise<Baseline | undefined> {
     if (hasCode(error, "ENOENT")) return undefined;
     throw new MaintenanceError(
       "baseline-read-failed",
-      `无法读取基线 ${path}：${errorMessage(error)}`,
+      `Failed to read baseline ${path}: ${errorMessage(error)}`,
       { cause: error },
     );
   }
@@ -421,7 +420,7 @@ async function readBaseline(path: string): Promise<Baseline | undefined> {
   } catch (error) {
     throw new MaintenanceError(
       "baseline-invalid",
-      `基线 ${path} 不是有效 JSON：${errorMessage(error)}`,
+      `Baseline ${path} is not valid JSON: ${errorMessage(error)}`,
       { cause: error },
     );
   }
@@ -435,7 +434,7 @@ async function readBaseline(path: string): Promise<Baseline | undefined> {
   } catch (error) {
     throw new MaintenanceError(
       "baseline-invalid",
-      `基线 ${path} 格式无效：${errorMessage(error)}`,
+      `Invalid baseline format at ${path}: ${errorMessage(error)}`,
       { cause: error },
     );
   }

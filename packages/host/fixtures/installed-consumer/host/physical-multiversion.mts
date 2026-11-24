@@ -48,13 +48,22 @@ const config = defineConfig({
 
 resetCollectionCount();
 const updated = await updateBaseline(config);
-assert(updated.status === "updated", "同版本多实例基线应成功。");
-assert(readCollectionCount() === 1, "同一插件每次维护只接收一次批量采集。");
+assert(
+  updated.status === "updated",
+  "Same-version multi-instance baseline should succeed.",
+);
+assert(
+  readCollectionCount() === 1,
+  "Same plugin receives only one batch collection per maintenance run.",
+);
 const current = await check(config);
-assert(readCollectionCount() === 2, "下一次维护重新采集当前事实。");
+assert(
+  readCollectionCount() === 2,
+  "Subsequent maintenance re-collects current facts.",
+);
 assert(
   current.bindings.every((result) => result.consistency === "consistent"),
-  "同版本多实例当前报告应一致。",
+  "Same-version multi-instance current report should be consistent.",
 );
 
 const conflictingReference = createReference<
@@ -77,10 +86,15 @@ try {
 }
 assert(
   conflict instanceof Error &&
-    /引用身份 shared-reference 对应多个不同定义/.test(conflict.message),
-  "冲突定义应在配置组装时拒绝。",
+    /Reference ID shared-reference maps to multiple distinct definitions/.test(
+      conflict.message,
+    ),
+  "Conflicting definitions must be rejected during config assembly.",
 );
-assert(readCollectionCount() === 2, "冲突必须在任何采集前拒绝。");
+assert(
+  readCollectionCount() === 2,
+  "Conflicts must be rejected before any collection.",
+);
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(message);

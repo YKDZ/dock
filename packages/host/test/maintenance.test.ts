@@ -15,7 +15,7 @@ import {
   type Reference,
 } from "@ykdz/dock";
 
-void test("JSON 键顺序和备注不制造引用身份冲突", () => {
+void test("JSON key order and notes do not cause reference ID conflicts", () => {
   type SharedReference = Reference<
     "fixture-plugin",
     "shared-reference",
@@ -47,7 +47,7 @@ void test("JSON 键顺序和备注不制造引用身份冲突", () => {
     "fixture-plugin",
     "shared-reference",
     { left: 1, right: 2 },
-    { note: "第一份备注" },
+    { note: "First note" },
   );
   const second = createReference<
     "fixture-plugin",
@@ -58,7 +58,7 @@ void test("JSON 键顺序和备注不制造引用身份冲突", () => {
     "fixture-plugin",
     "shared-reference",
     { right: 2, left: 1 },
-    { note: "另一份备注" },
+    { note: "Another note" },
   );
 
   const config = defineConfig({
@@ -71,7 +71,7 @@ void test("JSON 键顺序和备注不制造引用身份冲突", () => {
   assert.equal(config.bindings.length, 2);
 });
 
-void test("配置路径维护使用新的模块图读取导入声明", async () => {
+void test("config path maintenance uses a fresh module graph to read imported declarations", async () => {
   const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
   const cacheDirectory = join(packageDirectory, "node_modules", ".cache");
   await mkdir(cacheDirectory, { recursive: true });
@@ -87,8 +87,8 @@ void test("配置路径维护使用新的模块图读取导入声明", async () 
       packageAlias,
       process.platform === "win32" ? "junction" : "dir",
     );
-    await writeFile(join(root, "first.md"), "第一份\n", "utf8");
-    await writeFile(join(root, "second.md"), "第二份\n", "utf8");
+    await writeFile(join(root, "first.md"), "First edition\n", "utf8");
+    await writeFile(join(root, "second.md"), "Second edition\n", "utf8");
     await writeFile(declarationsPath, 'export const target = "first.md";\n');
     await writeFile(
       configPath,
