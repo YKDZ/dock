@@ -30,6 +30,11 @@
       "types": "./dist/core/index.d.ts",
       "default": "./dist/core/index.js"
     },
+    "./node-test": {
+      "source": "./src/node-test/index.ts",
+      "types": "./dist/node-test/index.d.ts",
+      "default": "./dist/node-test/index.js"
+    },
     "./cli": "./dist/cli.js"
   },
   "publishConfig": {
