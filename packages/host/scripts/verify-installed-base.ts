@@ -41,6 +41,7 @@ type MaintenanceReport = {
   }[];
   readonly bindings: readonly {
     readonly bindingId: string;
+    readonly consistency?: string;
     readonly current?: {
       readonly references: Record<
         string,
@@ -56,12 +57,20 @@ type MaintenanceReport = {
     };
     readonly errors?: readonly {
       readonly referenceId?: string;
+      readonly memberId?: string;
       readonly code: string;
       readonly message?: string;
     }[];
     readonly changes?: readonly {
       readonly kind: string;
       readonly referenceId: string;
+      readonly memberChanges?: readonly {
+        readonly memberId: string;
+        readonly beforePresent: boolean;
+        readonly afterPresent: boolean;
+        readonly before?: unknown;
+        readonly after?: unknown;
+      }[];
     }[];
   }[];
 };
@@ -516,6 +525,10 @@ async function verifyFilePublicAndCurrentConfig(
 async function verifyCliAndStaticPlugins(scenario: string): Promise<void> {
   const bin = dockBin(scenario);
   await verifyCliContractSmoke(bin, join(scenario, "cli-contract"));
+  await verifyInstalledErrorWithConfirmedChange(
+    bin,
+    join(scenario, "error-with-change"),
+  );
   await verifyInstalledFileSmoke(bin, join(scenario, "file-smoke"));
   await verifyInstalledMarkdownSmoke(bin, join(scenario, "markdown-smoke"));
   await verifyInstalledTypeScriptSmoke(bin, join(scenario, "ts-smoke"));
@@ -769,6 +782,354 @@ async function verifyCliContractSmoke(bin: string, dir: string): Promise<void> {
   const emptyEnvelope = parseEnvelope(emptyUpdateStructured.stdout);
   assert.equal(emptyEnvelope.variant, "rejected");
   assert.equal(emptyEnvelope.data?.errors?.[0]?.code, "empty-selection");
+
+  // Run a migrated consumer script following the upgrade guide across both JS updateBaseline() and CLI structured output.
+  await writeFile(
+    join(dir, "migrated-update-consumer.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { spawnSync } from "node:child_process";',
+      'import { readFile } from "node:fs/promises";',
+      'import { updateBaseline } from "@ykdz/dock";',
+      'import { updateBaseline as updateCoreBaseline } from "@ykdz/dock/core";',
+      "",
+      "function summarizeUpdateOutcome(status, report, topLevelErrors) {",
+      "  const bindingErrors = report.bindings.flatMap((entry) =>",
+      '    "errors" in entry && Array.isArray(entry.errors)',
+      "      ? entry.errors.map((error) => ({",
+      "          bindingId: entry.bindingId,",
+      "          referenceId: error.referenceId,",
+      "          memberId: error.memberId,",
+      "          code: error.code,",
+      "        }))",
+      "      : [],",
+      "  );",
+      "  return {",
+      "    status,",
+      "    bindingErrors,",
+      "    operationErrors: topLevelErrors,",
+      "  };",
+      "}",
+      "",
+      'const baselineBytes = await readFile("dock.baseline.json");',
+      'const jsMissing = await updateBaseline("dock.config.mjs");',
+      'assert.equal(jsMissing.status, "rejected");',
+      "const jsMissingSummary = summarizeUpdateOutcome(",
+      "  jsMissing.status,",
+      "  jsMissing.report,",
+      "  jsMissing.errors,",
+      ");",
+      "assert.deepEqual(jsMissingSummary.bindingErrors, [",
+      '  { bindingId: "cli-policy", referenceId: "fact-ref", memberId: undefined, code: "missing-fact" },',
+      "]);",
+      "assert.deepEqual(jsMissingSummary.operationErrors, []);",
+      'assert.deepEqual(await readFile("dock.baseline.json"), baselineBytes);',
+      "",
+      `const cliMissing = spawnSync(${JSON.stringify(bin)},`,
+      '  ["baseline", "update", "--config", "dock.config.mjs", "--output", "structured"],',
+      '  { encoding: "utf8" },',
+      ");",
+      "assert.equal(cliMissing.error, undefined);",
+      "assert.equal(cliMissing.status, 1, cliMissing.stderr);",
+      "const cliMissingEnvelope = JSON.parse(cliMissing.stdout);",
+      "const cliMissingSummary = summarizeUpdateOutcome(",
+      "  cliMissingEnvelope.variant,",
+      "  cliMissingEnvelope.data.report,",
+      "  cliMissingEnvelope.data.errors,",
+      ");",
+      'assert.equal(cliMissingSummary.status, "rejected");',
+      "assert.deepEqual(cliMissingSummary.bindingErrors, [",
+      '  { bindingId: "cli-policy", referenceId: "fact-ref", memberId: undefined, code: "missing-fact" },',
+      "]);",
+      "assert.deepEqual(cliMissingSummary.operationErrors, []);",
+      'assert.deepEqual(await readFile("dock.baseline.json"), baselineBytes);',
+      "",
+      `const cliEmpty = spawnSync(${JSON.stringify(bin)},`,
+      '  ["baseline", "update", "--config", "empty-config/empty.config.mjs", "--output", "structured"],',
+      '  { encoding: "utf8" },',
+      ");",
+      "assert.equal(cliEmpty.error, undefined);",
+      "assert.equal(cliEmpty.status, 1, cliEmpty.stderr);",
+      "const cliEmptyEnvelope = JSON.parse(cliEmpty.stdout);",
+      "const cliEmptySummary = summarizeUpdateOutcome(",
+      "  cliEmptyEnvelope.variant,",
+      "  cliEmptyEnvelope.data.report,",
+      "  cliEmptyEnvelope.data.errors,",
+      ");",
+      'assert.equal(cliEmptySummary.status, "rejected");',
+      "assert.deepEqual(cliEmptySummary.bindingErrors, []);",
+      "assert.equal(cliEmptySummary.operationErrors.length, 1);",
+      'assert.equal(cliEmptySummary.operationErrors[0]?.code, "empty-selection");',
+      'assert.deepEqual(await readFile("dock.baseline.json"), baselineBytes);',
+      "",
+      'const jsEmpty = await updateBaseline("empty-config/empty.config.mjs");',
+      'assert.equal(jsEmpty.status, "rejected");',
+      "const jsEmptySummary = summarizeUpdateOutcome(",
+      "  jsEmpty.status,",
+      "  jsEmpty.report,",
+      "  jsEmpty.errors,",
+      ");",
+      "assert.deepEqual(jsEmptySummary.bindingErrors, []);",
+      "assert.equal(jsEmptySummary.operationErrors.length, 1);",
+      'assert.equal(jsEmptySummary.operationErrors[0]?.code, "empty-selection");',
+      "",
+      'const parsedSavedBaseline = JSON.parse(baselineBytes.toString("utf8"));',
+      "const coreEmptyScope = updateCoreBaseline({",
+      "  references: [],",
+      "  bindings: [],",
+      "  facts: [],",
+      "  baseline: parsedSavedBaseline,",
+      "  scope: [],",
+      "});",
+      'assert.equal(coreEmptyScope.status, "rejected");',
+      "const coreEmptySummary = summarizeUpdateOutcome(",
+      "  coreEmptyScope.status,",
+      "  coreEmptyScope.report,",
+      "  coreEmptyScope.errors,",
+      ");",
+      "assert.deepEqual(coreEmptySummary.bindingErrors, []);",
+      "assert.equal(coreEmptySummary.operationErrors.length, 1);",
+      'assert.equal(coreEmptySummary.operationErrors[0]?.code, "empty-selection");',
+      'assert.deepEqual(await readFile("dock.baseline.json"), baselineBytes);',
+    ].join("\n"),
+    "utf8",
+  );
+  const migratedConsumer = await run(
+    process.execPath,
+    [join(dir, "migrated-update-consumer.mjs")],
+    dir,
+  );
+  assert.equal(
+    migratedConsumer.code,
+    0,
+    `Migrated update consumer failed:\n${migratedConsumer.stdout}\n${migratedConsumer.stderr}`,
+  );
+}
+
+async function verifyInstalledErrorWithConfirmedChange(
+  bin: string,
+  dir: string,
+): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  const statePath = join(dir, "suite-state.json");
+  const configPath = join(dir, "dock.config.mjs");
+  const baselinePath = join(dir, "dock.baseline.json");
+
+  await writeFile(
+    statePath,
+    JSON.stringify({ members: [{ id: "a", value: "ok" }] }),
+    "utf8",
+  );
+  await writeFile(
+    configPath,
+    [
+      'import { readFileSync } from "node:fs";',
+      'import { join } from "node:path";',
+      'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+      "",
+      "const suitePlugin = definePlugin({",
+      '  id: "fixture:installed-suite",',
+      "  validate() {},",
+      "  collect(request, context) {",
+      "    const state = JSON.parse(",
+      '      readFileSync(join(context.root, "suite-state.json"), "utf8"),',
+      "    );",
+      "    return {",
+      "      results: request.selectedReferences.map((reference) => ({",
+      "        referenceId: reference.id,",
+      '        kind: "collection",',
+      "        collection: {",
+      '          completeness: "complete",',
+      "          members: state.members,",
+      "        },",
+      "      })),",
+      "    };",
+      "  },",
+      "});",
+      "",
+      "export default defineConfig({",
+      "  plugins: [suitePlugin],",
+      "  bindings: [",
+      '    binding("suite-binding", [',
+      '      createReference("fixture:installed-suite", "suite-ref", "suite-state.json"),',
+      "    ]),",
+      "  ],",
+      "});",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const initialUpdate = await run(
+    bin,
+    ["baseline", "update", "--config", "dock.config.mjs"],
+    dir,
+  );
+  assert.equal(initialUpdate.code, 0, initialUpdate.stderr);
+  assert.match(initialUpdate.stdout, /Baseline updated\./);
+  const savedBaseline = await readFile(baselinePath);
+
+  await writeFile(
+    statePath,
+    JSON.stringify({
+      members: [
+        {
+          id: "a",
+          error: {
+            code: "missing-observation",
+            message: "Missing observation for A",
+          },
+        },
+        { id: "b", value: "added-b" },
+      ],
+    }),
+    "utf8",
+  );
+
+  const checkText = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs"],
+    dir,
+  );
+  assert.equal(checkText.code, 1, checkText.stderr);
+  assert.equal(checkText.stderr, "");
+  const checkErrorIndex = checkText.stdout.indexOf(
+    "Error suite-ref / a (missing-observation): Missing observation for A",
+  );
+  const checkChangeIndex = checkText.stdout.indexOf(
+    'Change: suite-ref member b added: "added-b"',
+  );
+  assert.ok(checkErrorIndex !== -1, checkText.stdout);
+  assert.ok(checkChangeIndex !== -1, checkText.stdout);
+  assert.ok(checkErrorIndex < checkChangeIndex, checkText.stdout);
+  assert.deepEqual(await readFile(baselinePath), savedBaseline);
+
+  const checkStructured = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
+    dir,
+  );
+  assert.equal(checkStructured.code, 1, checkStructured.stderr);
+  const checkEnvelope = parseEnvelope(checkStructured.stdout);
+  assert.equal(checkEnvelope.variant, "errors");
+  const checkReport = requireReport(checkEnvelope);
+  assert.equal(checkReport.bindings[0]?.consistency, undefined);
+  assert.equal(
+    Object.hasOwn(checkReport.bindings[0] ?? {}, "consistency"),
+    false,
+  );
+  assertBindingError(checkReport, "suite-binding", "missing-observation");
+  assert.equal(checkReport.bindings[0]?.errors?.[0]?.memberId, "a");
+  assert.equal(
+    checkReport.bindings[0]?.changes?.[0]?.memberChanges?.[0]?.memberId,
+    "b",
+  );
+  assert.equal(
+    checkReport.bindings[0]?.changes?.[0]?.memberChanges?.[0]?.afterPresent,
+    true,
+  );
+  assert.deepEqual(await readFile(baselinePath), savedBaseline);
+
+  const updateText = await run(
+    bin,
+    ["baseline", "update", "--config", "dock.config.mjs"],
+    dir,
+  );
+  assert.equal(updateText.code, 1, updateText.stderr);
+  assert.equal(updateText.stderr, "");
+  const updateErrorIndex = updateText.stdout.indexOf(
+    "Error suite-ref / a (missing-observation): Missing observation for A",
+  );
+  const updateChangeIndex = updateText.stdout.indexOf(
+    'Change: suite-ref member b added: "added-b"',
+  );
+  assert.ok(updateErrorIndex !== -1, updateText.stdout);
+  assert.ok(updateChangeIndex !== -1, updateText.stdout);
+  assert.ok(updateErrorIndex < updateChangeIndex, updateText.stdout);
+  assert.equal(
+    updateText.stdout.match(/Error suite-ref \/ a \(missing-observation\):/g)
+      ?.length,
+    1,
+  );
+  assert.doesNotMatch(updateText.stdout, /Update error/);
+  assert.match(updateText.stdout, /Baseline was not updated\./);
+  assert.deepEqual(await readFile(baselinePath), savedBaseline);
+
+  const updateStructured = await run(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
+    dir,
+  );
+  assert.equal(updateStructured.code, 1, updateStructured.stderr);
+  const updateEnvelope = parseEnvelope(updateStructured.stdout);
+  assert.equal(updateEnvelope.variant, "rejected");
+  assert.deepEqual(updateEnvelope.data?.errors, []);
+  const updateReport = requireReport(updateEnvelope);
+  assert.equal(updateReport.bindings[0]?.consistency, undefined);
+  assert.equal(
+    Object.hasOwn(updateReport.bindings[0] ?? {}, "consistency"),
+    false,
+  );
+  assert.equal(updateReport.bindings[0]?.errors?.[0]?.memberId, "a");
+  assert.equal(
+    updateReport.bindings[0]?.errors?.[0]?.code,
+    "missing-observation",
+  );
+  assert.equal(
+    updateReport.bindings[0]?.changes?.[0]?.memberChanges?.[0]?.memberId,
+    "b",
+  );
+  assert.deepEqual(await readFile(baselinePath), savedBaseline);
+
+  await writeFile(
+    join(dir, "js-error-with-change.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFile } from "node:fs/promises";',
+      'import { check, updateBaseline } from "@ykdz/dock";',
+      "",
+      'const beforeBytes = await readFile("dock.baseline.json");',
+      'const checked = await check("dock.config.mjs");',
+      "const checkedBinding = checked.bindings[0];",
+      "assert.ok(checkedBinding);",
+      'assert.equal("consistency" in checkedBinding, false);',
+      'assert.equal(checkedBinding.errors?.[0]?.referenceId, "suite-ref");',
+      'assert.equal(checkedBinding.errors?.[0]?.memberId, "a");',
+      'assert.equal(checkedBinding.errors?.[0]?.code, "missing-observation");',
+      'assert.equal(checkedBinding.changes[0]?.memberChanges?.[0]?.memberId, "b");',
+      "assert.equal(checkedBinding.changes[0]?.memberChanges?.[0]?.afterPresent, true);",
+      "",
+      'const updated = await updateBaseline("dock.config.mjs");',
+      'assert.equal(updated.status, "rejected");',
+      "assert.deepEqual(updated.errors, []);",
+      "const updatedBinding = updated.report.bindings[0];",
+      "assert.ok(updatedBinding);",
+      'assert.equal("consistency" in updatedBinding, false);',
+      'assert.equal(updatedBinding.errors?.[0]?.referenceId, "suite-ref");',
+      'assert.equal(updatedBinding.errors?.[0]?.memberId, "a");',
+      'assert.equal(updatedBinding.errors?.[0]?.code, "missing-observation");',
+      'assert.equal(updatedBinding.changes[0]?.memberChanges?.[0]?.memberId, "b");',
+      'assert.equal(updatedBinding.changes[0]?.memberChanges?.[0]?.after, "added-b");',
+      'assert.deepEqual(await readFile("dock.baseline.json"), beforeBytes);',
+    ].join("\n"),
+    "utf8",
+  );
+  const jsErrorWithChange = await run(
+    process.execPath,
+    [join(dir, "js-error-with-change.mjs")],
+    dir,
+  );
+  assert.equal(
+    jsErrorWithChange.code,
+    0,
+    `JS error-with-change check failed:\n${jsErrorWithChange.stdout}\n${jsErrorWithChange.stderr}`,
+  );
 }
 
 async function verifyInstalledFileSmoke(
