@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": []
+  },
+  "include": [
+    "positive.mts",
+    "negative.mts",
+    "group-positive.mts",
+    "group-negative.mts"
+  ]
+}

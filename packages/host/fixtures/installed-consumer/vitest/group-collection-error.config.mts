@@ -1,0 +1,30 @@
+import { binding, defineConfig } from "@ykdz/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestSuite,
+} from "@ykdz/dock/vitest";
+
+import { settings } from "./test-workspace/groups.observations.mts";
+
+const run = defineVitestRun("collection failed native group", {
+  files: ["test/group-failures.test.mts"],
+  testRoot: "../test-workspace",
+  observations: [settings],
+});
+const suite = vitestSuite(
+  "collection-failure-members",
+  run,
+  {
+    file: "test/group-failures.test.mts",
+    suitePath: ["collection failure"],
+  },
+  [settings],
+);
+
+export default defineConfig({
+  root: "maintenance-root",
+  baseline: "groups.baseline.json",
+  plugins: [vitest],
+  bindings: [binding("collection failed group", [suite])],
+});

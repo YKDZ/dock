@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "strict": true,
+    "noEmit": true,
+    "target": "ES2024",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "types": []
+  },
+  "include": [
+    "test-workspace/read-types-positive.mts",
+    "test-workspace/read-types-negative.mts"
+  ]
+}

@@ -6,6 +6,7 @@ import { basename, resolve } from "node:path";
 import { verifyInstalledCli } from "./verify-installed-cli.ts";
 import { verifyInstalledFile } from "./verify-installed-file.ts";
 import { verifyInstalledHost } from "./verify-installed-host.ts";
+import { verifyInstalledVitest } from "./verify-installed-vitest.ts";
 
 async function main(): Promise<void> {
   const artifacts = process.argv.slice(2);
@@ -22,8 +23,9 @@ async function main(): Promise<void> {
   await verifyInstalledHost(dockTarball);
   await verifyInstalledFile(dockTarball);
   await verifyInstalledCli(dockTarball);
+  await verifyInstalledVitest(dockTarball);
   process.stdout.write(
-    "Clean @ykdz/dock installed verification (host, core, file, and CLI) passed.\n",
+    "Clean @ykdz/dock installed verification (host, core, file, CLI, and Vitest) passed.\n",
   );
 }
 

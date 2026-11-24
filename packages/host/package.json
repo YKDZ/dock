@@ -30,6 +30,11 @@
       "types": "./dist/core/index.d.ts",
       "default": "./dist/core/index.js"
     },
+    "./vitest": {
+      "source": "./src/vitest/index.ts",
+      "types": "./dist/vitest/index.d.ts",
+      "default": "./dist/vitest/index.js"
+    },
     "./cli": "./dist/cli.js"
   },
   "publishConfig": {
@@ -50,13 +55,22 @@
     "@ykdz/cli-contract": "0.7.0",
     "zod": "^4.6.5"
   },
+  "peerDependencies": {
+    "vitest": "4.1.11 || 5.0.3"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
+  },
   "devDependencies": {
     "@dock/tooling-config": "workspace:*",
     "@types/node": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "tsrs": "catalog:",
-    "typescript-7": "catalog:"
+    "typescript-7": "catalog:",
+    "vitest": "4.1.11"
   },
   "engines": {
     "node": "^26.13.1"

@@ -1,0 +1,52 @@
+import { binding, defineConfig } from "@ykdz/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestObservation,
+  vitestStatus,
+  vitestSuite,
+} from "@ykdz/dock/vitest";
+
+import { settings, steps } from "./test-workspace/groups.observations.mts";
+
+const run = defineVitestRun("shared native run for group and test", {
+  files: ["test/groups.test.mts"],
+  testRoot: "../test-workspace",
+  ...(process.env.DOCK_VITEST_GROUP_ADDITIONAL === "1"
+    ? {
+        additionalTests: [
+          { file: "test/groups.test.mts", name: "extra marker" },
+        ],
+      }
+    : {}),
+  observations: [settings, steps],
+});
+const suite = vitestSuite(
+  "preview-members",
+  run,
+  {
+    file: "test/groups.test.mts",
+    suitePath: ["preview config", "inner > label"],
+  },
+  [settings, steps],
+);
+const single = vitestObservation(
+  "primary-settings",
+  run,
+  {
+    file: "test/groups.test.mts",
+    name: "preview config > inner > label > primary",
+  },
+  settings,
+);
+const status = vitestStatus("primary-status", run, {
+  file: "test/groups.test.mts",
+  name: "preview config > inner > label > primary",
+});
+
+export default defineConfig({
+  root: "maintenance-root",
+  baseline: "groups-shared.baseline.json",
+  plugins: [vitest],
+  bindings: [binding("group and single test shared", [suite, single, status])],
+});
