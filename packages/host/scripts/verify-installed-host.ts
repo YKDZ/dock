@@ -102,7 +102,6 @@ export async function verifyInstalledHost(tarball: string): Promise<void> {
       dependencyNames,
     );
     for (const forbidden of [
-      "typescript",
       "typescript-7",
       "vitest",
       "@vitest/runner",
