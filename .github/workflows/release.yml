@@ -37,7 +37,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Check source
-        run: pnpm run check && pnpm run check:heavy
+        run: node --conditions=source scripts/task-gates.ts check && node --conditions=source scripts/task-gates.ts check:heavy
       - name: Build packages in dependency order
         run: pnpm exec turbo run build
       - name: Pack unpublished versions

@@ -26,24 +26,17 @@ type StructuredEnvelope = {
 
 async function main(): Promise<void> {
   const artifacts = process.argv.slice(2);
-  assert.ok(
-    artifacts.length >= 1,
-    "Installed CLI verification requires at least the @ykdz/dock tarball path.",
+  assert.equal(
+    artifacts.length,
+    1,
+    "Installed CLI verification expects the @ykdz/dock tarball path.",
   );
-  const tarballs = artifacts.map((artifact) =>
-    resolve(process.cwd(), artifact),
-  );
-  await Promise.all(tarballs.map((artifact) => access(artifact)));
-  await verifyInstalledCliTarballs(tarballs);
+  await verifyInstalledCli(artifacts[0]!);
 }
 
 export async function verifyInstalledCli(tarball: string): Promise<void> {
-  await verifyInstalledCliTarballs([resolve(process.cwd(), tarball)]);
-}
-
-async function verifyInstalledCliTarballs(
-  tarballs: readonly string[],
-): Promise<void> {
+  const resolvedTarball = resolve(process.cwd(), tarball);
+  await access(resolvedTarball);
   const consumer = await mkdtemp(join(tmpdir(), "dock-cli-installed-"));
   try {
     await writeFile(
@@ -65,7 +58,7 @@ async function verifyInstalledCliTarballs(
         "--ignore-scripts",
         "--no-audit",
         "--no-fund",
-        ...tarballs,
+        resolvedTarball,
       ],
       consumer,
     );
@@ -175,6 +168,17 @@ async function verifyInstalledCliTarballs(
     assert.equal(changedEnvelope.kind, "data");
     assert.equal(changedEnvelope.variant, "changed");
 
+    const updatedText = await run(
+      dock,
+      ["baseline", "update", "--config", "dock.config.mjs"],
+      consumer,
+    );
+    assert.equal(updatedText.code, 0, updatedText.stderr);
+    assert.equal(updatedText.stderr, "");
+    assert.match(updatedText.stdout, /Scope: cli-policy/);
+    assert.match(updatedText.stdout, /Binding cli-policy/);
+    assert.match(updatedText.stdout, /Current fact: "initial fact"/);
+
     const updated = await run(
       dock,
       [
@@ -233,6 +237,18 @@ async function verifyInstalledCliTarballs(
     assert.equal(errorEnvelope.outputMode, "structured");
     assert.equal(errorEnvelope.kind, "data");
     assert.equal(errorEnvelope.variant, "errors");
+
+    const rejectedUpdateText = await run(
+      dock,
+      ["baseline", "update", "--config", "dock.config.mjs"],
+      consumer,
+    );
+    assert.equal(rejectedUpdateText.code, 1, rejectedUpdateText.stderr);
+    assert.equal(rejectedUpdateText.stderr, "");
+    assert.match(
+      rejectedUpdateText.stdout,
+      /Update error cli-policy \/ fact-ref \(missing-fact\):/,
+    );
 
     const rejectedUpdate = await run(
       dock,
