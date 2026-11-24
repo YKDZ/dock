@@ -30,6 +30,16 @@
       "types": "./dist/core/index.d.ts",
       "default": "./dist/core/index.js"
     },
+    "./markdown": {
+      "source": "./src/markdown/index.ts",
+      "types": "./dist/markdown/index.d.ts",
+      "default": "./dist/markdown/index.js"
+    },
+    "./typescript": {
+      "source": "./src/typescript/index.ts",
+      "types": "./dist/typescript/index.d.ts",
+      "default": "./dist/typescript/index.js"
+    },
     "./cli": "./dist/cli.js"
   },
   "publishConfig": {
@@ -48,6 +58,11 @@
   },
   "dependencies": {
     "@ykdz/cli-contract": "0.7.0",
+    "mdast-util-from-markdown": "2.0.2",
+    "mdast-util-gfm": "3.0.0",
+    "micromark-extension-gfm": "3.0.0",
+    "parse5": "8.0.0",
+    "typescript": "5.9.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
