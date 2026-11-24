@@ -8,7 +8,6 @@ import type { Config, PluginRequest } from "./contracts.ts";
 import {
   check as checkCore,
   copyJsonValue,
-  isJsonValue,
   updateBaseline as updateBaselineCore,
   type Baseline,
   type BaselineUpdateIssue,
@@ -534,12 +533,16 @@ function toReferenceResult(id: string, value: unknown): ReferenceResult {
   }
   if (kind.value === "value") {
     const fact = ownDataProperty(value, "value");
-    if (fact.status !== "value" || !isJsonValue(fact.value)) {
+    if (fact.status !== "value") {
+      return invalidPluginResult(id);
+    }
+    const copied = tryCopyJsonValue(fact.value);
+    if (!copied.ok) {
       return invalidPluginResult(id);
     }
     return {
       referenceId: id,
-      value: copyJsonValue(fact.value),
+      value: copied.value,
       ...(range === undefined ? {} : { range }),
     };
   }
@@ -608,10 +611,24 @@ function toMemberResult(value: unknown):
     };
   }
   const fact = ownDataProperty(value, "value");
-  if (fact.status === "value" && isJsonValue(fact.value)) {
-    return { id: id.value, value: copyJsonValue(fact.value) };
+  if (fact.status === "value") {
+    const copied = tryCopyJsonValue(fact.value);
+    if (copied.ok) {
+      return { id: id.value, value: copied.value };
+    }
   }
   return undefined;
+}
+
+function tryCopyJsonValue(
+  value: unknown,
+): { readonly ok: true; readonly value: JsonValue } | { readonly ok: false } {
+  try {
+    return { ok: true, value: copyJsonValue(value) };
+  } catch (error) {
+    if (error instanceof TypeError) return { ok: false };
+    throw error;
+  }
 }
 
 function copyTextRange(value: unknown): TextRange | undefined {

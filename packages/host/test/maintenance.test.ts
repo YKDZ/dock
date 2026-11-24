@@ -25,6 +25,8 @@ import {
   type PluginBatchResult,
   type PluginContext,
   type PluginRequest,
+  type ReadableReferencePlugin,
+  readReference,
   type Reference,
   updateBaseline,
 } from "@ykdz/dock";
@@ -521,6 +523,265 @@ void test("inspect, check, and updateBaseline share consistent scope and require
         after: "beta v2\n",
       },
     ]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("authoring and readReference reject accessors with zero getter calls and isolate nested read values", async () => {
+  let getterCalls = 0;
+  const nestedGetter = Object.defineProperty({}, "secret", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return "leaked";
+    },
+  });
+  const topLevelSelectionGetter = Object.defineProperty({}, "selection", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return { step: 1 };
+    },
+  });
+  const topLevelTargetRef = Object.defineProperty(
+    { id: "bad-ref", pluginId: "nested-plugin" },
+    "target",
+    {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return { path: "doc.md" };
+      },
+    },
+  ) as unknown as Reference<"nested-plugin", string, { path: string }, string>;
+
+  assert.throws(
+    () =>
+      createReference("nested-plugin", "bad", {
+        nested: nestedGetter,
+      } as never),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      createReference(
+        "nested-plugin",
+        "bad-options",
+        { path: "doc.md" },
+        topLevelSelectionGetter as never,
+      ),
+    TypeError,
+  );
+
+  const retainedValue = { items: ["alpha", { count: 1 }] };
+  let nextReadResult: unknown = {
+    value: retainedValue,
+    range: { path: "doc.md", start: 0, end: 5 },
+  };
+  const plugin: ReadableReferencePlugin<
+    "nested-plugin",
+    Reference<"nested-plugin", string, { path: string }, typeof retainedValue>,
+    typeof retainedValue
+  > = definePlugin({
+    id: "nested-plugin",
+    validate() {},
+    collect: () => ({ results: [] }),
+    read() {
+      return nextReadResult as { value: typeof retainedValue };
+    },
+  });
+
+  assert.throws(
+    () =>
+      defineConfig({
+        plugins: [plugin],
+        bindings: [binding("bad-binding", [topLevelTargetRef as never])],
+      }),
+    TypeError,
+  );
+
+  const validRef = createReference<
+    "nested-plugin",
+    "item",
+    { path: string },
+    typeof retainedValue
+  >("nested-plugin", "item", { path: "doc.md" });
+  const config = defineConfig({
+    plugins: [plugin],
+    bindings: [binding("item-binding", [validRef])],
+  });
+
+  const read = await readReference(config, validRef);
+  retainedValue.items[0] = "mutated-by-plugin";
+  (retainedValue.items[1] as { count: number }).count = 999;
+  assert.deepEqual(read.value, { items: ["alpha", { count: 1 }] });
+
+  await assert.rejects(
+    () => readReference(config, topLevelTargetRef as never),
+    (error: unknown) =>
+      error instanceof MaintenanceError && error.code === "invalid-reference",
+  );
+
+  nextReadResult = Object.defineProperty({}, "value", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return { ok: true };
+    },
+  });
+  await assert.rejects(
+    () => readReference(config, validRef),
+    (error: unknown) =>
+      error instanceof MaintenanceError &&
+      error.code === "invalid-plugin-read-result",
+  );
+
+  nextReadResult = { value: { nested: [nestedGetter] } };
+  await assert.rejects(
+    () => readReference(config, validRef),
+    (error: unknown) =>
+      error instanceof MaintenanceError &&
+      error.code === "invalid-plugin-read-result",
+  );
+
+  assert.equal(getterCalls, 0);
+});
+
+void test("host check and updateBaseline keep accepted inputs, reports, and baselines three-way independent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-three-way-independence-"));
+  try {
+    type NestedTarget = { path: string; meta: { tags: string[] } };
+    type NestedFact = { summary: { count: number; items: string[] } };
+    const callerTarget: NestedTarget = {
+      path: "doc.md",
+      meta: { tags: ["initial"] },
+    };
+    const callerSelection = { steps: [{ kind: "quote", text: "v1" }] };
+    const ref = createReference<
+      "nested-plugin",
+      "nested-ref",
+      NestedTarget,
+      NestedFact,
+      typeof callerSelection
+    >("nested-plugin", "nested-ref", callerTarget, {
+      selection: callerSelection,
+    });
+
+    const pluginPayload: NestedFact = {
+      summary: { count: 1, items: ["fact-v1"] },
+    };
+    const plugin = definePlugin({
+      id: "nested-plugin",
+      validate() {},
+      collect(
+        request: PluginRequest<
+          Reference<"nested-plugin", string, NestedTarget, NestedFact>
+        >,
+      ): PluginBatchResult<NestedFact> {
+        return {
+          results: request.selectedReferences.map((selected) => ({
+            referenceId: selected.id,
+            kind: "value",
+            value: pluginPayload,
+          })),
+        };
+      },
+    });
+    const config = defineConfig({
+      root,
+      plugins: [plugin],
+      bindings: [binding("nested-binding", [ref])],
+    });
+
+    const initial = await updateBaseline(config);
+    assert.equal(initial.status, "updated");
+
+    callerTarget.meta.tags[0] = "caller-mutated-before-second";
+    callerSelection.steps[0]!.text = "caller-mutated-before-second";
+    pluginPayload.summary.count = 2;
+    pluginPayload.summary.items[0] = "fact-v2";
+
+    const secondRef = createReference<
+      "nested-plugin",
+      "nested-ref",
+      NestedTarget,
+      NestedFact,
+      typeof callerSelection
+    >("nested-plugin", "nested-ref", callerTarget, {
+      selection: callerSelection,
+    });
+    const secondConfig = defineConfig({
+      root,
+      plugins: [plugin],
+      bindings: [binding("nested-binding", [secondRef])],
+    });
+
+    const outcome = await updateBaseline(secondConfig);
+    assert.equal(outcome.status, "updated");
+    if (outcome.status !== "updated") return;
+
+    callerTarget.meta.tags[0] = "caller-mutated-after";
+    callerSelection.steps[0]!.text = "caller-mutated-after";
+    pluginPayload.summary.count = 99;
+    pluginPayload.summary.items[0] = "plugin-mutated-after";
+
+    const reportBinding = outcome.report.bindings[0]!;
+    assert.ok("current" in reportBinding);
+    const reportFact = reportBinding.current.references["nested-ref"]!;
+    const baselineFact =
+      outcome.baseline.bindings["nested-binding"]!.references["nested-ref"]!;
+
+    assert.deepEqual(reportFact.value, {
+      summary: { count: 2, items: ["fact-v2"] },
+    });
+    assert.deepEqual(baselineFact.value, {
+      summary: { count: 2, items: ["fact-v2"] },
+    });
+    assert.deepEqual(
+      (
+        reportFact.definition.target as {
+          target: NestedTarget;
+        }
+      ).target.meta.tags,
+      ["caller-mutated-before-second"],
+    );
+    assert.deepEqual(
+      (
+        baselineFact.definition.target as {
+          target: NestedTarget;
+        }
+      ).target.meta.tags,
+      ["caller-mutated-before-second"],
+    );
+
+    reportFact.value.summary.items[0] = "mutated-in-report";
+    const factChange = reportBinding.changes.find((c) => c.kind === "fact");
+    assert.ok(factChange && "before" in factChange);
+    if (factChange && "before" in factChange) {
+      (factChange.before as NestedFact).summary.items[0] =
+        "mutated-change-before";
+    }
+    assert.deepEqual(baselineFact.value, {
+      summary: { count: 2, items: ["fact-v2"] },
+    });
+    assert.equal(pluginPayload.summary.items[0], "plugin-mutated-after");
+
+    baselineFact.value.summary.items[0] = "mutated-in-baseline";
+    (
+      baselineFact.definition.target as { target: NestedTarget }
+    ).target.meta.tags[0] = "mutated-in-baseline";
+    assert.equal(reportFact.value.summary.items[0], "mutated-in-report");
+    assert.deepEqual(
+      (
+        reportFact.definition.target as {
+          target: NestedTarget;
+        }
+      ).target.meta.tags,
+      ["caller-mutated-before-second"],
+    );
+    assert.equal(pluginPayload.summary.items[0], "plugin-mutated-after");
+    assert.equal(callerTarget.meta.tags[0], "caller-mutated-after");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

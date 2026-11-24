@@ -515,3 +515,139 @@ void test("members containing both value and error preserve collection failure a
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("batch collection rejects getters with zero evaluations and isolates malformed diagnostics from valid facts", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-batch-getters-"));
+  let getterCalls = 0;
+  const nestedGetter = Object.defineProperty({}, "secret", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return "leaked";
+    },
+  });
+
+  const plugin = definePlugin({
+    id: "fixture-plugin",
+    validate(_reference: FixtureReference): void {},
+    collect(
+      request: PluginRequest<FixtureReference>,
+    ): PluginBatchResult<string> {
+      const results: unknown[] = [];
+      for (const reference of request.selectedReferences) {
+        if (reference.id === "valid") {
+          results.push({
+            referenceId: "valid",
+            kind: "value",
+            value: { nested: ["ok"] },
+          });
+        } else if (reference.id === "getter-top") {
+          results.push(
+            Object.defineProperty(
+              { referenceId: "getter-top", kind: "value" },
+              "value",
+              {
+                enumerable: true,
+                get() {
+                  getterCalls += 1;
+                  return "secret";
+                },
+              },
+            ),
+          );
+        } else if (reference.id === "getter-nested") {
+          results.push({
+            referenceId: "getter-nested",
+            kind: "value",
+            value: { nested: [nestedGetter] },
+          });
+        } else if (reference.id === "getter-member") {
+          results.push({
+            referenceId: "getter-member",
+            kind: "collection",
+            collection: {
+              completeness: "complete",
+              members: [
+                {
+                  id: "m1",
+                  value: { nested: nestedGetter },
+                },
+              ],
+            },
+          });
+        } else if (reference.id === "ref-error") {
+          results.push({
+            referenceId: "ref-error",
+            kind: "error",
+            error: { code: "custom-error", message: "Reference failed" },
+          });
+        }
+      }
+      results.push({
+        kind: "value",
+        value: "no-id",
+      });
+      return {
+        results: results as PluginBatchResult<string>["results"],
+        diagnostics: {
+          data: { bad: nestedGetter },
+          text: ["should be isolated"],
+        },
+      };
+    },
+  });
+
+  const config = defineConfig({
+    root,
+    plugins: [plugin],
+    bindings: [
+      binding("valid-policy", [fixtureReference("valid")]),
+      binding("getter-top-policy", [fixtureReference("getter-top")]),
+      binding("getter-nested-policy", [fixtureReference("getter-nested")]),
+      binding("getter-member-policy", [fixtureReference("getter-member")]),
+      binding("error-policy", [fixtureReference("ref-error")]),
+    ],
+  });
+
+  try {
+    const report = await check(config);
+    const byBinding = (id: string) =>
+      report.bindings.find(({ bindingId }) => bindingId === id);
+
+    const valid = byBinding("valid-policy");
+    assert.ok(valid && "current" in valid);
+    assert.deepEqual(valid.current.references.valid?.value, {
+      nested: ["ok"],
+    });
+
+    for (const badId of [
+      "getter-top-policy",
+      "getter-nested-policy",
+      "getter-member-policy",
+    ]) {
+      const bad = byBinding(badId);
+      assert.ok(bad && "errors" in bad);
+      assert.equal(bad.errors[0]?.code, "invalid-plugin-result");
+    }
+
+    const refError = byBinding("error-policy");
+    assert.ok(refError && "errors" in refError);
+    assert.equal(refError.errors[0]?.code, "custom-error");
+
+    assert.deepEqual(report.pluginDiagnostics, []);
+    assert.deepEqual(report.pluginErrors.map(({ code }) => code).sort(), [
+      "invalid-plugin-diagnostics",
+      "unattributed-plugin-result",
+    ]);
+
+    const updated = await updateBaseline(config, { binding: ["valid-policy"] });
+    assert.equal(updated.status, "updated");
+    assert.deepEqual(
+      updated.report.pluginErrors.map(({ code }) => code).sort(),
+      ["invalid-plugin-diagnostics", "unattributed-plugin-result"],
+    );
+    assert.equal(getterCalls, 0);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

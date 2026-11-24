@@ -4,17 +4,24 @@ import { test } from "node:test";
 import { canonicalJson, copyJsonValue, isJsonValue } from "@ykdz/dock/core";
 
 void test("comparable values reject special properties and cycles without invoking accessors or toJSON", () => {
-  let evaluated = false;
+  let getterCalls = 0;
   const accessor = Object.defineProperty({}, "value", {
     enumerable: true,
     get() {
-      evaluated = true;
+      getterCalls += 1;
+      return 1;
+    },
+  });
+  const nonEnumerableAccessor = Object.defineProperty({}, "hidden", {
+    enumerable: false,
+    get() {
+      getterCalls += 1;
       return 1;
     },
   });
   const converted = {
     toJSON() {
-      evaluated = true;
+      getterCalls += 1;
       return 1;
     },
   };
@@ -25,28 +32,37 @@ void test("comparable values reject special properties and cycles without invoki
   const arrayAccessor = Object.defineProperty([1], "0", {
     enumerable: true,
     get() {
-      evaluated = true;
+      getterCalls += 1;
       return 1;
     },
   });
+  const nestedAccessor = { outer: [{ inner: accessor }] };
+  const nestedArrayAccessor = { list: [arrayAccessor] };
   for (const value of [
     accessor,
+    nonEnumerableAccessor,
+    nestedAccessor,
     converted,
     Object.defineProperty({}, "hidden", { value: 1 }),
     { [Symbol("extra")]: 1 },
     Object.assign([1], { extra: 2 }),
+    Object.assign([1], { [Symbol("extra")]: 2 }),
     Object.defineProperty([1], "hidden", { value: 2 }),
     Object.setPrototypeOf([1], null),
     Object.create({ inherited: 1 }),
     arrayAccessor,
+    nestedArrayAccessor,
     sparse,
     NaN,
     Infinity,
+    -Infinity,
     cycle,
   ]) {
     assert.equal(isJsonValue(value), false);
+    assert.throws(() => copyJsonValue(value), TypeError);
+    assert.throws(() => canonicalJson(value as never), TypeError);
   }
-  assert.equal(evaluated, false);
+  assert.equal(getterCalls, 0);
 });
 
 void test("comparable values copy isolated data, preserve shared subvalues, and canonicalize encoding", () => {

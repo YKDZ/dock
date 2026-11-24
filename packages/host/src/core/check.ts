@@ -1,7 +1,8 @@
 import {
   assertBaseline,
   assertBindingDefinition,
-  assertReferenceDefinition,
+  copyBindingDefinition,
+  copyReferenceDefinition,
 } from "./contracts.ts";
 import type {
   BindingCheckResult,
@@ -19,8 +20,9 @@ import type {
   ReferenceDefinition,
   ReferenceResult,
   ReferenceMemberResult,
+  TextRange,
 } from "./contracts.ts";
-import { canonicalJson, copyJsonValue, isJsonValue } from "./json-value.ts";
+import { canonicalJson, copyJsonValue } from "./json-value.ts";
 
 type CollectionSnapshot = {
   definition: ReferenceDefinition;
@@ -85,7 +87,73 @@ function memberValue(members: readonly ReferenceMemberResult[]): JsonValue {
   return [...members]
     .filter(isValueMember)
     .sort((left, right) => compareText(left.id, right.id))
-    .map((member) => ({ id: member.id, value: copyJsonValue(member.value) }));
+    .map((member) => ({ id: member.id, value: member.value }));
+}
+
+function copyRange(range: TextRange | undefined): TextRange | undefined {
+  if (range === undefined) return undefined;
+  return copyJsonValue(range) as TextRange;
+}
+
+function readDataProperty(value: object, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) return undefined;
+  if (!descriptor.enumerable || !("value" in descriptor)) {
+    throw new TypeError(`Property ${key} cannot be an accessor property.`);
+  }
+  return descriptor.value;
+}
+
+function copyMemberResult(
+  member: ReferenceMemberResult,
+): ReferenceMemberResult {
+  const errorProp = Object.getOwnPropertyDescriptor(member, "error");
+  if (errorProp !== undefined) {
+    if (!errorProp.enumerable || !("value" in errorProp)) {
+      return {
+        id: member.id,
+        error: {
+          code: "invalid-fact",
+          message:
+            "Member fact must be a valid JSON value with finite numbers.",
+        },
+      };
+    }
+    const err = errorProp.value as { code: string; message: string };
+    return {
+      id: member.id,
+      error: { code: err.code, message: err.message },
+    };
+  }
+  const valueProp = Object.getOwnPropertyDescriptor(member, "value");
+  if (
+    valueProp === undefined ||
+    !valueProp.enumerable ||
+    !("value" in valueProp)
+  ) {
+    return {
+      id: member.id,
+      error: {
+        code: "invalid-fact",
+        message: "Member fact must be a valid JSON value with finite numbers.",
+      },
+    };
+  }
+  try {
+    return { id: member.id, value: copyJsonValue(valueProp.value) };
+  } catch (error) {
+    if (error instanceof TypeError) {
+      return {
+        id: member.id,
+        error: {
+          code: "invalid-fact",
+          message:
+            "Member fact must be a valid JSON value with finite numbers.",
+        },
+      };
+    }
+    throw error;
+  }
 }
 
 function comparableReference(definition: ReferenceDefinition): JsonValue {
@@ -168,14 +236,43 @@ function collectCurrent(
     }
 
     const fact = matches[0]!;
-    if ("error" in fact) {
+    let copiedRange: TextRange | undefined;
+    try {
+      copiedRange = copyRange(
+        readDataProperty(fact, "range") as TextRange | undefined,
+      );
+    } catch (error) {
+      if (error instanceof TypeError) {
+        errors.push({
+          referenceId,
+          code: "invalid-fact",
+          message:
+            "Reference fact must be a valid JSON value with finite numbers.",
+        });
+        continue;
+      }
+      throw error;
+    }
+    const errorDescriptor = Object.getOwnPropertyDescriptor(fact, "error");
+    if (errorDescriptor !== undefined) {
+      const errorValue =
+        errorDescriptor.enumerable && "value" in errorDescriptor
+          ? (errorDescriptor.value as { code: string; message: string })
+          : undefined;
+      if (errorValue === undefined) {
+        errors.push({
+          referenceId,
+          code: "invalid-fact",
+          message:
+            "Reference fact must be a valid JSON value with finite numbers.",
+        });
+        continue;
+      }
       errors.push({
         referenceId,
-        code: fact.error.code,
-        message: fact.error.message,
-        ...(fact.range === undefined
-          ? {}
-          : { range: structuredClone(fact.range) }),
+        code: errorValue.code,
+        message: errorValue.message,
+        ...(copiedRange === undefined ? {} : { range: copiedRange }),
       });
       continue;
     }
@@ -195,11 +292,15 @@ function collectCurrent(
       const memberIds = new Set<string>();
       let invalidIdentity = false;
       for (const member of fact.collection.members) {
-        if (
-          !member ||
-          typeof member.id !== "string" ||
-          member.id.length === 0
-        ) {
+        const idDescriptor =
+          member && typeof member === "object"
+            ? Object.getOwnPropertyDescriptor(member, "id")
+            : undefined;
+        const memberId =
+          idDescriptor && idDescriptor.enumerable && "value" in idDescriptor
+            ? idDescriptor.value
+            : undefined;
+        if (typeof memberId !== "string" || memberId.length === 0) {
           errors.push({
             referenceId,
             code: "invalid-member-id",
@@ -208,10 +309,10 @@ function collectCurrent(
           invalidIdentity = true;
           continue;
         }
-        if (memberIds.has(member.id)) {
+        if (memberIds.has(memberId)) {
           errors.push({
             referenceId,
-            memberId: member.id,
+            memberId,
             code: "ambiguous-member",
             message:
               "Member collection contains duplicate member IDs; member changes cannot be compared.",
@@ -219,23 +320,12 @@ function collectCurrent(
           invalidIdentity = true;
           continue;
         }
-        memberIds.add(member.id);
+        memberIds.add(memberId);
       }
       if (invalidIdentity) continue;
 
-      const members: ReferenceMemberResult[] = fact.collection.members.map(
-        (member) =>
-          !("error" in member) && !isJsonValue(member.value)
-            ? {
-                id: member.id,
-                error: {
-                  code: "invalid-fact",
-                  message:
-                    "Member fact must be a valid JSON value with finite numbers.",
-                },
-              }
-            : member,
-      );
+      const members: ReferenceMemberResult[] =
+        fact.collection.members.map(copyMemberResult);
       if (fact.collection.completeness === "partial") {
         errors.push({
           referenceId,
@@ -257,15 +347,13 @@ function collectCurrent(
 
       if (fact.collection.completeness === "complete") {
         const snapshot: CollectionSnapshot = {
-          definition: structuredClone(definition),
-          members: structuredClone(members),
+          definition,
+          members,
           valueKind: "member-collection",
           ...(members.every(isValueMember)
             ? { value: memberValue(members) }
             : {}),
-          ...(fact.range === undefined
-            ? {}
-            : { range: structuredClone(fact.range) }),
+          ...(copiedRange === undefined ? {} : { range: copiedRange }),
         };
         collections.set(referenceId, snapshot);
       }
@@ -286,27 +374,31 @@ function collectCurrent(
       continue;
     }
 
-    if (!isJsonValue(fact.value)) {
-      errors.push({
-        referenceId,
-        code: "invalid-fact",
-        message:
-          "Reference fact must be a valid JSON value with finite numbers.",
-      });
-      continue;
+    let copiedValue: JsonValue;
+    try {
+      copiedValue = copyJsonValue(readDataProperty(fact, "value"));
+    } catch (error) {
+      if (error instanceof TypeError) {
+        errors.push({
+          referenceId,
+          code: "invalid-fact",
+          message:
+            "Reference fact must be a valid JSON value with finite numbers.",
+        });
+        continue;
+      }
+      throw error;
     }
     references[referenceId] = {
-      definition: structuredClone(definition),
-      value: structuredClone(fact.value),
-      ...(fact.range === undefined
-        ? {}
-        : { range: structuredClone(fact.range) }),
+      definition,
+      value: copiedValue,
+      ...(copiedRange === undefined ? {} : { range: copiedRange }),
     };
   }
 
   if (errors.length) return { errors, collections };
   return {
-    current: { definition: structuredClone(binding), references },
+    current: { definition: copyBindingDefinition(binding), references },
     errors,
     collections,
   };
@@ -386,10 +478,8 @@ function collectionMemberChangesFor(
       afterPresent,
       ...(beforeValue === undefined
         ? {}
-        : { before: structuredClone(beforeValue) }),
-      ...(afterValue === undefined
-        ? {}
-        : { after: structuredClone(afterValue) }),
+        : { before: copyJsonValue(beforeValue) }),
+      ...(afterValue === undefined ? {} : { after: afterValue }),
     });
   }
   return changes;
@@ -410,7 +500,7 @@ function changesFor(
   ) {
     changes.push({
       kind: "binding-definition",
-      before: structuredClone(previous.definition),
+      before: copyBindingDefinition(previous.definition),
       after: current.definition,
     });
   }
@@ -441,7 +531,7 @@ function changesFor(
       changes.push({
         kind: "reference-definition",
         referenceId,
-        before: structuredClone(before.definition),
+        before: copyReferenceDefinition(before.definition),
         after: after.definition,
       });
     }
@@ -471,7 +561,7 @@ function changesFor(
       changes.push({
         kind: "fact",
         referenceId,
-        before: structuredClone(before.value),
+        before: copyJsonValue(before.value),
         after: after.value,
         ...(before.valueKind === undefined
           ? {}
@@ -495,34 +585,45 @@ export function check(input: CheckInput): CheckReport {
     Array<{ definition?: ReferenceDefinition; error?: string }>
   >();
   for (const definition of input.references) {
-    if (
-      !definition ||
-      typeof definition.id !== "string" ||
-      definition.id.length === 0
-    ) {
+    const idDescriptor =
+      definition && typeof definition === "object"
+        ? Object.getOwnPropertyDescriptor(definition, "id")
+        : undefined;
+    const definitionId =
+      idDescriptor && idDescriptor.enumerable && "value" in idDescriptor
+        ? idDescriptor.value
+        : undefined;
+    if (typeof definitionId !== "string" || definitionId.length === 0) {
       throw new TypeError("Reference ID must be a non-empty string.");
     }
-    const candidates = definitions.get(definition.id) ?? [];
+    const candidates = definitions.get(definitionId) ?? [];
     try {
-      assertReferenceDefinition(definition);
-      candidates.push({ definition });
+      candidates.push({ definition: copyReferenceDefinition(definition) });
     } catch (error) {
       candidates.push({
         error: error instanceof Error ? error.message : String(error),
       });
     }
-    definitions.set(definition.id, candidates);
+    definitions.set(definitionId, candidates);
   }
 
   const declaredBindings = new Map<string, BindingDefinition>();
   for (const binding of input.bindings) {
-    if (!binding || typeof binding.id !== "string" || binding.id.length === 0) {
+    const idDescriptor =
+      binding && typeof binding === "object"
+        ? Object.getOwnPropertyDescriptor(binding, "id")
+        : undefined;
+    const bindingId =
+      idDescriptor && idDescriptor.enumerable && "value" in idDescriptor
+        ? idDescriptor.value
+        : undefined;
+    if (typeof bindingId !== "string" || bindingId.length === 0) {
       throw new TypeError("Binding ID must be a non-empty string.");
     }
-    if (declaredBindings.has(binding.id)) {
-      throw new TypeError(`Duplicate binding ID: ${binding.id}`);
+    if (declaredBindings.has(bindingId)) {
+      throw new TypeError(`Duplicate binding ID: ${bindingId}`);
     }
-    declaredBindings.set(binding.id, binding);
+    declaredBindings.set(bindingId, binding);
   }
 
   const completeness = input.declarationCompleteness ?? "partial";
@@ -552,7 +653,7 @@ export function check(input: CheckInput): CheckReport {
           changes: [
             {
               kind: "binding-removed",
-              before: structuredClone(previous.definition),
+              before: copyBindingDefinition(previous.definition),
             },
           ],
           untracked: true,

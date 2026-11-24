@@ -9,8 +9,8 @@ import type {
   PluginRequest,
   ReferencePlugin,
 } from "./contracts.ts";
+import { assertBaseline } from "./core/contracts.ts";
 import {
-  check as checkCore,
   resolveCheckScope,
   type Baseline,
   type BindingDefinition,
@@ -168,11 +168,11 @@ export async function resolveMaintenance(
   }
   return {
     model: {
-      context: structuredClone({
+      context: {
         ...context,
         declarationCompleteness: "complete",
         scope: resolveCheckScope(context),
-      }),
+      },
       root: config.root,
       baselinePath: config.baselinePath,
       ...(configPath === undefined ? {} : { configPath }),
@@ -434,12 +434,7 @@ async function readBaseline(path: string): Promise<Baseline | undefined> {
     );
   }
   try {
-    checkCore({
-      references: [],
-      bindings: [],
-      facts: [],
-      baseline: parsed as Baseline,
-    });
+    assertBaseline(parsed as Baseline);
   } catch (error) {
     throw new MaintenanceError(
       "baseline-invalid",

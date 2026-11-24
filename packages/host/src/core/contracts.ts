@@ -1,4 +1,8 @@
-import { isJsonValue, type JsonValue } from "./json-value.ts";
+import {
+  assertJsonValue,
+  copyJsonValue,
+  type JsonValue,
+} from "./json-value.ts";
 
 export type { JsonValue } from "./json-value.ts";
 
@@ -169,39 +173,84 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (!isRecord(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return (
+    (prototype === Object.prototype || prototype === null) &&
+    Object.getOwnPropertySymbols(value).length === 0
+  );
+}
+
+type OwnProperty = { present: false } | { present: true; value: unknown };
+
+function readOwnDataProperty(value: object, key: string): OwnProperty {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) return { present: false };
+  if (!descriptor.enumerable || !("value" in descriptor)) {
+    throw new TypeError(`Property ${key} cannot be an accessor property.`);
+  }
+  return { present: true, value: descriptor.value };
+}
+
 function assertMemberCollectionValue(
   value: unknown,
   referenceId: string,
 ): void {
-  if (!Array.isArray(value)) {
+  if (
+    !Array.isArray(value) ||
+    Object.getPrototypeOf(value) !== Array.prototype ||
+    Object.getOwnPropertySymbols(value).length !== 0 ||
+    Object.keys(value).length !== value.length ||
+    Object.getOwnPropertyNames(value).length !== value.length + 1
+  ) {
     throw new TypeError(
       `Member-collection baseline for reference ${referenceId} must be an array.`,
     );
   }
   const memberIds = new Set<string>();
-  for (const member of value) {
+  for (let index = 0; index < value.length; index++) {
+    const element = Object.getOwnPropertyDescriptor(value, String(index));
+    if (element === undefined || !element.enumerable || !("value" in element)) {
+      throw new TypeError(
+        `Member-collection baseline for reference ${referenceId} must be an array.`,
+      );
+    }
+    const member = element.value;
     if (
-      !isRecord(member) ||
+      !isPlainObject(member) ||
       Object.keys(member).length !== 2 ||
-      !Object.hasOwn(member, "id") ||
-      !Object.hasOwn(member, "value")
+      Object.getOwnPropertyNames(member).length !== 2
     ) {
       throw new TypeError(
         `Invalid member-collection baseline record for reference ${referenceId}.`,
       );
     }
-    assertId(member.id, `Member ID of reference ${referenceId}`);
-    if (memberIds.has(member.id)) {
+    const idProperty = readOwnDataProperty(member, "id");
+    const valueProperty = readOwnDataProperty(member, "value");
+    if (!idProperty.present || !valueProperty.present) {
+      throw new TypeError(
+        `Invalid member-collection baseline record for reference ${referenceId}.`,
+      );
+    }
+    assertId(idProperty.value, `Member ID of reference ${referenceId}`);
+    if (memberIds.has(idProperty.value)) {
       throw new TypeError(
         `Duplicate member-collection baseline ID for reference ${referenceId}.`,
       );
     }
-    if (!isJsonValue(member.value)) {
-      throw new TypeError(
-        `Invalid member-collection baseline value for reference ${referenceId}.`,
-      );
+    try {
+      assertJsonValue(valueProperty.value);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new TypeError(
+          `Invalid member-collection baseline value for reference ${referenceId}.`,
+          { cause: error },
+        );
+      }
+      throw error;
     }
-    memberIds.add(member.id);
+    memberIds.add(idProperty.value);
   }
 }
 
@@ -221,7 +270,14 @@ function assertReferenceIds(
     );
   }
   const seen = new Set<string>();
-  for (const id of ids) {
+  for (let index = 0; index < ids.length; index++) {
+    const element = Object.getOwnPropertyDescriptor(ids, String(index));
+    if (element === undefined || !element.enumerable || !("value" in element)) {
+      throw new TypeError(
+        `Reference ID in binding ${bindingId} must be a non-empty string.`,
+      );
+    }
+    const id = element.value;
     assertId(id, `Reference ID in binding ${bindingId}`);
     if (seen.has(id)) {
       throw new TypeError(
@@ -238,59 +294,164 @@ export function assertBindingDefinition(
   if (!isRecord(value)) {
     throw new TypeError("Binding definition must be an object.");
   }
-  assertId(value.id, "Binding ID");
-  assertReferenceIds(value.references, value.id);
-  if (value.note !== undefined && typeof value.note !== "string") {
-    throw new TypeError(`Binding ${value.id} note must be a string.`);
+  const idProperty = readOwnDataProperty(value, "id");
+  const id = idProperty.present ? idProperty.value : undefined;
+  assertId(id, "Binding ID");
+  const references = readOwnDataProperty(value, "references");
+  assertReferenceIds(references.present ? references.value : undefined, id);
+  const noteProperty = readOwnDataProperty(value, "note");
+  const note = noteProperty.present ? noteProperty.value : undefined;
+  if (note !== undefined && typeof note !== "string") {
+    throw new TypeError(`Binding ${id} note must be a string.`);
   }
+}
+
+export function copyBindingDefinition(
+  value: BindingDefinition,
+): BindingDefinition {
+  return {
+    id: value.id,
+    references: [...value.references],
+    ...(value.note === undefined ? {} : { note: value.note }),
+  };
+}
+
+function parseReferenceDefinition(
+  value: unknown,
+  copyValues: boolean,
+): ReferenceDefinition {
+  if (!isRecord(value)) {
+    throw new TypeError("Reference definition must be an object.");
+  }
+  const idProperty = readOwnDataProperty(value, "id");
+  const id = idProperty.present ? idProperty.value : undefined;
+  assertId(id, "Reference ID");
+
+  const targetProperty = readOwnDataProperty(value, "target");
+  if (!targetProperty.present) {
+    throw new TypeError(`Reference ${id} is missing target.`);
+  }
+  let target: JsonValue;
+  try {
+    if (copyValues) {
+      target = copyJsonValue(targetProperty.value);
+    } else {
+      assertJsonValue(targetProperty.value);
+      target = targetProperty.value;
+    }
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new TypeError(
+        `Reference ${id} target must be a valid JSON value.`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+
+  const selectionProperty = readOwnDataProperty(value, "selection");
+  let selection: JsonValue | undefined;
+  if (selectionProperty.present && selectionProperty.value !== undefined) {
+    try {
+      if (copyValues) {
+        selection = copyJsonValue(selectionProperty.value);
+      } else {
+        assertJsonValue(selectionProperty.value);
+        selection = selectionProperty.value;
+      }
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new TypeError(
+          `Reference ${id} selection must be a valid JSON value.`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  }
+
+  const noteProperty = readOwnDataProperty(value, "note");
+  const note = noteProperty.present ? noteProperty.value : undefined;
+  if (note !== undefined && typeof note !== "string") {
+    throw new TypeError(`Reference ${id} note must be a string.`);
+  }
+
+  return {
+    id,
+    target,
+    ...(selection === undefined ? {} : { selection }),
+    ...(note === undefined ? {} : { note }),
+  };
 }
 
 export function assertReferenceDefinition(
   value: unknown,
 ): asserts value is ReferenceDefinition {
-  if (!isRecord(value)) {
-    throw new TypeError("Reference definition must be an object.");
+  parseReferenceDefinition(value, false);
+}
+
+export function copyReferenceDefinition(value: unknown): ReferenceDefinition {
+  return parseReferenceDefinition(value, true);
+}
+
+export function copyBaselineReferenceFact(
+  fact: BaselineReferenceFact,
+): BaselineReferenceFact {
+  return {
+    definition: copyReferenceDefinition(fact.definition),
+    value: copyJsonValue(fact.value),
+    ...(fact.valueKind === undefined ? {} : { valueKind: fact.valueKind }),
+  };
+}
+
+export function copyBindingBaseline(binding: BindingBaseline): BindingBaseline {
+  const references: Record<string, BaselineReferenceFact> = Object.create(
+    null,
+  ) as Record<string, BaselineReferenceFact>;
+  for (const [referenceId, fact] of Object.entries(binding.references)) {
+    references[referenceId] = copyBaselineReferenceFact(fact);
   }
-  assertId(value.id, "Reference ID");
-  if (!Object.hasOwn(value, "target")) {
-    throw new TypeError(`Reference ${value.id} is missing target.`);
-  }
-  if (!isJsonValue(value.target)) {
-    throw new TypeError(
-      `Reference ${value.id} target must be a valid JSON value.`,
-    );
-  }
-  if (value.selection !== undefined && !isJsonValue(value.selection)) {
-    throw new TypeError(
-      `Reference ${value.id} selection must be a valid JSON value.`,
-    );
-  }
-  if (value.note !== undefined && typeof value.note !== "string") {
-    throw new TypeError(`Reference ${value.id} note must be a string.`);
-  }
+  return {
+    definition: copyBindingDefinition(binding.definition),
+    references,
+  };
 }
 
 export function assertBaseline(value: Baseline | undefined): void {
   if (value === undefined) return;
-  if (!isRecord(value) || !isRecord(value.bindings)) {
+  if (!isRecord(value)) {
     throw new TypeError("Invalid baseline format.");
   }
-  if (value.version !== 3) {
+  const bindingsProperty = readOwnDataProperty(value, "bindings");
+  if (!bindingsProperty.present || !isRecord(bindingsProperty.value)) {
+    throw new TypeError("Invalid baseline format.");
+  }
+  const versionProperty = readOwnDataProperty(value, "version");
+  const version = versionProperty.present ? versionProperty.value : undefined;
+  if (version !== 3) {
     throw new TypeError(
-      `Unsupported baseline version ${String(value.version)}; expected version 3. Review current bindings and references, remove or replace the old baseline, rebuild with \`dock baseline update --config <config>\`, and verify with \`dock check --config <config>\`.`,
+      `Unsupported baseline version ${String(version)}; expected version 3. Review current bindings and references, remove or replace the old baseline, rebuild with \`dock baseline update --config <config>\`, and verify with \`dock check --config <config>\`.`,
     );
   }
-  for (const [id, binding] of Object.entries(value.bindings)) {
-    if (!isRecord(binding) || !isRecord(binding.references)) {
+  for (const [id, binding] of Object.entries(bindingsProperty.value)) {
+    if (!isRecord(binding)) {
       throw new TypeError(`Invalid baseline format for binding ${id}.`);
     }
-    assertBindingDefinition(binding.definition);
-    if (binding.definition.id !== id) {
+    const definitionProperty = readOwnDataProperty(binding, "definition");
+    const referencesProperty = readOwnDataProperty(binding, "references");
+    if (!referencesProperty.present || !isRecord(referencesProperty.value)) {
+      throw new TypeError(`Invalid baseline format for binding ${id}.`);
+    }
+    const definition = definitionProperty.present
+      ? definitionProperty.value
+      : undefined;
+    assertBindingDefinition(definition);
+    if (definition.id !== id) {
       throw new TypeError(`Baseline ID mismatch for binding ${id}.`);
     }
 
-    const required = new Set(binding.definition.references);
-    const actual = Object.keys(binding.references);
+    const required = new Set(definition.references);
+    const actual = Object.keys(referencesProperty.value);
     if (
       actual.length !== required.size ||
       actual.some((referenceId) => !required.has(referenceId))
@@ -299,26 +460,50 @@ export function assertBaseline(value: Baseline | undefined): void {
         `Baseline for binding ${id} is missing required references.`,
       );
     }
-    for (const [referenceId, reference] of Object.entries(binding.references)) {
+    for (const [referenceId, reference] of Object.entries(
+      referencesProperty.value,
+    )) {
       if (!isRecord(reference)) {
         throw new TypeError(
           `Invalid baseline format for reference ${referenceId}.`,
         );
       }
-      assertReferenceDefinition(reference.definition);
+      const refDefinitionProperty = readOwnDataProperty(
+        reference,
+        "definition",
+      );
+      const refDefinition = refDefinitionProperty.present
+        ? refDefinitionProperty.value
+        : undefined;
+      assertReferenceDefinition(refDefinition);
+      const refValueProperty = readOwnDataProperty(reference, "value");
+      const valueKindProperty = readOwnDataProperty(reference, "valueKind");
+      const valueKind = valueKindProperty.present
+        ? valueKindProperty.value
+        : undefined;
       if (
-        reference.definition.id !== referenceId ||
-        !Object.hasOwn(reference, "value") ||
-        !isJsonValue(reference.value) ||
-        (reference.valueKind !== undefined &&
-          reference.valueKind !== "member-collection")
+        refDefinition.id !== referenceId ||
+        !refValueProperty.present ||
+        (valueKind !== undefined && valueKind !== "member-collection")
       ) {
         throw new TypeError(
           `Invalid baseline record for reference ${referenceId}.`,
         );
       }
-      if (reference.valueKind === "member-collection") {
-        assertMemberCollectionValue(reference.value, referenceId);
+      if (valueKind === "member-collection") {
+        assertMemberCollectionValue(refValueProperty.value, referenceId);
+      } else {
+        try {
+          assertJsonValue(refValueProperty.value);
+        } catch (error) {
+          if (error instanceof TypeError) {
+            throw new TypeError(
+              `Invalid baseline record for reference ${referenceId}.`,
+              { cause: error },
+            );
+          }
+          throw error;
+        }
       }
     }
   }

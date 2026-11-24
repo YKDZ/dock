@@ -392,3 +392,166 @@ function collectAllIssues(outcome: ReturnType<typeof updateBaseline>) {
   }));
   return [...bindingIssues, ...operationIssues];
 }
+
+void test("core check and updateBaseline reject accessors across inputs and baselines without evaluating getters", () => {
+  let getterCalls = 0;
+  const nestedGetter = Object.defineProperty({}, "secret", {
+    enumerable: true,
+    get() {
+      getterCalls += 1;
+      return "evaluated";
+    },
+  });
+  const topLevelTargetGetter = Object.defineProperty(
+    { id: "setting" },
+    "target",
+    {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return { path: "setting.txt" };
+      },
+    },
+  ) as unknown as CheckInput["references"][number];
+  const topLevelSelectionGetter = Object.defineProperty(
+    { id: "setting", target: { path: "setting.txt" } },
+    "selection",
+    {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return { step: 1 };
+      },
+    },
+  ) as unknown as CheckInput["references"][number];
+  const topLevelFactGetter = Object.defineProperty(
+    { referenceId: "setting" },
+    "value",
+    {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return { ok: true };
+      },
+    },
+  ) as unknown as CheckInput["facts"][number];
+  const topLevelMemberGetter = Object.defineProperty(
+    { id: "member" },
+    "value",
+    {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return { ok: true };
+      },
+    },
+  );
+
+  const baseInput: CheckInput = {
+    references: [{ id: "setting", target: { path: "setting.txt" } }],
+    bindings: [{ id: "configuration", references: ["setting"] }],
+    facts: [{ referenceId: "setting", value: { nested: [1, 2] } }],
+  };
+  const initial = updateBaseline(baseInput);
+  assert.equal(initial.status, "updated");
+  if (initial.status !== "updated") return;
+
+  for (const definition of [
+    topLevelTargetGetter,
+    topLevelSelectionGetter,
+    { id: "setting", target: { nested: nestedGetter } },
+    { id: "setting", target: "ok", selection: { nested: [nestedGetter] } },
+  ]) {
+    const rejected = updateBaseline({
+      ...baseInput,
+      references: [definition],
+      baseline: initial.baseline,
+    });
+    assert.equal(rejected.status, "rejected");
+    if (rejected.status !== "rejected") return;
+    assert.equal(
+      rejected.report.bindings[0]?.errors?.[0]?.code,
+      "invalid-reference-definition",
+    );
+  }
+
+  for (const badFact of [
+    topLevelFactGetter,
+    { referenceId: "setting", value: { nested: [nestedGetter] } },
+  ]) {
+    const rejected = updateBaseline({
+      ...baseInput,
+      facts: [badFact],
+      baseline: initial.baseline,
+    });
+    assert.equal(rejected.status, "rejected");
+    if (rejected.status !== "rejected") return;
+    assert.equal(
+      rejected.report.bindings[0]?.errors?.[0]?.code,
+      "invalid-fact",
+    );
+  }
+
+  for (const badMember of [
+    topLevelMemberGetter,
+    { id: "member", value: { nested: [nestedGetter] } },
+  ]) {
+    const rejected = updateBaseline({
+      ...baseInput,
+      facts: [
+        {
+          referenceId: "setting",
+          collection: {
+            completeness: "complete",
+            members: [
+              badMember as CheckInput["facts"][number] extends {
+                collection: { members: (infer M)[] };
+              }
+                ? M
+                : never,
+            ],
+          },
+        },
+      ],
+      baseline: initial.baseline,
+    });
+    assert.equal(rejected.status, "rejected");
+    if (rejected.status !== "rejected") return;
+    assert.equal(
+      rejected.report.bindings[0]?.errors?.[0]?.code,
+      "invalid-fact",
+    );
+  }
+
+  const corruptedValueBaseline = structuredClone(initial.baseline);
+  corruptedValueBaseline.bindings.configuration!.references.setting!.value = {
+    nested: nestedGetter as unknown as JsonValue,
+  };
+  assert.throws(
+    () => check({ ...baseInput, baseline: corruptedValueBaseline }),
+    TypeError,
+  );
+
+  const corruptedMemberBaseline = structuredClone(initial.baseline);
+  corruptedMemberBaseline.bindings.configuration!.references.setting!.valueKind =
+    "member-collection";
+  corruptedMemberBaseline.bindings.configuration!.references.setting!.value = [
+    { id: "m1", value: { nested: nestedGetter as unknown as JsonValue } },
+  ];
+  assert.throws(
+    () => check({ ...baseInput, baseline: corruptedMemberBaseline }),
+    TypeError,
+  );
+
+  const corruptedTopLevelMemberBaseline = structuredClone(initial.baseline);
+  corruptedTopLevelMemberBaseline.bindings.configuration!.references.setting!.valueKind =
+    "member-collection";
+  corruptedTopLevelMemberBaseline.bindings.configuration!.references.setting!.value =
+    [topLevelMemberGetter];
+  assert.throws(
+    () => check({ ...baseInput, baseline: corruptedTopLevelMemberBaseline }),
+    TypeError,
+  );
+
+  assert.equal(getterCalls, 0);
+});
