@@ -10,7 +10,7 @@ export type JsonValue =
 /** All comparable values share pure-data rules; validation never evaluates accessors or conversion methods. */
 export function isJsonValue(value: unknown): value is JsonValue {
   try {
-    copyJsonValue(value);
+    assertJsonValue(value);
     return true;
   } catch (error) {
     if (error instanceof TypeError) return false;
@@ -18,12 +18,104 @@ export function isJsonValue(value: unknown): value is JsonValue {
   }
 }
 
+/** Validates pure JSON data in a single zero-copy traversal without invoking accessors. */
+export function assertJsonValue(value: unknown): asserts value is JsonValue {
+  validate(value, new Set());
+}
+
 /** Accepts pure data and produces an independent copy; special properties and cycles fail explicitly. */
 export function copyJsonValue(value: unknown): JsonValue {
   return copy(value, new Set());
 }
 
+/** Object key order is ignored, plain arrays are ordered, and 0/-0 share JSON encoding. */
+export function canonicalJson(value: JsonValue): string {
+  return encode(value, new Set());
+}
+
+function validate(value: unknown, active: Set<object>): void {
+  if (value === null || typeof value !== "object") {
+    validatePrimitive(value);
+    return;
+  }
+  const container = inspectContainer(value, active);
+  active.add(value);
+  try {
+    if (container.array) {
+      for (let index = 0; index < container.length; index++) {
+        validate(ownDataDescriptorValue(value, String(index), true), active);
+      }
+      return;
+    }
+    for (const key of container.keys) {
+      validate(ownDataDescriptorValue(value, key, false), active);
+    }
+  } finally {
+    active.delete(value);
+  }
+}
+
 function copy(value: unknown, active: Set<object>): JsonValue {
+  if (value === null || typeof value !== "object") {
+    return validatePrimitive(value);
+  }
+  const container = inspectContainer(value, active);
+  active.add(value);
+  try {
+    if (container.array) {
+      const result: JsonValue[] = [];
+      for (let index = 0; index < container.length; index++) {
+        result.push(
+          copy(ownDataDescriptorValue(value, String(index), true), active),
+        );
+      }
+      return result;
+    }
+    const result: Record<string, JsonValue> = {};
+    for (const key of container.keys) {
+      Object.defineProperty(result, key, {
+        value: copy(ownDataDescriptorValue(value, key, false), active),
+        writable: true,
+        enumerable: true,
+        configurable: true,
+      });
+    }
+    return result;
+  } finally {
+    active.delete(value);
+  }
+}
+
+function encode(value: unknown, active: Set<object>): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(validatePrimitive(value));
+  }
+  const container = inspectContainer(value, active);
+  active.add(value);
+  try {
+    if (container.array) {
+      const parts: string[] = [];
+      for (let index = 0; index < container.length; index++) {
+        parts.push(
+          encode(ownDataDescriptorValue(value, String(index), true), active),
+        );
+      }
+      return `[${parts.join(",")}]`;
+    }
+    container.keys.sort();
+    const parts: string[] = [];
+    for (const key of container.keys) {
+      parts.push(
+        `${JSON.stringify(key)}:${encode(ownDataDescriptorValue(value, key, false), active)}`,
+      );
+    }
+    return `{${parts.join(",")}}`;
+  } finally {
+    active.delete(value);
+  }
+}
+
+function validatePrimitive(value: unknown): null | boolean | number | string {
   if (
     value === null ||
     typeof value === "string" ||
@@ -37,10 +129,16 @@ function copy(value: unknown, active: Set<object>): JsonValue {
     }
     return value;
   }
-  if (typeof value !== "object" || value === null || active.has(value)) {
+  throw invalidValue();
+}
+
+function inspectContainer(
+  value: object,
+  active: Set<object>,
+): { array: true; length: number } | { array: false; keys: string[] } {
+  if (active.has(value)) {
     throw invalidValue();
   }
-
   const array = Array.isArray(value);
   const prototype = Object.getPrototypeOf(value);
   if (
@@ -59,7 +157,7 @@ function copy(value: unknown, active: Set<object>): JsonValue {
   if (
     Object.getOwnPropertyNames(value).length !==
       keys.length + (array ? 1 : 0) ||
-    (array && keys.length !== value.length)
+    (array && keys.length !== (value as unknown[]).length)
   ) {
     throw new TypeError(
       array
@@ -67,55 +165,29 @@ function copy(value: unknown, active: Set<object>): JsonValue {
         : "Value must be a plain JSON object without extra properties.",
     );
   }
+  return array
+    ? { array: true, length: (value as unknown[]).length }
+    : { array: false, keys };
+}
 
-  active.add(value);
-  try {
-    if (array) {
-      const result: JsonValue[] = [];
-      for (let index = 0; index < value.length; index++) {
-        const descriptor = Object.getOwnPropertyDescriptor(
-          value,
-          String(index),
-        );
-        if (
-          descriptor === undefined ||
-          !descriptor.enumerable ||
-          !("value" in descriptor)
-        ) {
-          throw new TypeError(
-            "JSON array cannot contain holes or accessor properties.",
-          );
-        }
-        result.push(copy(descriptor.value, active));
-      }
-      return result;
-    }
-    const entries: [string, JsonValue][] = [];
-    for (const key of keys) {
-      const descriptor = Object.getOwnPropertyDescriptor(value, key);
-      if (descriptor === undefined || !("value" in descriptor)) {
-        throw new TypeError("JSON object cannot contain accessor properties.");
-      }
-      entries.push([key, copy(descriptor.value, active)]);
-    }
-    return Object.fromEntries(entries);
-  } finally {
-    active.delete(value);
+function ownDataDescriptorValue(
+  value: object,
+  key: string,
+  array: boolean,
+): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (
+    descriptor === undefined ||
+    (array && !descriptor.enumerable) ||
+    !("value" in descriptor)
+  ) {
+    throw new TypeError(
+      array
+        ? "JSON array cannot contain holes or accessor properties."
+        : "JSON object cannot contain accessor properties.",
+    );
   }
-}
-
-/** Object key order is ignored, plain arrays are ordered, and 0/-0 share JSON encoding. */
-export function canonicalJson(value: JsonValue): string {
-  return encode(copyJsonValue(value));
-}
-
-function encode(value: JsonValue): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(encode).join(",")}]`;
-  return `{${Object.keys(value)
-    .sort()
-    .map((key) => `${JSON.stringify(key)}:${encode(value[key]!)}`)
-    .join(",")}}`;
+  return descriptor.value;
 }
 
 function invalidValue(): TypeError {

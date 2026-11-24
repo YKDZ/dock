@@ -1,10 +1,13 @@
 import { check } from "./check.ts";
-import type {
-  BaselineReferenceFact,
-  BaselineUpdateIssue,
-  BaselineUpdateOutcome,
-  BindingBaseline,
-  CheckInput,
+import {
+  copyBaselineReferenceFact,
+  copyBindingBaseline,
+  copyBindingDefinition,
+  type BaselineReferenceFact,
+  type BaselineUpdateIssue,
+  type BaselineUpdateOutcome,
+  type BindingBaseline,
+  type CheckInput,
 } from "./contracts.ts";
 
 /** Atomically updates selected bindings with current valid facts without requiring a prior check or zero diffs. */
@@ -24,13 +27,23 @@ export function updateBaseline(input: CheckInput): BaselineUpdateOutcome {
     return { status: "rejected", errors, report };
   }
 
-  const nextBindings: Record<string, BindingBaseline> = Object.assign(
-    Object.create(null) as Record<string, BindingBaseline>,
-    structuredClone(input.baseline?.bindings ?? {}),
+  const touchedBindings = new Set(
+    report.bindings.map((binding) => binding.bindingId),
   );
+  const nextBindings: Record<string, BindingBaseline> = Object.create(
+    null,
+  ) as Record<string, BindingBaseline>;
+  if (input.baseline !== undefined) {
+    for (const [bindingId, baselineBinding] of Object.entries(
+      input.baseline.bindings,
+    )) {
+      if (!touchedBindings.has(bindingId)) {
+        nextBindings[bindingId] = copyBindingBaseline(baselineBinding);
+      }
+    }
+  }
   for (const binding of report.bindings) {
     if ("untracked" in binding) {
-      delete nextBindings[binding.bindingId];
       continue;
     }
     if (!("current" in binding)) continue;
@@ -40,14 +53,10 @@ export function updateBaseline(input: CheckInput): BaselineUpdateOutcome {
     for (const [referenceId, fact] of Object.entries(
       binding.current.references,
     )) {
-      references[referenceId] = {
-        definition: structuredClone(fact.definition),
-        value: structuredClone(fact.value),
-        ...(fact.valueKind === undefined ? {} : { valueKind: fact.valueKind }),
-      };
+      references[referenceId] = copyBaselineReferenceFact(fact);
     }
     nextBindings[binding.bindingId] = {
-      definition: structuredClone(binding.current.definition),
+      definition: copyBindingDefinition(binding.current.definition),
       references,
     };
   }

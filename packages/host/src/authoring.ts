@@ -37,11 +37,27 @@ export function createReference<
   target: Target,
   options: ReferenceOptions<Selection> = {},
 ): Reference<PluginId, Id, Target, Value, Selection> {
+  if (
+    typeof options !== "object" ||
+    options === null ||
+    Array.isArray(options)
+  ) {
+    throw new TypeError(`Reference ${String(id)} options must be an object.`);
+  }
+  const selection = readOwnOption(options, "selection") as
+    | Selection
+    | undefined;
+  const note = readOwnOption(options, "note") as string | undefined;
+  const declaredAt = readOwnOption(options, "declaredAt") as
+    | DeclarationSource
+    | undefined;
   const result = {
     id,
     pluginId,
     target,
-    ...options,
+    ...(selection === undefined ? {} : { selection }),
+    ...(note === undefined ? {} : { note }),
+    ...(declaredAt === undefined ? {} : { declaredAt }),
   };
   assertReferenceDefinition(result);
   assertDeclarationSource(result.declaredAt, `Reference ${id}`);
@@ -418,28 +434,27 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     });
 
     for (const reference of current.references) {
-      assertReference(reference);
-      const prior = references.get(reference.id);
-      if (prior !== undefined && !sameReferenceDefinition(prior, reference)) {
+      const candidate = readReferenceMetadata(reference);
+      const prior = references.get(candidate.id);
+      if (prior === undefined) {
+        references.set(candidate.id, {
+          ...ownNormalizedReference(candidate),
+          declarationSources: declarationSources([candidate.declaredAt]),
+        });
+        continue;
+      }
+      if (!sameReferenceDefinition(prior, candidate)) {
         throw new TypeError(
-          `Reference ID ${reference.id} maps to multiple distinct definitions${formatDeclarationSources([...prior.declarationSources, reference.declaredAt])}.`,
+          `Reference ID ${candidate.id} maps to multiple distinct definitions${formatDeclarationSources([...prior.declarationSources, candidate.declaredAt])}.`,
         );
       }
-      references.set(
-        reference.id,
-        prior === undefined
-          ? {
-              ...ownReference(reference),
-              declarationSources: declarationSources([reference.declaredAt]),
-            }
-          : {
-              ...prior,
-              declarationSources: declarationSources([
-                ...prior.declarationSources,
-                reference.declaredAt,
-              ]),
-            },
-      );
+      references.set(candidate.id, {
+        ...prior,
+        declarationSources: declarationSources([
+          ...prior.declarationSources,
+          candidate.declaredAt,
+        ]),
+      });
     }
   }
 
@@ -542,21 +557,92 @@ function referenceIds(value: unknown): unknown {
   });
 }
 
-function assertReference(value: unknown): asserts value is Reference {
+function readOwnOption(value: object, key: string): unknown {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) return undefined;
+  if (!("value" in descriptor)) {
+    throw new TypeError(`Reference option ${key} cannot be an accessor.`);
+  }
+  return descriptor.value;
+}
+
+function readOwnReferenceProperty(
+  value: object,
+  key: string,
+):
+  | { readonly present: false }
+  | { readonly present: true; readonly value: unknown } {
+  const descriptor = Object.getOwnPropertyDescriptor(value, key);
+  if (descriptor === undefined) return { present: false };
+  if (!descriptor.enumerable || !("value" in descriptor)) {
+    throw new TypeError(`Reference property ${key} cannot be an accessor.`);
+  }
+  return { present: true, value: descriptor.value };
+}
+
+function readReferenceMetadata(value: unknown): Reference {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     throw new TypeError(
       "Binding references must be created by plugin-provided reference builders.",
     );
   }
-  const reference = value as Reference;
-  assertReferenceDefinition(reference);
-  if (
-    typeof reference.pluginId !== "string" ||
-    reference.pluginId.length === 0
-  ) {
-    throw new TypeError(`Reference ${reference.id} is missing pluginId.`);
+  const idProperty = readOwnReferenceProperty(value, "id");
+  const id = idProperty.present ? idProperty.value : undefined;
+  if (typeof id !== "string" || id.length === 0) {
+    throw new TypeError("Reference ID must be a non-empty string.");
   }
-  assertDeclarationSource(reference.declaredAt, `Reference ${reference.id}`);
+  const targetProperty = readOwnReferenceProperty(value, "target");
+  if (!targetProperty.present) {
+    throw new TypeError(`Reference ${id} is missing target.`);
+  }
+  const selectionProperty = readOwnReferenceProperty(value, "selection");
+  const noteProperty = readOwnReferenceProperty(value, "note");
+  const note = noteProperty.present ? noteProperty.value : undefined;
+  if (note !== undefined && typeof note !== "string") {
+    throw new TypeError(`Reference ${id} note must be a string.`);
+  }
+  const pluginIdProperty = readOwnReferenceProperty(value, "pluginId");
+  const pluginId = pluginIdProperty.present
+    ? pluginIdProperty.value
+    : undefined;
+  if (typeof pluginId !== "string" || pluginId.length === 0) {
+    throw new TypeError(`Reference ${id} is missing pluginId.`);
+  }
+  const declaredAtProperty = readOwnReferenceProperty(value, "declaredAt");
+  const declaredAt = declaredAtProperty.present
+    ? (declaredAtProperty.value as DeclarationSource | undefined)
+    : undefined;
+  assertDeclarationSource(declaredAt, `Reference ${id}`);
+  return {
+    id,
+    pluginId,
+    target: targetProperty.value as JsonValue,
+    ...(selectionProperty.present && selectionProperty.value !== undefined
+      ? { selection: selectionProperty.value as JsonValue }
+      : {}),
+    ...(note === undefined ? {} : { note }),
+    ...(declaredAt === undefined ? {} : { declaredAt }),
+  };
+}
+
+function ownNormalizedReference(reference: Reference): Reference {
+  try {
+    return ownReference(reference);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      if (!isJsonValue(reference.target)) {
+        throw new TypeError(
+          `Reference ${reference.id} target must be a valid JSON value.`,
+          { cause: error },
+        );
+      }
+      throw new TypeError(
+        `Reference ${reference.id} selection must be a valid JSON value.`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
 }
 
 function assertReferenceDefinition(value: Reference): void {
@@ -609,12 +695,38 @@ function assertBindingDefinitionLocal(
 }
 
 function sameReferenceDefinition(left: Reference, right: Reference): boolean {
+  let rightTarget: string;
+  try {
+    rightTarget = canonicalJson(right.target);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new TypeError(
+        `Reference ${right.id} target must be a valid JSON value.`,
+        { cause: error },
+      );
+    }
+    throw error;
+  }
+  let rightSelection: string | undefined;
+  if (right.selection !== undefined) {
+    try {
+      rightSelection = canonicalJson(right.selection);
+    } catch (error) {
+      if (error instanceof TypeError) {
+        throw new TypeError(
+          `Reference ${right.id} selection must be a valid JSON value.`,
+          { cause: error },
+        );
+      }
+      throw error;
+    }
+  }
   return (
     left.pluginId === right.pluginId &&
-    canonicalJson(left.target) === canonicalJson(right.target) &&
-    (left.selection === undefined || right.selection === undefined
+    canonicalJson(left.target) === rightTarget &&
+    (left.selection === undefined || rightSelection === undefined
       ? left.selection === right.selection
-      : canonicalJson(left.selection) === canonicalJson(right.selection))
+      : canonicalJson(left.selection) === rightSelection)
   );
 }
 
