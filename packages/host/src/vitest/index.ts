@@ -1053,7 +1053,8 @@ function factFromVitestSuite(
         test.file === file && isWithinSuite(test.suitePath, target.suitePath),
     )
     .map((entry) => {
-      const id = entry.identity;
+      // Single vitestSuite references already bind file identity via fileInfo, so member IDs omit the testRoot-relative file prefix.
+      const id = JSON.stringify([...entry.suitePath, entry.name]);
       const matches = run.tests.filter(
         (test) => test.identity === entry.identity,
       );

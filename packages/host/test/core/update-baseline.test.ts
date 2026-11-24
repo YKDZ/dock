@@ -553,5 +553,57 @@ void test("core check and updateBaseline reject accessors across inputs and base
     TypeError,
   );
 
+  const corruptedBindingGetterBaseline = structuredClone(initial.baseline);
+  Object.defineProperty(
+    corruptedBindingGetterBaseline.bindings,
+    "configuration",
+    {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return structuredClone(initial.baseline.bindings.configuration!);
+      },
+    },
+  );
+  assert.throws(
+    () => check({ ...baseInput, baseline: corruptedBindingGetterBaseline }),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      updateBaseline({
+        ...baseInput,
+        baseline: corruptedBindingGetterBaseline,
+      }),
+    TypeError,
+  );
+
+  const corruptedReferenceGetterBaseline = structuredClone(initial.baseline);
+  Object.defineProperty(
+    corruptedReferenceGetterBaseline.bindings.configuration!.references,
+    "setting",
+    {
+      enumerable: true,
+      get() {
+        getterCalls += 1;
+        return structuredClone(
+          initial.baseline.bindings.configuration!.references.setting!,
+        );
+      },
+    },
+  );
+  assert.throws(
+    () => check({ ...baseInput, baseline: corruptedReferenceGetterBaseline }),
+    TypeError,
+  );
+  assert.throws(
+    () =>
+      updateBaseline({
+        ...baseInput,
+        baseline: corruptedReferenceGetterBaseline,
+      }),
+    TypeError,
+  );
+
   assert.equal(getterCalls, 0);
 });
