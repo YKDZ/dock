@@ -85,13 +85,19 @@ await test(exampleTest.name, async () => {
 
     const unchanged = runDock(source.check);
     assert.equal(unchanged.status, 0, unchanged.stdout);
-    assert.match(unchanged.stdout, /Consistent with baseline\./u);
+    assert.equal(
+      unchanged.stdout,
+      "Scope: installation\nAll checked bindings are consistent with baseline.\n",
+    );
 
     manifest.version = "1.0.1";
     await writeFile(join(project, "package.json"), JSON.stringify(manifest));
     const unrelated = runDock(source.check);
     assert.equal(unrelated.status, 0, unrelated.stdout);
-    assert.match(unrelated.stdout, /Consistent with baseline\./u);
+    assert.equal(
+      unrelated.stdout,
+      "Scope: installation\nAll checked bindings are consistent with baseline.\n",
+    );
 
     manifest.engines.node = source.nextVersion;
     await writeFile(join(project, "package.json"), JSON.stringify(manifest));
@@ -104,8 +110,9 @@ await test(exampleTest.name, async () => {
       ),
       changed.stdout,
     );
-    assert.match(changed.stdout, /Reference install-guide, file install\.md/u);
-    assert.ok(changed.stdout.includes(JSON.stringify(`${source.guide}\n`)));
+    assert.match(changed.stdout, /install-guide \(install\.md:1\)/u);
+    assert.doesNotMatch(changed.stdout, /Current fact:/u);
+    assert.ok(!changed.stdout.includes(JSON.stringify(`${source.guide}\n`)));
     assert.equal(
       await readFile(join(project, "dock.baseline.json"), "utf8"),
       saved,
@@ -129,7 +136,10 @@ await test(exampleTest.name, async () => {
     );
     const confirmed = runDock(source.usageCheck);
     assert.equal(confirmed.status, 0, confirmed.stdout);
-    assert.match(confirmed.stdout, /Consistent with baseline\./u);
+    assert.equal(
+      confirmed.stdout,
+      "Scope: installation\nAll checked bindings are consistent with baseline.\n",
+    );
   } finally {
     await rm(project, { recursive: true, force: true });
   }

@@ -16,6 +16,7 @@ import type {
   ReadableReferencePlugin,
   Reference,
 } from "../contracts.ts";
+import { recordLineRange } from "../line-range.ts";
 import { selectTextRange, TextSelectionError } from "./text-selection.ts";
 import type { TextSelectionStep } from "./text-selection.ts";
 
@@ -375,15 +376,18 @@ async function readFileReference(
       const code = isTextSelectionError(error)
         ? error.code
         : "file-selection-failed";
+      const errorRange = { path, start: 0, end: text.length };
+      recordLineRange(errorRange, text);
       throw new FileReferenceError(
         code,
         error instanceof Error ? error.message : String(error),
-        { path, start: 0, end: text.length },
+        errorRange,
         { cause: error },
       );
     }
   }
 
+  recordLineRange(selectedRange, text);
   return {
     value: text.slice(selectedRange.start, selectedRange.end),
     range: selectedRange,

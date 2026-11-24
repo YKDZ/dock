@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { open, rename, rm, mkdir } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
@@ -19,6 +19,13 @@ import {
   type TextRange,
 } from "./core/index.ts";
 import { MaintenanceError } from "./errors.ts";
+import {
+  computeLineRange,
+  getRecordedLineRange,
+  lineRangeKey,
+  type LineRange,
+  type LineRangeRecord,
+} from "./line-range.ts";
 import { ownPluginInformation } from "./owned-data.ts";
 import {
   resolveMaintenance,
@@ -57,6 +64,16 @@ export type BaselineUpdateOutcome =
       readonly report: CheckReport;
     };
 
+export type CliCheckResult = {
+  readonly report: CheckReport;
+  readonly lineRanges: LineRangeRecord;
+};
+
+export type CliUpdateBaselineResult = {
+  readonly outcome: BaselineUpdateOutcome;
+  readonly lineRanges: LineRangeRecord;
+};
+
 export async function inspect(
   config: MaintenanceConfig,
   scope?: MaintenanceScope,
@@ -76,6 +93,41 @@ export async function updateBaseline(
   scope?: MaintenanceScope,
 ): Promise<BaselineUpdateOutcome> {
   return await runOperation("updateBaseline", config, scope);
+}
+
+/** Internal CLI entry that preserves public CheckReport while carrying source-derived line numbers. */
+export async function checkForCli(
+  config: MaintenanceConfig,
+  scope?: MaintenanceScope,
+): Promise<CliCheckResult> {
+  const { result, lineRanges } =
+    typeof config === "string" || config instanceof URL
+      ? await runConfigWorker<{
+          readonly result: CheckReport;
+          readonly lineRanges: LineRangeRecord;
+        }>("check", resolveConfigPath(config), scope, true)
+      : await operateConfigWithLineRanges("check", config, process.cwd(), scope);
+  return { report: result, lineRanges };
+}
+
+/** Internal CLI entry that preserves public BaselineUpdateOutcome while carrying source-derived line numbers. */
+export async function updateBaselineForCli(
+  config: MaintenanceConfig,
+  scope?: MaintenanceScope,
+): Promise<CliUpdateBaselineResult> {
+  const { result, lineRanges } =
+    typeof config === "string" || config instanceof URL
+      ? await runConfigWorker<{
+          readonly result: BaselineUpdateOutcome;
+          readonly lineRanges: LineRangeRecord;
+        }>("updateBaseline", resolveConfigPath(config), scope, true)
+      : await operateConfigWithLineRanges(
+          "updateBaseline",
+          config,
+          process.cwd(),
+          scope,
+        );
+  return { outcome: result, lineRanges };
 }
 
 type OperationResult = {
@@ -103,29 +155,82 @@ export async function operateConfig<Kind extends Operation>(
   scope?: MaintenanceScope,
   configPath?: string,
 ): Promise<OperationResult[Kind]> {
+  const { result } = await runResolvedOperation(
+    operation,
+    value,
+    defaultRoot,
+    scope,
+    configPath,
+    false,
+  );
+  return result;
+}
+
+export async function operateConfigWithLineRanges<Kind extends Operation>(
+  operation: Kind,
+  value: unknown,
+  defaultRoot: string,
+  scope?: MaintenanceScope,
+  configPath?: string,
+): Promise<{
+  readonly result: OperationResult[Kind];
+  readonly lineRanges: LineRangeRecord;
+}> {
+  return await runResolvedOperation(
+    operation,
+    value,
+    defaultRoot,
+    scope,
+    configPath,
+    true,
+  );
+}
+
+async function runResolvedOperation<Kind extends Operation>(
+  operation: Kind,
+  value: unknown,
+  defaultRoot: string,
+  scope: MaintenanceScope | undefined,
+  configPath: string | undefined,
+  collectLineRanges: boolean,
+): Promise<{
+  readonly result: OperationResult[Kind];
+  readonly lineRanges: LineRangeRecord;
+}> {
   const resolved = await resolveMaintenance(
     value,
     defaultRoot,
     scope,
     configPath,
   );
-  if (operation === "inspect") return resolved.model as OperationResult[Kind];
-  const collection = await collect(resolved);
+  if (operation === "inspect") {
+    return {
+      result: resolved.model as OperationResult[Kind],
+      lineRanges: {},
+    };
+  }
+  const collection = await collect(resolved, collectLineRanges);
   const input = { ...resolved.model.context, facts: collection.facts };
   if (operation === "check") {
-    return withPluginInformation(
-      checkCore(input),
-      collection,
-    ) as OperationResult[Kind];
+    return {
+      result: withPluginInformation(
+        checkCore(input),
+        collection,
+      ) as OperationResult[Kind],
+      lineRanges: collection.lineRanges,
+    };
   }
   const outcome = updateBaselineCore(input);
   if (outcome.status === "updated") {
     await writeBaseline(resolved.model.baselinePath, outcome.baseline);
   }
   return {
-    ...outcome,
-    report: withPluginInformation(outcome.report, collection),
-  } as OperationResult[Kind];
+    result: {
+      ...outcome,
+      report: withPluginInformation(outcome.report, collection),
+    } as OperationResult[Kind],
+    lineRanges: collection.lineRanges,
+  };
 }
 
 type PluginError = {
@@ -142,10 +247,28 @@ type PluginCollection = {
     readonly text: readonly string[];
   }[];
   readonly errors: readonly PluginError[];
+  readonly lineRanges: LineRangeRecord;
 };
 
-async function collect(resolved: ResolvedOperation): Promise<PluginCollection> {
+type LineRangeCollector = {
+  readonly lineRanges: Record<string, LineRange>;
+  readonly fallbacks: {
+    readonly key: string;
+    readonly range: TextRange;
+  }[];
+};
+
+async function collect(
+  resolved: ResolvedOperation,
+  collectLineRanges: boolean,
+): Promise<PluginCollection> {
   const context = Object.freeze({ root: resolved.model.root });
+  const lineRangeCollector: LineRangeCollector | undefined = collectLineRanges
+    ? {
+        lineRanges: Object.create(null) as Record<string, LineRange>,
+        fallbacks: [],
+      }
+    : undefined;
   const batches = await Promise.all(
     resolved.runtime.collectors
       .filter(({ selectedReferences }) => selectedReferences.length > 0)
@@ -159,17 +282,52 @@ async function collect(resolved: ResolvedOperation): Promise<PluginCollection> {
               : { prepared: plugin.prepared }),
           });
           const value = await plugin.plugin.collect(request, context);
-          return acceptPluginBatch(plugin, value);
+          return acceptPluginBatch(plugin, value, lineRangeCollector);
         } catch (error) {
           return failedPluginBatch(plugin, error);
         }
       }),
   );
+  if (
+    lineRangeCollector !== undefined &&
+    lineRangeCollector.fallbacks.length > 0
+  ) {
+    await resolveFallbackLineRanges(resolved.model.root, lineRangeCollector);
+  }
   return {
     facts: batches.flatMap(({ facts }) => facts),
     diagnostics: batches.flatMap(({ diagnostics }) => diagnostics),
     errors: batches.flatMap(({ errors }) => errors),
+    lineRanges: lineRangeCollector?.lineRanges ?? {},
   };
+}
+
+async function resolveFallbackLineRanges(
+  root: string,
+  collector: LineRangeCollector,
+): Promise<void> {
+  const sourceCache = new Map<string, Promise<string | undefined>>();
+  const readSource = (path: string): Promise<string | undefined> => {
+    const resolvedPath = resolve(root, path);
+    let pending = sourceCache.get(resolvedPath);
+    if (pending === undefined) {
+      pending = readFile(resolvedPath, "utf8").catch(() => undefined);
+      sourceCache.set(resolvedPath, pending);
+    }
+    return pending;
+  };
+  await Promise.all(
+    collector.fallbacks.map(async ({ key, range }) => {
+      const source = await readSource(range.path);
+      if (source !== undefined) {
+        collector.lineRanges[key] = computeLineRange(
+          source,
+          range.start,
+          range.end,
+        );
+      }
+    }),
+  );
 }
 
 type AcceptedBatch = {
@@ -181,6 +339,7 @@ type AcceptedBatch = {
 function acceptPluginBatch(
   plugin: ResolvedPluginRuntime,
   value: unknown,
+  lineRangeCollector?: LineRangeCollector,
 ): AcceptedBatch {
   const shell = readBatchShell(value);
   if (shell === undefined) {
@@ -255,7 +414,14 @@ function acceptPluginBatch(
       continue;
     }
     try {
-      facts.push(toReferenceResult(reference.id, matches[0]));
+      const parsed = toReferenceResult(reference.id, matches[0]);
+      facts.push(parsed);
+      recordCollectedLineRange(
+        reference.id,
+        matches[0],
+        parsed,
+        lineRangeCollector,
+      );
     } catch {
       facts.push(invalidPluginResult(reference.id));
     }
@@ -578,10 +744,48 @@ function resolveConfigPath(input: string | URL): string {
   return resolve(process.cwd(), input);
 }
 
+function recordCollectedLineRange(
+  referenceId: string,
+  rawEntry: unknown,
+  parsed: ReferenceResult,
+  collector: LineRangeCollector | undefined,
+): void {
+  if (collector === undefined || parsed.range === undefined) return;
+  const rawRange = isPlainRecord(rawEntry)
+    ? ownDataProperty(rawEntry, "range")
+    : undefined;
+  const recorded =
+    rawRange?.status === "value" &&
+    typeof rawRange.value === "object" &&
+    rawRange.value !== null
+      ? getRecordedLineRange(rawRange.value)
+      : undefined;
+  const key = lineRangeKey(parsed.range, referenceId);
+  if (recorded !== undefined) {
+    collector.lineRanges[key] = recorded;
+    return;
+  }
+  if (
+    "value" in parsed &&
+    typeof parsed.value === "string" &&
+    parsed.range.start === 0 &&
+    parsed.range.end === parsed.value.length
+  ) {
+    collector.lineRanges[key] = computeLineRange(
+      parsed.value,
+      0,
+      parsed.value.length,
+    );
+    return;
+  }
+  collector.fallbacks.push({ key, range: parsed.range });
+}
+
 function runConfigWorker<T>(
   operation: Operation,
   configPath: string,
   scope?: MaintenanceScope,
+  collectLineRanges = false,
 ): Promise<T> {
   const workerUrl = new URL(
     import.meta.url.endsWith(".ts")
@@ -601,6 +805,7 @@ function runConfigWorker<T>(
         operation,
         configPath,
         ...(scope === undefined ? {} : { scope }),
+        ...(collectLineRanges ? { collectLineRanges: true } : {}),
       },
       execArgv,
     });

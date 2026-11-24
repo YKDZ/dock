@@ -5,6 +5,7 @@ import { parentPort, workerData } from "node:worker_threads";
 import {
   MaintenanceError,
   operateConfig,
+  operateConfigWithLineRanges,
   type Operation,
   type MaintenanceScope,
   type WorkerMessage,
@@ -14,6 +15,7 @@ type WorkerInput = {
   readonly operation: Operation;
   readonly configPath: string;
   readonly scope?: MaintenanceScope;
+  readonly collectLineRanges?: boolean;
 };
 
 async function run(): Promise<WorkerMessage> {
@@ -50,13 +52,21 @@ async function run(): Promise<WorkerMessage> {
 
   const defaultRoot = dirname(input.configPath);
   try {
-    const result = await operateConfig(
-      input.operation,
-      loaded.default,
-      defaultRoot,
-      input.scope,
-      input.configPath,
-    );
+    const result = input.collectLineRanges
+      ? await operateConfigWithLineRanges(
+          input.operation,
+          loaded.default,
+          defaultRoot,
+          input.scope,
+          input.configPath,
+        )
+      : await operateConfig(
+          input.operation,
+          loaded.default,
+          defaultRoot,
+          input.scope,
+          input.configPath,
+        );
     return { ok: true, result };
   } catch (error) {
     if (error instanceof MaintenanceError) throw error;

@@ -27,6 +27,7 @@ import {
   selectTextRange,
   type TextSelectionStep,
 } from "../file/text-selection.ts";
+import { recordLineRange } from "../line-range.ts";
 
 export const markdownPluginId = "@ykdz/dock-reference-markdown" as const;
 
@@ -311,6 +312,7 @@ async function readMarkdownReference(
   try {
     selection = decodeMarkdownSelection(reference.selection);
   } catch (error) {
+    recordLineRange(current, source);
     throw new MarkdownReferenceError(
       "invalid-selection",
       `Invalid selection for Markdown reference ${reference.id}: ${errorMessage(error)}`,
@@ -324,6 +326,7 @@ async function readMarkdownReference(
       try {
         current = selectMarkdownRange(source, current, step);
       } catch (error) {
+        recordLineRange(current, source);
         throw new MarkdownReferenceError(
           errorCode(error),
           errorMessage(error),
@@ -334,6 +337,7 @@ async function readMarkdownReference(
     }
   }
 
+  recordLineRange(current, source);
   return { value: markdownFact(source, current), range: current };
 }
 
