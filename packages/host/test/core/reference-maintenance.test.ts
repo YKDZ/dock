@@ -252,7 +252,7 @@ void test("old facts and definitions in change reports are bidirectionally isola
 
   bindingChange.before.references[0] = "from-report";
   (referenceChange.before.target as { path: string }).path = "from-report";
-  (factChange.before as string[])[0] = "from-report";
+  factChange.before[0] = "from-report";
   assert.equal(oldBinding.definition.references[0], "from-input");
   assert.equal(
     (oldReference.definition.target as { path: string }).path,
@@ -276,8 +276,8 @@ void test("untracking descriptions are bidirectionally isolated from input basel
   assert.equal(Object.hasOwn(outcome.baseline.bindings, binding.id), false);
 
   const removal = outcome.report.bindings[0]!;
-  assert.ok("untracked" in removal && removal.untracked === true);
-  if (!("untracked" in removal) || removal.untracked !== true) return;
+  assert.ok("untracked" in removal && removal.untracked);
+  if (!("untracked" in removal) || !removal.untracked) return;
   const before = removal.changes[0].before;
   const oldDefinition = baseline.bindings[binding.id]!.definition;
   oldDefinition.references[0] = "from-input";

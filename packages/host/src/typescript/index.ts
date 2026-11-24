@@ -25,6 +25,7 @@ import {
   selectTextRange,
   type TextSelectionStep,
 } from "../file/text-selection.ts";
+import { recordLineRange } from "../line-range.ts";
 
 export const typescriptPluginId = "@ykdz/dock-reference-typescript" as const;
 
@@ -299,6 +300,7 @@ async function readTypeScriptReference(
       range = selectTextRange(sourceText, range, step);
     }
   } catch (error) {
+    recordLineRange(range, sourceText);
     throw new TypeScriptReferenceError(
       errorCode(error),
       errorMessage(error),
@@ -307,6 +309,7 @@ async function readTypeScriptReference(
     );
   }
 
+  recordLineRange(range, sourceText);
   return { value: sourceText.slice(range.start, range.end), range };
 }
 

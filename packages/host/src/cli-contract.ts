@@ -13,16 +13,18 @@ import type {
   BindingCheckResult,
   TextRange,
 } from "./core/index.ts";
+import { lineRangeKey, type LineRangeRecord } from "./line-range.ts";
 import {
-  check,
+  checkForCli,
   inspect,
   MaintenanceError,
-  updateBaseline,
+  updateBaselineForCli,
 } from "./maintenance.ts";
 import type { CheckReport, MaintenanceScope } from "./maintenance.ts";
 import type { ResolvedMaintenance } from "./resolution.ts";
 
 const define = defineCli();
+const checkLineRanges = new WeakMap<object, LineRangeRecord>();
 const reportPayload = z.object({ report: z.unknown() });
 const updateIssueSchema = z.object({
   bindingId: z.string().optional(),
@@ -87,6 +89,16 @@ const presentMaintenanceFailure = ({
   readonly code: string;
   readonly message: string;
 }) => text.lines(toTextLines([`Maintenance failed (${code})`, message]));
+
+const presentReport = (
+  { report }: { readonly report: unknown },
+  context: { readonly input: object },
+) =>
+  text.lines(
+    toTextLines(
+      formatReport(report as CheckReport, checkLineRanges.get(context.input)),
+    ),
+  );
 
 const inspectCommand = define.command("inspect")({
   kind: "command",
@@ -181,7 +193,11 @@ const checkCommand = define.command("check")({
       },
       async handler({ input, outcome }) {
         try {
-          const report = await check(input.config, inputScope(input));
+          const { report, lineRanges } = await checkForCli(
+            input.config,
+            inputScope(input),
+          );
+          checkLineRanges.set(input, lineRanges);
           const hasErrors = report.bindings.some(
             (binding) => "errors" in binding,
           );
@@ -196,9 +212,6 @@ const checkCommand = define.command("check")({
         }
       },
     });
-
-    const presentReport = ({ report }: { readonly report: unknown }) =>
-      text.lines(toTextLines(formatReport(report as CheckReport)));
 
     return {
       default: "text",
@@ -253,7 +266,11 @@ const updateCommand = define.command("update")({
       },
       async handler({ input, outcome }) {
         try {
-          const result = await updateBaseline(input.config, inputScope(input));
+          const { outcome: result, lineRanges } = await updateBaselineForCli(
+            input.config,
+            inputScope(input),
+          );
+          checkLineRanges.set(input, lineRanges);
           if (result.status === "updated") {
             return outcome.data.updated({ report: result.report });
           }
@@ -273,14 +290,22 @@ const updateCommand = define.command("update")({
         text: execution.text({
           description: "Human-readable text output",
           success: {
-            updated: ({ report }) =>
-              text.lines(toTextLines(formatReport(report as CheckReport))),
-            rejected: ({ report, errors }) =>
+            updated: ({ report }, context) =>
+              text.lines(
+                toTextLines(
+                  formatReport(
+                    report as CheckReport,
+                    checkLineRanges.get(context.input),
+                  ),
+                ),
+              ),
+            rejected: ({ report, errors }, context) =>
               text.lines(
                 toTextLines(
                   formatRejectedUpdate(
                     report as CheckReport,
                     errors as BaselineUpdateIssue[],
+                    checkLineRanges.get(context.input),
                   ),
                 ),
               ),
@@ -394,22 +419,27 @@ function inputScope(input: {
   };
 }
 
-function formatReport(report: CheckReport): [string, ...string[]] {
+function formatReport(
+  report: CheckReport,
+  lineRanges?: LineRangeRecord,
+): [string, ...string[]] {
   const lines = [
     `Scope: ${report.scope.length === 0 ? "none" : report.scope.join(", ")}`,
   ];
-  for (const diagnostic of report.pluginDiagnostics) {
-    for (const line of diagnostic.text) {
-      lines.push(`Plugin ${diagnostic.pluginId}: ${line}`);
-    }
-  }
   for (const error of report.pluginErrors) {
     lines.push(
       `Plugin ${error.pluginId} error (${error.code}): ${error.message}`,
     );
   }
-  for (const binding of report.bindings) {
-    lines.push(...formatBinding(binding));
+  const activeBindings = report.bindings.filter(
+    (binding) => "errors" in binding || binding.changes.length > 0,
+  );
+  if (activeBindings.length === 0) {
+    lines.push("All checked bindings are consistent with baseline.");
+    return lines as [string, ...string[]];
+  }
+  for (const binding of activeBindings) {
+    lines.push(...formatBinding(binding, lineRanges));
   }
   return lines as [string, ...string[]];
 }
@@ -471,75 +501,190 @@ function formatResolution(
 function formatRejectedUpdate(
   report: CheckReport,
   errors: readonly BaselineUpdateIssue[],
+  lineRanges?: LineRangeRecord,
 ): [string, ...string[]] {
-  const lines = formatReport(report);
+  const lines = formatReport(report, lineRanges);
   for (const error of errors) {
     const identity = [error.bindingId, error.referenceId, error.memberId]
       .filter(Boolean)
       .join(" / ");
     lines.push(
-      `Update error${identity === "" ? "" : ` ${identity}`} (${error.code})${formatRange(error.range)}: ${error.message}`,
+      `Update error${identity === "" ? "" : ` ${identity}`} (${error.code})${formatLocationSuffix(error.range, undefined, lineRanges, error.referenceId)}: ${error.message}`,
     );
   }
   return lines;
 }
 
-function formatBinding(binding: BindingCheckResult): string[] {
+function formatBinding(
+  binding: BindingCheckResult,
+  lineRanges?: LineRangeRecord,
+): string[] {
   const lines = [`Binding ${binding.bindingId}`];
-  if ("errors" in binding) {
+  const erroredIds = new Set<string>();
+  if ("errors" in binding && binding.errors !== undefined) {
     for (const error of binding.errors) {
+      if (error.referenceId !== undefined) {
+        erroredIds.add(error.referenceId);
+      }
       const identity = [error.referenceId, error.memberId]
         .filter(Boolean)
         .join(" / ");
       lines.push(
-        `Error${identity === "" ? "" : ` ${identity}`} (${error.code})${formatRange(error.range)}: ${error.message}`,
+        `Error${identity === "" ? "" : ` ${identity}`} (${error.code})${formatLocationSuffix(error.range, undefined, lineRanges, error.referenceId)}: ${error.message}`,
       );
     }
-    return lines;
   }
-  if ("current" in binding) {
-    for (const reference of Object.values(binding.current.references)) {
-      const fileInfo = referenceFileInfo(reference.definition.target);
-      const file = fileInfo === undefined ? "" : `, file ${fileInfo}`;
-      lines.push(`Reference ${reference.definition.id}${file}`);
-      lines.push(`Current fact: ${JSON.stringify(reference.value)}`);
-      if (reference.range !== undefined) {
+
+  const currentReferences =
+    "current" in binding && binding.current !== undefined
+      ? binding.current.references
+      : undefined;
+  const changedIds = new Set<string>();
+  for (const change of binding.changes) {
+    if ("referenceId" in change) {
+      changedIds.add(change.referenceId);
+    }
+    lines.push(...formatChange(change, currentReferences, lineRanges));
+  }
+
+  if (currentReferences !== undefined) {
+    const otherReferences = Object.values(currentReferences).filter(
+      (reference) =>
+        !changedIds.has(reference.definition.id) &&
+        !erroredIds.has(reference.definition.id),
+    );
+    if (otherReferences.length > 0) {
+      lines.push(
+        binding.changes.some((change) => change.kind === "binding-added")
+          ? "References in binding:"
+          : "Other references to check:",
+      );
+      for (const reference of otherReferences) {
+        const location = formatLocation(
+          reference.range,
+          referenceFileInfo(reference.definition.target),
+          lineRanges,
+          reference.definition.id,
+        );
         lines.push(
-          `Location ${reference.range.path} (text offset ${reference.range.start}-${reference.range.end})`,
+          location === undefined
+            ? `  - ${reference.definition.id}`
+            : `  - ${reference.definition.id} (${location})`,
         );
       }
-    }
-  }
-  if (binding.changes.length === 0) {
-    lines.push("Consistent with baseline.");
-  } else {
-    for (const change of binding.changes) {
-      lines.push(`Change: ${describeChange(change)}`);
     }
   }
   return lines;
 }
 
-function formatRange(range: TextRange | undefined): string {
-  return range === undefined
-    ? ""
-    : ` (${range.path}, text offset ${range.start}-${range.end})`;
+function formatLocation(
+  range: TextRange | undefined,
+  fileInfo: string | undefined,
+  lineRanges: LineRangeRecord | undefined,
+  referenceId?: string,
+): string | undefined {
+  if (range !== undefined) {
+    const lineRange = lineRanges?.[lineRangeKey(range, referenceId)];
+    if (lineRange !== undefined) {
+      return lineRange.startLine === lineRange.endLine
+        ? `${range.path}:${lineRange.startLine}`
+        : `${range.path}:${lineRange.startLine}-${lineRange.endLine}`;
+    }
+    return `${range.path} (text offset ${range.start}-${range.end})`;
+  }
+  return fileInfo;
 }
 
-function describeChange(change: BindingCheckResult["changes"][number]): string {
-  if (change.kind === "fact" && "before" in change) {
-    return `${change.referenceId} fact: before ${JSON.stringify(change.before)}; after ${JSON.stringify(change.after)}`;
+function formatLocationSuffix(
+  range: TextRange | undefined,
+  fileInfo: string | undefined,
+  lineRanges: LineRangeRecord | undefined,
+  referenceId?: string,
+): string {
+  const location = formatLocation(range, fileInfo, lineRanges, referenceId);
+  return location === undefined ? "" : ` (${location})`;
+}
+
+function formatChange(
+  change: BindingCheckResult["changes"][number],
+  currentReferences:
+    | Readonly<
+        Record<
+          string,
+          {
+            readonly range?: TextRange;
+            readonly definition: { readonly target: unknown };
+          }
+        >
+      >
+    | undefined,
+  lineRanges: LineRangeRecord | undefined,
+): string[] {
+  const reference =
+    "referenceId" in change && currentReferences !== undefined
+      ? currentReferences[change.referenceId]
+      : undefined;
+  const locSuffix =
+    "referenceId" in change
+      ? formatLocationSuffix(
+          reference?.range,
+          reference === undefined
+            ? undefined
+            : referenceFileInfo(reference.definition.target),
+          lineRanges,
+          change.referenceId,
+        )
+      : "";
+
+  if (change.kind === "binding-added") {
+    return ["Change: binding added (not yet in baseline)"];
   }
-  if (change.kind === "fact") {
-    return `${change.referenceId} member facts: ${JSON.stringify(change.memberChanges)}`;
+  if (change.kind === "binding-removed") {
+    return ["Change: binding removed (no longer in current declarations)"];
   }
   if (change.kind === "binding-definition") {
-    return `binding definition: before ${JSON.stringify(change.before)}; after ${JSON.stringify(change.after)}`;
+    return [
+      `Change: binding definition changed: references ${JSON.stringify(change.before.references)} -> ${JSON.stringify(change.after.references)}`,
+    ];
+  }
+  if (change.kind === "reference-added") {
+    return [`Change: reference ${change.referenceId} added${locSuffix}`];
+  }
+  if (change.kind === "reference-removed") {
+    return [`Change: reference ${change.referenceId} removed`];
   }
   if (change.kind === "reference-definition") {
-    return `reference ${change.referenceId} definition changed${formatDefinitionLocations(change.before, change.after)}`;
+    return [
+      `Change: reference ${change.referenceId} definition changed${formatDefinitionLocations(change.before, change.after)}`,
+    ];
   }
-  return JSON.stringify(change);
+  if (change.kind === "fact" && "before" in change) {
+    if (
+      typeof change.before === "string" &&
+      typeof change.after === "string" &&
+      (isMultilineText(change.before) || isMultilineText(change.after))
+    ) {
+      return [
+        `Change: ${change.referenceId} fact changed${locSuffix}`,
+        ...formatMultilineDiff(change.before, change.after),
+      ];
+    }
+    return [
+      `Change: ${change.referenceId} fact: before ${JSON.stringify(change.before)}; after ${JSON.stringify(change.after)}${locSuffix}`,
+    ];
+  }
+  if (change.kind === "fact") {
+    return change.memberChanges.map((member) => {
+      if (!member.beforePresent && member.afterPresent) {
+        return `Change: ${change.referenceId} member ${member.memberId} added: ${JSON.stringify(member.after)}`;
+      }
+      if (member.beforePresent && !member.afterPresent) {
+        return `Change: ${change.referenceId} member ${member.memberId} removed (was ${JSON.stringify(member.before)})`;
+      }
+      return `Change: ${change.referenceId} member ${member.memberId} changed: before ${JSON.stringify(member.before)}; after ${JSON.stringify(member.after)}`;
+    });
+  }
+  return [`Change: ${JSON.stringify(change)}`];
 }
 
 function formatDefinitionLocations(before: unknown, after: unknown): string {
@@ -570,4 +715,180 @@ function referenceFileInfo(target: unknown): string | undefined {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const DIFF_CONTEXT_LINES = 2;
+const MAX_LCS_CELLS = 200_000;
+
+function isMultilineText(value: string): boolean {
+  return value.includes("\n") || value.includes("\r");
+}
+
+function splitDiffLines(value: string): string[] {
+  const withoutTrailingNewline = value.replace(/(?:\r\n|\r|\n)$/u, "");
+  return withoutTrailingNewline.length === 0
+    ? []
+    : withoutTrailingNewline.split(/\r\n|\r|\n/u);
+}
+
+type DiffStep = {
+  readonly kind: "equal" | "delete" | "insert";
+  readonly line: string;
+  readonly beforeLine: number;
+  readonly afterLine: number;
+};
+
+function computeLineDiffSteps(
+  beforeLines: readonly string[],
+  afterLines: readonly string[],
+): DiffStep[] {
+  let prefix = 0;
+  while (
+    prefix < beforeLines.length &&
+    prefix < afterLines.length &&
+    beforeLines[prefix] === afterLines[prefix]
+  ) {
+    prefix += 1;
+  }
+
+  let suffix = 0;
+  while (
+    beforeLines.length - 1 - suffix >= prefix &&
+    afterLines.length - 1 - suffix >= prefix &&
+    beforeLines[beforeLines.length - 1 - suffix] ===
+      afterLines[afterLines.length - 1 - suffix]
+  ) {
+    suffix += 1;
+  }
+
+  const steps: DiffStep[] = [];
+  let beforeLine = 1;
+  let afterLine = 1;
+  const pushEqual = (line: string): void => {
+    steps.push({ kind: "equal", line, beforeLine, afterLine });
+    beforeLine += 1;
+    afterLine += 1;
+  };
+  const pushDelete = (line: string): void => {
+    steps.push({ kind: "delete", line, beforeLine, afterLine });
+    beforeLine += 1;
+  };
+  const pushInsert = (line: string): void => {
+    steps.push({ kind: "insert", line, beforeLine, afterLine });
+    afterLine += 1;
+  };
+
+  for (let index = 0; index < prefix; index += 1) {
+    pushEqual(beforeLines[index]!);
+  }
+
+  const beforeMid = beforeLines.slice(prefix, beforeLines.length - suffix);
+  const afterMid = afterLines.slice(prefix, afterLines.length - suffix);
+  if (beforeMid.length > 0 || afterMid.length > 0) {
+    if (beforeMid.length * afterMid.length <= MAX_LCS_CELLS) {
+      const m = beforeMid.length;
+      const n = afterMid.length;
+      const stride = n + 1;
+      const dp = new Uint32Array((m + 1) * stride);
+      for (let i = m - 1; i >= 0; i -= 1) {
+        for (let j = n - 1; j >= 0; j -= 1) {
+          dp[i * stride + j] =
+            beforeMid[i] === afterMid[j]
+              ? dp[(i + 1) * stride + (j + 1)]! + 1
+              : Math.max(dp[(i + 1) * stride + j]!, dp[i * stride + (j + 1)]!);
+        }
+      }
+      let i = 0;
+      let j = 0;
+      while (i < m && j < n) {
+        if (beforeMid[i] === afterMid[j]) {
+          pushEqual(beforeMid[i]!);
+          i += 1;
+          j += 1;
+        } else if (dp[(i + 1) * stride + j]! >= dp[i * stride + (j + 1)]!) {
+          pushDelete(beforeMid[i]!);
+          i += 1;
+        } else {
+          pushInsert(afterMid[j]!);
+          j += 1;
+        }
+      }
+      while (i < m) {
+        pushDelete(beforeMid[i]!);
+        i += 1;
+      }
+      while (j < n) {
+        pushInsert(afterMid[j]!);
+        j += 1;
+      }
+    } else {
+      for (const line of beforeMid) pushDelete(line);
+      for (const line of afterMid) pushInsert(line);
+    }
+  }
+
+  for (
+    let index = beforeLines.length - suffix;
+    index < beforeLines.length;
+    index += 1
+  ) {
+    pushEqual(beforeLines[index]!);
+  }
+  return steps;
+}
+
+function formatMultilineDiff(before: string, after: string): string[] {
+  const beforeLines = splitDiffLines(before);
+  const afterLines = splitDiffLines(after);
+  const steps = computeLineDiffSteps(beforeLines, afterLines);
+
+  const hunks: { start: number; end: number }[] = [];
+  for (let index = 0; index < steps.length; index += 1) {
+    if (steps[index]!.kind === "equal") continue;
+    const start = Math.max(0, index - DIFF_CONTEXT_LINES);
+    const end = Math.min(steps.length - 1, index + DIFF_CONTEXT_LINES);
+    const previous = hunks.at(-1);
+    if (previous !== undefined && start <= previous.end + 1) {
+      previous.end = end;
+    } else {
+      hunks.push({ start, end });
+    }
+  }
+
+  if (hunks.length === 0) {
+    return ["  (line endings or trailing newline changed)"];
+  }
+
+  const maxLineNumber = Math.max(beforeLines.length, afterLines.length, 1);
+  const width = String(maxLineNumber).length;
+  const output: string[] = [];
+  for (const hunk of hunks) {
+    const slice = steps.slice(hunk.start, hunk.end + 1);
+    const first = slice[0]!;
+    const beforeCount = slice.filter((step) => step.kind !== "insert").length;
+    const afterCount = slice.filter((step) => step.kind !== "delete").length;
+    const beforeStart =
+      beforeCount === 0 ? Math.max(0, first.beforeLine - 1) : first.beforeLine;
+    const afterStart =
+      afterCount === 0 ? Math.max(0, first.afterLine - 1) : first.afterLine;
+    output.push(
+      `  @@ -${beforeStart},${beforeCount} +${afterStart},${afterCount} @@`,
+    );
+    for (const step of slice) {
+      if (step.kind === "equal") {
+        output.push(
+          `    ${String(step.afterLine).padStart(width)} | ${step.line}`,
+        );
+      } else if (step.kind === "delete") {
+        output.push(
+          `  - ${String(step.beforeLine).padStart(width)} | ${step.line}`,
+        );
+      } else {
+        output.push(
+          `  + ${String(step.afterLine).padStart(width)} | ${step.line}`,
+        );
+      }
+    }
+  }
+  return output;
 }
