@@ -344,7 +344,7 @@ void test("inspect, check, and baseline update share handlers across English tex
       start: 0,
       end: 12,
     });
-    assert.deepEqual(Object.keys(structuredRef?.range ?? {}).sort(), [
+    assert.deepEqual(Object.keys(structuredRef?.range ?? {}).toSorted(), [
       "end",
       "path",
       "start",
@@ -612,10 +612,7 @@ void test("lists related references with line-based locations, fallbacks, plugin
         report: {
           bindings: Array<{
             current: {
-              references: Record<
-                string,
-                { range?: Record<string, unknown> }
-              >;
+              references: Record<string, { range?: Record<string, unknown> }>;
             };
           }>;
         };
@@ -625,7 +622,7 @@ void test("lists related references with line-based locations, fallbacks, plugin
       structuredReport.data.report.bindings[0]?.current.references["crlf-ref"]
         ?.range;
     assert.deepEqual(crlfRange, { path: "crlf.txt", start: 7, end: 22 });
-    assert.deepEqual(Object.keys(crlfRange ?? {}).sort(), [
+    assert.deepEqual(Object.keys(crlfRange ?? {}).toSorted(), [
       "end",
       "path",
       "start",
@@ -658,7 +655,10 @@ void test("lists related references with line-based locations, fallbacks, plugin
       statePath,
       JSON.stringify({
         members: [
-          { id: "a", error: { code: "missing-observation", message: "Missing obs" } },
+          {
+            id: "a",
+            error: { code: "missing-observation", message: "Missing obs" },
+          },
           { id: "b", value: "new-member" },
         ],
       }),
@@ -745,7 +745,10 @@ void test("renders local line-level context hunks for multiline text fact change
     const diffText = await runCli(["check", "--config", configPath]);
     assert.equal(diffText.result.exitCode, 1);
     assert.equal(diffText.stderr, "");
-    assert.match(diffText.stdout, /Change: guide-ref fact changed \(guide\.md:1-15\)/);
+    assert.match(
+      diffText.stdout,
+      /Change: guide-ref fact changed \(guide\.md:1-15\)/,
+    );
     assert.match(diffText.stdout, /@@ /);
     assert.match(diffText.stdout, /Line 06/);
     assert.match(diffText.stdout, /Line 07/);
@@ -774,7 +777,10 @@ void test("renders local line-level context hunks for multiline text fact change
           bindings: Array<{
             changes: Array<{ before?: string; after?: string }>;
             current: {
-              references: Record<string, { range?: { path: string; start: number; end: number } }>;
+              references: Record<
+                string,
+                { range?: { path: string; start: number; end: number } }
+              >;
             };
           }>;
         };
@@ -784,7 +790,8 @@ void test("renders local line-level context hunks for multiline text fact change
     assert.equal(factChange?.before, initialText);
     assert.equal(factChange?.after, updatedText);
     assert.deepEqual(
-      structured.data.report.bindings[0]?.current.references["guide-ref"]?.range,
+      structured.data.report.bindings[0]?.current.references["guide-ref"]
+        ?.range,
       { path: "guide.md", start: 0, end: updatedText.length },
     );
   } finally {

@@ -90,6 +90,16 @@ const presentMaintenanceFailure = ({
   readonly message: string;
 }) => text.lines(toTextLines([`Maintenance failed (${code})`, message]));
 
+const presentReport = (
+  { report }: { readonly report: unknown },
+  context: { readonly input: object },
+) =>
+  text.lines(
+    toTextLines(
+      formatReport(report as CheckReport, checkLineRanges.get(context.input)),
+    ),
+  );
+
 const inspectCommand = define.command("inspect")({
   kind: "command",
   parent: "dock",
@@ -202,16 +212,6 @@ const checkCommand = define.command("check")({
         }
       },
     });
-
-    const presentReport = (
-      { report }: { readonly report: unknown },
-      context: { readonly input: object },
-    ) =>
-      text.lines(
-        toTextLines(
-          formatReport(report as CheckReport, checkLineRanges.get(context.input)),
-        ),
-      );
 
     return {
       default: "text",
@@ -608,7 +608,15 @@ function formatLocationSuffix(
 function formatChange(
   change: BindingCheckResult["changes"][number],
   currentReferences:
-    | Readonly<Record<string, { readonly range?: TextRange; readonly definition: { readonly target: unknown } }>>
+    | Readonly<
+        Record<
+          string,
+          {
+            readonly range?: TextRange;
+            readonly definition: { readonly target: unknown };
+          }
+        >
+      >
     | undefined,
   lineRanges: LineRangeRecord | undefined,
 ): string[] {

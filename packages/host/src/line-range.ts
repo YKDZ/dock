@@ -26,7 +26,10 @@ export function recordLineRange(
   range: { readonly start: number; readonly end: number },
   source: string,
 ): void {
-  recordedLineRanges.set(range, computeLineRange(source, range.start, range.end));
+  recordedLineRanges.set(
+    range,
+    computeLineRange(source, range.start, range.end),
+  );
 }
 
 export function getRecordedLineRange(range: object): LineRange | undefined {
@@ -34,7 +37,11 @@ export function getRecordedLineRange(range: object): LineRange | undefined {
 }
 
 export function lineRangeKey(
-  range: { readonly path: string; readonly start: number; readonly end: number },
+  range: {
+    readonly path: string;
+    readonly start: number;
+    readonly end: number;
+  },
   referenceId?: string,
 ): string {
   return `${referenceId ?? ""}\0${range.path}\0${range.start}\0${range.end}`;

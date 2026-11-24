@@ -106,7 +106,12 @@ export async function checkForCli(
           readonly result: CheckReport;
           readonly lineRanges: LineRangeRecord;
         }>("check", resolveConfigPath(config), scope, true)
-      : await operateConfigWithLineRanges("check", config, process.cwd(), scope);
+      : await operateConfigWithLineRanges(
+          "check",
+          config,
+          process.cwd(),
+          scope,
+        );
   return { report: result, lineRanges };
 }
 
