@@ -17,7 +17,11 @@ import type {
   Reference,
 } from "../contracts.ts";
 import { recordLineRange } from "../line-range.ts";
-import { selectTextRange, TextSelectionError } from "./text-selection.ts";
+import {
+  assertTextSelectionStep,
+  selectTextRange,
+  TextSelectionError,
+} from "./text-selection.ts";
 import type { TextSelectionStep } from "./text-selection.ts";
 
 export const filePluginId = "@ykdz/dock-reference-file" as const;
@@ -235,16 +239,23 @@ function createTextBuilder(
   } satisfies FileTextSelection;
   return {
     quote(text: string): FileTextReferenceBuilder {
-      return createTextBuilder(target, [...steps, { kind: "quote", text }]);
+      const step: TextSelectionStep = { kind: "quote", text };
+      assertTextSelectionStep(step);
+      return createTextBuilder(target, [...steps, step]);
     },
     match(pattern: string, group?: number): FileTextReferenceBuilder {
-      return createTextBuilder(target, [
-        ...steps,
-        { kind: "match", pattern, ...(group === undefined ? {} : { group }) },
-      ]);
+      const step: TextSelectionStep = {
+        kind: "match",
+        pattern,
+        ...(group === undefined ? {} : { group }),
+      };
+      assertTextSelectionStep(step);
+      return createTextBuilder(target, [...steps, step]);
     },
     region(name: string): FileTextReferenceBuilder {
-      return createTextBuilder(target, [...steps, { kind: "region", name }]);
+      const step: TextSelectionStep = { kind: "region", name };
+      assertTextSelectionStep(step);
+      return createTextBuilder(target, [...steps, step]);
     },
     reference<Id extends string>(
       id: Id,
@@ -455,9 +466,11 @@ function assertFileSelection(value: JsonValue | undefined): void {
     value.kind === "text" &&
     Object.keys(value).length === 2 &&
     Array.isArray(value.steps) &&
-    value.steps.length > 0 &&
-    value.steps.every(isTextSelectionStep)
+    value.steps.length > 0
   ) {
+    for (const step of value.steps) {
+      assertTextSelectionStep(step);
+    }
     return;
   }
   throw new TypeError(
@@ -470,28 +483,6 @@ function decodeFileSelection(
 ): FileSelection | undefined {
   assertFileSelection(value);
   return value === undefined ? undefined : (value as FileSelection);
-}
-
-function isTextSelectionStep(
-  value: JsonValue,
-): value is JsonValue & TextSelectionStep {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return false;
-  }
-  if (value.kind === "quote") {
-    return typeof value.text === "string" && Object.keys(value).length === 2;
-  }
-  if (value.kind === "match") {
-    return (
-      typeof value.pattern === "string" &&
-      (value.group === undefined || typeof value.group === "number") &&
-      Object.keys(value).length === (value.group === undefined ? 2 : 3)
-    );
-  }
-  if (value.kind === "region") {
-    return typeof value.name === "string" && Object.keys(value).length === 2;
-  }
-  return false;
 }
 
 function resolveTarget(target: string, root: string): string {

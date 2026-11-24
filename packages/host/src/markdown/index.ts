@@ -24,6 +24,7 @@ import type {
   TextRange,
 } from "../contracts.ts";
 import {
+  assertTextSelectionStep,
   selectTextRange,
   type TextSelectionStep,
 } from "../file/text-selection.ts";
@@ -229,22 +230,23 @@ function createBuilder<Selection extends JsonValue>(
       ]);
     },
     quote(text): MarkdownReferenceBuilder {
-      return createBuilder<MarkdownSelection>(target, [
-        ...steps,
-        { kind: "quote", text },
-      ]);
+      const step: TextSelectionStep = { kind: "quote", text };
+      assertTextSelectionStep(step);
+      return createBuilder<MarkdownSelection>(target, [...steps, step]);
     },
     match(pattern, group): MarkdownReferenceBuilder {
-      return createBuilder<MarkdownSelection>(target, [
-        ...steps,
-        { kind: "match", pattern, ...(group === undefined ? {} : { group }) },
-      ]);
+      const step: TextSelectionStep = {
+        kind: "match",
+        pattern,
+        ...(group === undefined ? {} : { group }),
+      };
+      assertTextSelectionStep(step);
+      return createBuilder<MarkdownSelection>(target, [...steps, step]);
     },
     region(name): MarkdownReferenceBuilder {
-      return createBuilder<MarkdownSelection>(target, [
-        ...steps,
-        { kind: "region", name },
-      ]);
+      const step: TextSelectionStep = { kind: "region", name };
+      assertTextSelectionStep(step);
+      return createBuilder<MarkdownSelection>(target, [...steps, step]);
     },
     reference<Id extends string>(
       id: Id,
@@ -865,34 +867,17 @@ function assertMarkdownStep(
       "Table cell selection must provide a target column and a valid row key.",
     );
   }
-  if (value.kind === "quote") {
-    if (Object.keys(value).length === 2 && typeof value.text === "string") {
+  if (
+    value.kind === "quote" ||
+    value.kind === "match" ||
+    value.kind === "region"
+  ) {
+    try {
+      assertTextSelectionStep(value);
       return;
+    } catch (error) {
+      throw invalidSelector(errorMessage(error));
     }
-    throw invalidSelector(
-      "Quote selection step must provide text with no extra fields.",
-    );
-  }
-  if (value.kind === "match") {
-    if (
-      (Object.keys(value).length === 2 || Object.keys(value).length === 3) &&
-      typeof value.pattern === "string" &&
-      (value.group === undefined ||
-        (typeof value.group === "number" && Number.isInteger(value.group)))
-    ) {
-      return;
-    }
-    throw invalidSelector(
-      "Match selection step has an invalid pattern or capture group.",
-    );
-  }
-  if (value.kind === "region") {
-    if (Object.keys(value).length === 2 && typeof value.name === "string") {
-      return;
-    }
-    throw invalidSelector(
-      "Region selection step must provide name with no extra fields.",
-    );
   }
   if (value.kind === "marker") {
     if (

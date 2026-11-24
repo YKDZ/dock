@@ -21,6 +21,7 @@ import type {
   TextRange,
 } from "../contracts.ts";
 import {
+  assertTextSelectionStep,
   selectTextRange,
   type TextSelectionStep,
 } from "../file/text-selection.ts";
@@ -105,7 +106,7 @@ const implementation = definePlugin({
     } catch (error) {
       throw new TypeScriptReferenceError(
         "invalid-typescript-target",
-        errorMessage(error),
+        `Invalid TypeScript target for reference ${reference.id}: ${errorMessage(error)}`,
         undefined,
         { cause: error },
       );
@@ -115,7 +116,7 @@ const implementation = definePlugin({
     } catch (error) {
       throw new TypeScriptReferenceError(
         "invalid-typescript-selection",
-        errorMessage(error),
+        `Invalid TypeScript selection for reference ${reference.id}: ${errorMessage(error)}`,
         undefined,
         { cause: error },
       );
@@ -198,16 +199,23 @@ function createTextBuilder(
 ): TypeScriptTextReferenceBuilder {
   return {
     quote(text: string): TypeScriptTextReferenceBuilder {
-      return createTextBuilder(target, [...steps, { kind: "quote", text }]);
+      const step: TextSelectionStep = { kind: "quote", text };
+      assertTextSelectionStep(step);
+      return createTextBuilder(target, [...steps, step]);
     },
     match(pattern: string, group?: number): TypeScriptTextReferenceBuilder {
-      return createTextBuilder(target, [
-        ...steps,
-        { kind: "match", pattern, ...(group === undefined ? {} : { group }) },
-      ]);
+      const step: TextSelectionStep = {
+        kind: "match",
+        pattern,
+        ...(group === undefined ? {} : { group }),
+      };
+      assertTextSelectionStep(step);
+      return createTextBuilder(target, [...steps, step]);
     },
     region(name: string): TypeScriptTextReferenceBuilder {
-      return createTextBuilder(target, [...steps, { kind: "region", name }]);
+      const step: TextSelectionStep = { kind: "region", name };
+      assertTextSelectionStep(step);
+      return createTextBuilder(target, [...steps, step]);
     },
     reference<Id extends string>(
       id: Id,
@@ -268,7 +276,7 @@ async function readTypeScriptReference(
   } catch (error) {
     throw new TypeScriptReferenceError(
       "invalid-typescript-selection",
-      errorMessage(error),
+      `Invalid TypeScript selection for reference ${reference.id}: ${errorMessage(error)}`,
       undefined,
       { cause: error },
     );
@@ -552,14 +560,17 @@ function assertSelection(
   if (
     !isRecord(value) ||
     value.kind !== "typescript" ||
+    Object.keys(value).length !== 2 ||
     !Array.isArray(value.steps) ||
     value.steps.length === 0 ||
-    !isSymbolStep(value.steps[0]) ||
-    !value.steps.slice(1).every(isTextSelectionStep)
+    !isSymbolStep(value.steps[0])
   ) {
     throw new TypeError(
       "TypeScript selection must start with a symbol step followed by plain text steps.",
     );
+  }
+  for (const step of value.steps.slice(1)) {
+    assertTextSelectionStep(step);
   }
 }
 
@@ -577,32 +588,6 @@ function isSymbolStep(value: unknown): value is TypeScriptSymbolStep {
   return Object.keys(value).every((key) =>
     ["kind", "name", "declaration"].includes(key),
   );
-}
-
-function isTextSelectionStep(value: unknown): value is TextSelectionStep {
-  if (!isRecord(value)) return false;
-  if (value.kind === "quote") {
-    return (
-      typeof value.text === "string" &&
-      Object.keys(value).every((key) => ["kind", "text"].includes(key))
-    );
-  }
-  if (value.kind === "match") {
-    return (
-      typeof value.pattern === "string" &&
-      (value.group === undefined || typeof value.group === "number") &&
-      Object.keys(value).every((key) =>
-        ["kind", "pattern", "group"].includes(key),
-      )
-    );
-  }
-  if (value.kind === "region") {
-    return (
-      typeof value.name === "string" &&
-      Object.keys(value).every((key) => ["kind", "name"].includes(key))
-    );
-  }
-  return false;
 }
 
 function isDeclarationKind(value: unknown): value is TypeScriptDeclarationKind {

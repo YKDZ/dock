@@ -618,3 +618,128 @@ void test("corrupted baseline fails explicitly instead of treating it as initial
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("plain file preflight rejects misspelled, missing, and mistyped text selector fields with reference ID", () => {
+  const sharedMisspelledMatch = {
+    kind: "match",
+    pattern: "port=(\\d+)",
+    gropu: 1,
+  };
+  const invalidSteps: readonly unknown[] = [
+    sharedMisspelledMatch,
+    { kind: "quote" },
+    { kind: "quote", text: 42 },
+    { kind: "quote", text: "ok", extra: true },
+    { kind: "match" },
+    { kind: "match", pattern: 42 },
+    { kind: "match", pattern: "port=(\\d+)", group: -1 },
+    { kind: "match", pattern: "port=(\\d+)", group: 1.5 },
+    { kind: "match", pattern: "port=(\\d+)", group: "1" },
+    { kind: "region" },
+    { kind: "region", name: 42 },
+    { kind: "region", name: "env", extra: true },
+  ];
+
+  for (const [index, step] of invalidSteps.entries()) {
+    const referenceId = `invalid-file-step-${index}`;
+    const reference = {
+      id: referenceId,
+      pluginId: filePluginId,
+      target: "guide.md",
+      selection: { kind: "text", steps: [step] },
+    };
+    assert.throws(
+      () => Reflect.apply(file.validate, file, [reference]),
+      (error: unknown) =>
+        error instanceof Error && error.message.includes(referenceId),
+      `file.validate should reject step ${JSON.stringify(step)} with referenceId`,
+    );
+    assert.throws(
+      () =>
+        Reflect.apply(defineConfig, undefined, [
+          {
+            plugins: [file],
+            bindings: [{ id: "invalid-policy", references: [reference] }],
+          },
+        ]),
+      (error: unknown) =>
+        error instanceof Error && error.message.includes(referenceId),
+      `defineConfig should reject step ${JSON.stringify(step)} with referenceId`,
+    );
+  }
+
+  assert.throws(
+    () => file.from("guide.md").match("port=(\\d+)", -1),
+    TypeError,
+  );
+  assert.throws(
+    () => file.from("guide.md").match("port=(\\d+)", 1.5),
+    TypeError,
+  );
+  assert.throws(() => file.from("guide.md").quote(JSON.parse("42")), TypeError);
+  assert.throws(
+    () => file.from("guide.md").region(JSON.parse("42")),
+    TypeError,
+  );
+});
+
+void test("plain file public entry supports quote, match with capture group, and region with source UTF-16 ranges", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-file-text-steps-"));
+  const source =
+    "😀header\n#region runtime\nport=4173\nhost=localhost\n#endregion runtime\n";
+
+  try {
+    await writeFile(join(root, "app.env"), source, "utf8");
+    const quoted = file
+      .from("app.env")
+      .quote("host=localhost")
+      .reference("quoted");
+    const matched = file
+      .from("app.env")
+      .match("port=(\\d+)", 1)
+      .reference("matched");
+    const regional = file
+      .from("app.env")
+      .region("runtime")
+      .reference("regional");
+    const config = defineConfig({
+      root,
+      plugins: [file],
+      bindings: [binding("env-policy", [quoted, matched, regional])],
+    });
+
+    const readMatched = await readReference(config, matched);
+    assert.equal(readMatched.value, "4173");
+    assert.deepEqual(readMatched.range, {
+      path: "app.env",
+      start: source.indexOf("4173"),
+      end: source.indexOf("4173") + 4,
+    });
+
+    const report = await check(config);
+    const entry = report.bindings[0];
+    assert.ok(entry && "current" in entry);
+    assert.equal(entry.current.references.quoted?.value, "host=localhost");
+    assert.deepEqual(entry.current.references.quoted?.range, {
+      path: "app.env",
+      start: source.indexOf("host=localhost"),
+      end: source.indexOf("host=localhost") + "host=localhost".length,
+    });
+    assert.equal(entry.current.references.matched?.value, "4173");
+    assert.deepEqual(
+      entry.current.references.matched?.range,
+      readMatched.range,
+    );
+    assert.equal(
+      entry.current.references.regional?.value,
+      "port=4173\nhost=localhost\n",
+    );
+    assert.deepEqual(entry.current.references.regional?.range, {
+      path: "app.env",
+      start: source.indexOf("port=4173"),
+      end: source.indexOf("#endregion runtime"),
+    });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
