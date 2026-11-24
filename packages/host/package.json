@@ -42,7 +42,7 @@
     "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false"
   },
   "dependencies": {
-    "@ykdz/cli-contract": "0.3.0",
+    "@ykdz/cli-contract": "0.7.0",
     "@ykdz/dock-core": "workspace:*",
     "zod": "^4.6.5"
   },

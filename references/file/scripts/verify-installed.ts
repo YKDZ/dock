@@ -32,6 +32,7 @@ type ProcessIdentity = {
 
 type CliEnvelope = {
   readonly schemaVersion: string;
+  readonly outputMode?: string;
   readonly kind: string;
   readonly variant?: string;
   readonly data?: {
@@ -228,7 +229,7 @@ async function runInstalledCli(
   assert.equal(missingConfigOption.code, 64, missingConfigOption.stderr);
   const missingConfigFile = await runDock(
     bin,
-    ["check", "--config", "missing.mjs", "--json"],
+    ["check", "--config", "missing.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(missingConfigFile.code, 1, missingConfigFile.stderr);
@@ -238,7 +239,7 @@ async function runInstalledCli(
 
   const typescriptConfig = await runDock(
     bin,
-    ["check", "--config", "dock.config.ts", "--json"],
+    ["check", "--config", "dock.config.ts", "--output", "structured"],
     consumer,
   );
   assert.equal(typescriptConfig.code, 1, typescriptConfig.stderr);
@@ -246,7 +247,7 @@ async function runInstalledCli(
 
   const firstCheck = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(firstCheck.code, 1, firstCheck.stderr);
@@ -260,7 +261,14 @@ async function runInstalledCli(
 
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(update.code, 0, update.stderr);
@@ -281,7 +289,8 @@ async function runInstalledCli(
       "update",
       "--config",
       "empty-config/dock.config.mjs",
-      "--json",
+      "--output",
+      "structured",
     ],
     consumer,
   );
@@ -296,7 +305,7 @@ async function runInstalledCli(
     consumer,
   );
   assert.equal(emptyUpdateText.code, 1, emptyUpdateText.stderr);
-  assert.match(emptyUpdateText.stdout, /更新错误（empty-selection）/);
+  assert.match(emptyUpdateText.stdout, /Update error \(empty-selection\)/);
 
   const textCheck = await runDock(
     bin,
@@ -304,17 +313,17 @@ async function runInstalledCli(
     consumer,
   );
   assert.equal(textCheck.code, 0, textCheck.stderr);
-  assert.match(textCheck.stdout, /范围：guide-policy/);
-  assert.match(textCheck.stdout, /引用 guide，文件 .*guide\.md/);
-  assert.match(textCheck.stdout, /当前事实："第一版正文\\n"/);
-  assert.match(textCheck.stdout, /位置 guide\.md（文本偏移 0–6）/);
+  assert.match(textCheck.stdout, /Scope: guide-policy/);
+  assert.match(textCheck.stdout, /Reference guide, file .*guide\.md/);
+  assert.match(textCheck.stdout, /Current fact: "第一版正文\\n"/);
+  assert.match(textCheck.stdout, /Location guide\.md \(text offset 0-6\)/);
   assert.doesNotMatch(textCheck.stdout, /"pluginId"|"fileInfo"/);
 
   const childDirectory = join(consumer, "scripts");
   await mkdir(childDirectory, { recursive: true });
   const childCheck = await runDock(
     bin,
-    ["check", "--config", "../dock.config.mjs", "--json"],
+    ["check", "--config", "../dock.config.mjs", "--output", "structured"],
     childDirectory,
   );
   assert.equal(childCheck.code, 0, childCheck.stderr);
@@ -325,7 +334,7 @@ async function runInstalledCli(
   );
   const targetChange = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(targetChange.code, 1, targetChange.stderr);
@@ -340,22 +349,32 @@ async function runInstalledCli(
     consumer,
   );
   assert.equal(targetChangeText.code, 1, targetChangeText.stderr);
-  assert.match(targetChangeText.stdout, /引用 guide 定义变化/);
-  assert.match(targetChangeText.stdout, /旧目标文件 .*guide\.md/);
-  assert.match(targetChangeText.stdout, /新目标文件 .*copy\.md/);
-  assert.match(targetChangeText.stdout, /当前事实："第一版正文\\n"/);
+  assert.match(
+    targetChangeText.stdout,
+    /Change: reference guide definition changed/,
+  );
+  assert.match(targetChangeText.stdout, /previous target file .*guide\.md/);
+  assert.match(targetChangeText.stdout, /new target file .*copy\.md/);
+  assert.match(targetChangeText.stdout, /Current fact: "第一版正文\\n"/);
   assert.doesNotMatch(targetChangeText.stdout, /"pluginId"|"fileInfo"/);
 
   const acceptTarget = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(acceptTarget.code, 0, acceptTarget.stderr);
   await writeFile(join(consumer, "copy.md"), "第二版正文\n", "utf8");
   const bodyChange = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(bodyChange.code, 1, bodyChange.stderr);
@@ -369,25 +388,39 @@ async function runInstalledCli(
     consumer,
   );
   assert.equal(bodyChangeText.code, 1, bodyChangeText.stderr);
-  assert.match(bodyChangeText.stdout, /旧值 "第一版正文\\n"/);
-  assert.match(bodyChangeText.stdout, /新值 "第二版正文\\n"/);
+  assert.match(bodyChangeText.stdout, /before "第一版正文\\n"/);
+  assert.match(bodyChangeText.stdout, /after "第二版正文\\n"/);
 
   await writeFile(join(consumer, "copy.md"), "第三版正文\n", "utf8");
   const acceptBody = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(acceptBody.code, 0, acceptBody.stderr);
   const handlerBaseline = await runDock(
     bin,
-    ["baseline", "update", "--config", "handler-file-config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "handler-file-config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(handlerBaseline.code, 0, handlerBaseline.stderr);
   const changedHandler = await runDock(
     bin,
-    ["check", "--config", "handler-other-config.mjs", "--json"],
+    ["check", "--config", "handler-other-config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(changedHandler.code, 1, changedHandler.stderr);
@@ -426,7 +459,7 @@ async function runInstalledCli(
   await rm(join(consumer, "copy.md"));
   const missingTarget = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(missingTarget.code, 1, missingTarget.stderr);
@@ -437,11 +470,18 @@ async function runInstalledCli(
     consumer,
   );
   assert.equal(missingTargetText.code, 1, missingTargetText.stderr);
-  assert.match(missingTargetText.stdout, /关联 guide-policy/);
-  assert.match(missingTargetText.stdout, /错误 guide/);
+  assert.match(missingTargetText.stdout, /Binding guide-policy/);
+  assert.match(missingTargetText.stdout, /Error guide/);
   const rejectedUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(rejectedUpdate.code, 1, rejectedUpdate.stderr);
@@ -458,7 +498,7 @@ async function runInstalledCli(
   );
   const invalidConfig = await runDock(
     bin,
-    ["baseline", "update", "--config", "invalid.mjs", "--json"],
+    ["baseline", "update", "--config", "invalid.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(invalidConfig.code, 1, invalidConfig.stderr);
@@ -481,7 +521,13 @@ async function runInstalledCli(
   );
   const unsupportedSelection = await runDock(
     bin,
-    ["check", "--config", "unsupported-selection.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "unsupported-selection.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(unsupportedSelection.code, 1, unsupportedSelection.stderr);
@@ -502,7 +548,13 @@ async function runInstalledCli(
   );
   const invalidBuilderTarget = await runDock(
     bin,
-    ["check", "--config", "invalid-builder-target.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "invalid-builder-target.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(invalidBuilderTarget.code, 1, invalidBuilderTarget.stderr);
@@ -520,7 +572,7 @@ async function runInstalledCli(
   );
   const invalidRawTarget = await runDock(
     bin,
-    ["check", "--config", "invalid-raw-target.mjs", "--json"],
+    ["check", "--config", "invalid-raw-target.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(invalidRawTarget.code, 1, invalidRawTarget.stderr);
@@ -537,7 +589,13 @@ async function runInstalledCli(
   );
   const invalidRawSelection = await runDock(
     bin,
-    ["check", "--config", "invalid-raw-selection.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "invalid-raw-selection.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(invalidRawSelection.code, 1, invalidRawSelection.stderr);
@@ -555,7 +613,7 @@ async function runInstalledCli(
   );
   const sharedUnregistered = await runDock(
     bin,
-    ["check", "--config", "shared-unregistered.mjs", "--json"],
+    ["check", "--config", "shared-unregistered.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(sharedUnregistered.code, 1, sharedUnregistered.stderr);
@@ -573,7 +631,7 @@ async function runInstalledCli(
   );
   const unregisteredPlugin = await runDock(
     bin,
-    ["check", "--config", "unregistered.mjs", "--json"],
+    ["check", "--config", "unregistered.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(unregisteredPlugin.code, 1, unregisteredPlugin.stderr);
@@ -592,7 +650,7 @@ async function runInstalledCli(
   );
   const duplicateBinding = await runDock(
     bin,
-    ["check", "--config", "duplicate.mjs", "--json"],
+    ["check", "--config", "duplicate.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(duplicateBinding.code, 1, duplicateBinding.stderr);
@@ -610,7 +668,13 @@ async function runInstalledCli(
   );
   const duplicateBindingObject = await runDock(
     bin,
-    ["check", "--config", "duplicate-binding-object.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "duplicate-binding-object.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(duplicateBindingObject.code, 1, duplicateBindingObject.stderr);
@@ -630,7 +694,7 @@ async function runInstalledCli(
   );
   const duplicateReference = await runDock(
     bin,
-    ["check", "--config", "duplicate-reference.mjs", "--json"],
+    ["check", "--config", "duplicate-reference.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(duplicateReference.code, 1, duplicateReference.stderr);
@@ -646,7 +710,7 @@ async function runInstalledCli(
   );
   const duplicatePlugin = await runDock(
     bin,
-    ["check", "--config", "duplicate-plugin.mjs", "--json"],
+    ["check", "--config", "duplicate-plugin.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(duplicatePlugin.code, 1, duplicatePlugin.stderr);
@@ -662,7 +726,13 @@ async function runInstalledCli(
   );
   const conflictingReference = await runDock(
     bin,
-    ["check", "--config", "conflicting-reference.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "conflicting-reference.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(conflictingReference.code, 1, conflictingReference.stderr);
@@ -677,7 +747,7 @@ async function runInstalledCli(
   await writeFile(join(consumer, "dock.baseline.json"), "{not json", "utf8");
   const corruptBaseline = await runDock(
     bin,
-    ["check", "--config", "dock.config.mjs", "--json"],
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
     consumer,
   );
   assert.equal(corruptBaseline.code, 1, corruptBaseline.stderr);
@@ -725,7 +795,8 @@ async function verifyBaselineFilesystemFailures(
       "update",
       "--config",
       "restricted-baseline/dock.config.mjs",
-      "--json",
+      "--output",
+      "structured",
     ],
     consumer,
   );
@@ -747,7 +818,8 @@ async function verifyBaselineFilesystemFailures(
         "update",
         "--config",
         "restricted-baseline/dock.config.mjs",
-        "--json",
+        "--output",
+        "structured",
       ],
       consumer,
       identity,
@@ -764,7 +836,13 @@ async function verifyBaselineFilesystemFailures(
     await chmod(baseline, 0);
     const unreadableBaseline = await runDock(
       bin,
-      ["check", "--config", "restricted-baseline/dock.config.mjs", "--json"],
+      [
+        "check",
+        "--config",
+        "restricted-baseline/dock.config.mjs",
+        "--output",
+        "structured",
+      ],
       consumer,
       identity,
     );
@@ -818,7 +896,10 @@ function run(
 }
 
 function parseEnvelope(output: string): CliEnvelope {
-  return JSON.parse(output) as CliEnvelope;
+  const envelope = JSON.parse(output) as CliEnvelope;
+  assert.equal(envelope.schemaVersion, "3", output);
+  assert.equal(envelope.outputMode, "structured", output);
+  return envelope;
 }
 
 function readReport(envelope: CliEnvelope): {

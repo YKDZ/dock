@@ -98,7 +98,8 @@ const selectedCli = spawnSync(
     "beta-reference",
     "--file",
     "beta.txt",
-    "--json",
+    "--output",
+    "structured",
   ],
   { encoding: "utf8" },
 );
@@ -115,7 +116,8 @@ const unmatchedCli = spawnSync(
     "scope-cli-config.mjs",
     "--reference",
     "missing",
-    "--json",
+    "--output",
+    "structured",
   ],
   { encoding: "utf8" },
 );
@@ -134,7 +136,8 @@ const unmatchedUpdate = spawnSync(
     "scope-cli-config.mjs",
     "--reference",
     "missing",
-    "--json",
+    "--output",
+    "structured",
   ],
   { encoding: "utf8" },
 );
