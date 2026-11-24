@@ -53,6 +53,24 @@ definePlugin({
   },
 });
 
+definePlugin({
+  id: "fixture:scope-negative",
+  validate(_reference: ScopeReference): void {},
+  collect(request: PluginRequest<ScopeReference>): PluginBatchResult<string> {
+    return {
+      results: request.selectedReferences.map(({ id }) => ({
+        referenceId: id,
+        kind: "value",
+        value: "scope fact",
+      })),
+    };
+  },
+  // @ts-expect-error Plugin comparableTarget must return a JSON value.
+  comparableTarget(): () => void {
+    return () => {};
+  },
+});
+
 type WrongTargetReference = Reference<
   "fixture:scope-negative",
   string,

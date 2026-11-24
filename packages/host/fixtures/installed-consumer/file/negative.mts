@@ -60,8 +60,27 @@ definePlugin({
       })),
     };
   },
+  // @ts-expect-error fileInfo must accept the same reference type as validate.
   fileInfo(reference: WrongHookReference): string {
     return reference.target.path.toUpperCase();
+  },
+});
+
+// @ts-expect-error comparableTarget must accept the same reference type as validate.
+definePlugin({
+  id: "hook-plugin",
+  validate(_reference: HookReference): void {},
+  collect(request: PluginRequest<HookReference>): PluginBatchResult<string> {
+    return {
+      results: request.selectedReferences.map(({ id }) => ({
+        referenceId: id,
+        kind: "value",
+        value: "ok",
+      })),
+    };
+  },
+  comparableTarget(reference: WrongHookReference): string {
+    return reference.target.path;
   },
 });
 

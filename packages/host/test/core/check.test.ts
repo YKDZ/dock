@@ -1206,7 +1206,7 @@ void test("valid binding and reference IDs are not shadowed by inherited JSON ob
     { referenceId: "guide", value: "guide" },
     ...ids.map((referenceId) => ({ referenceId, value: referenceId })),
   ];
-  const emptyBaseline = JSON.parse('{"version":2,"bindings":{}}');
+  const emptyBaseline = JSON.parse('{"version":3,"bindings":{}}');
   const initialInput: CheckInput = {
     references,
     bindings,

@@ -480,7 +480,7 @@ async function verifyNoVitestConsumer(dockTarball: string): Promise<void> {
       `  bindings: [{ id: "b", references: ["r"] }],`,
       `  facts: [{ referenceId: "r", value: "ready" }],`,
       `});`,
-      `const coreBaseline: Baseline = { version: 2, bindings: {} };`,
+      `const coreBaseline: Baseline = { version: 3, bindings: {} };`,
       `void valueCheck; void typedConfig; void coreResult; void coreBaseline;`,
       `void check; void inspect; void readReference; void updateBaseline;`,
       `void canonicalJson; void isJsonValue; void updateCoreBaseline;`,

@@ -50,7 +50,7 @@ export function createReference<
 
 type PluginReferenceArgument<
   Plugin,
-  Method extends "validate" | "read" | "fileInfo",
+  Method extends "validate" | "read" | "fileInfo" | "comparableTarget",
 > = Method extends keyof Plugin
   ? Plugin[Method] extends (...arguments_: infer Arguments) => unknown
     ? Arguments extends readonly [infer Ref, ...unknown[]]
@@ -189,21 +189,26 @@ type PluginHookReferenceContract<Plugin, Ref extends Reference> =
       > extends true
       ? AcceptsPluginReference<
           Ref,
-          PluginReferenceArgument<Plugin, "read">
+          PluginReferenceArgument<Plugin, "comparableTarget">
         > extends true
         ? AcceptsPluginReference<
             Ref,
-            PluginReferenceListArgument<Plugin>
+            PluginReferenceArgument<Plugin, "read">
           > extends true
-          ? RequestAcceptsReference<
+          ? AcceptsPluginReference<
               Ref,
-              PluginRequestArgument<Plugin, "collect">
+              PluginReferenceListArgument<Plugin>
             > extends true
             ? RequestAcceptsReference<
                 Ref,
-                PluginRequestArgument<Plugin, "describe">
+                PluginRequestArgument<Plugin, "collect">
               > extends true
-              ? unknown
+              ? RequestAcceptsReference<
+                  Ref,
+                  PluginRequestArgument<Plugin, "describe">
+                > extends true
+                ? unknown
+                : never
               : never
             : never
           : never
@@ -224,7 +229,7 @@ type PluginPreparedContract<Plugin> =
       : never
     : never;
 
-/** Pure preflight and fileInfo hooks must accept the same reference type declared by the plugin. */
+/** Pure preflight, fileInfo, and comparableTarget hooks must accept the same reference type declared by the plugin. */
 type PluginValueContractForReference<Plugin, Ref extends Reference> = [
   PluginHookReferenceContract<Plugin, Ref>,
 ] extends [never]
@@ -319,6 +324,7 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     }
     const read = "read" in candidate ? candidate.read : undefined;
     const fileInfo = candidate.fileInfo;
+    const comparableTarget = candidate.comparableTarget;
     const prepare = candidate.prepare;
     const describe = candidate.describe;
     plugins.set(
@@ -331,6 +337,9 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
         ...(fileInfo === undefined
           ? {}
           : { fileInfo: fileInfo.bind(candidate) }),
+        ...(comparableTarget === undefined
+          ? {}
+          : { comparableTarget: comparableTarget.bind(candidate) }),
         ...(prepare === undefined ? {} : { prepare: prepare.bind(candidate) }),
         ...(describe === undefined
           ? {}
@@ -495,6 +504,9 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
   const fileInfo = isObject
     ? (value as { readonly fileInfo?: unknown }).fileInfo
     : undefined;
+  const comparableTarget = isObject
+    ? (value as { readonly comparableTarget?: unknown }).comparableTarget
+    : undefined;
   const prepare = isObject
     ? (value as { readonly prepare?: unknown }).prepare
     : undefined;
@@ -509,13 +521,15 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     typeof (value as { collect?: unknown }).collect !== "function" ||
     typeof (value as { validate?: unknown }).validate !== "function" ||
     (fileInfo !== undefined && typeof fileInfo !== "function") ||
+    (comparableTarget !== undefined &&
+      typeof comparableTarget !== "function") ||
     (prepare !== undefined && typeof prepare !== "function") ||
     (describe !== undefined && typeof describe !== "function") ||
     "execution" in value ||
     "validateReferences" in value
   ) {
     throw new TypeError(
-      "Reference plugin must provide non-empty id, validate, and collect functions; optional fileInfo, prepare, and describe must be functions; legacy execution protocols are unsupported.",
+      "Reference plugin must provide non-empty id, validate, and collect functions; optional fileInfo, comparableTarget, prepare, and describe must be functions; legacy execution protocols are unsupported.",
     );
   }
 }

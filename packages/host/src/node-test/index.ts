@@ -351,6 +351,12 @@ const nodeTestImplementation = definePlugin({
       target.file,
     );
   },
+  comparableTarget(reference: RuntimeNodeTestReference): JsonValue {
+    const target = getNodeTestTarget(reference.target);
+    return target.kind === "node-test-observation"
+      ? { kind: target.kind, name: target.name, key: target.key }
+      : { kind: target.kind, name: target.name };
+  },
   prepare(
     references: readonly RuntimeNodeTestReference[],
     context: PluginContext,
