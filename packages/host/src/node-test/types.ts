@@ -30,14 +30,14 @@ export type NodeTestStatus =
   | "not-run"
   | "duplicate";
 
-/** A business observation recorded inside an active Node native test. */
+/** A business observation recorded during a specific attempt (`attempt`) of an active Node native test. */
 export type NodeObservationRecord = {
   readonly attempt: number;
   readonly key: string;
   readonly value: JsonValue;
 };
 
-/** A reference read recorded inside an active Node native test. */
+/** A reference read recorded during a specific attempt (`attempt`) to explain what value and range the test observed. */
 export type NodeReadRecord = {
   readonly attempt: number;
   readonly referenceId: string;
@@ -45,7 +45,7 @@ export type NodeReadRecord = {
   readonly range?: TextRange;
 };
 
-/** Single test record mapped from native Node test events. */
+/** Single test record mapped from native Node test events; `attemptCount`, `observations`, and `reads` explain how the test ran and what evidence it produced. */
 export type NodeTestRecord = {
   readonly id: string;
   readonly status: NodeTestStatus;

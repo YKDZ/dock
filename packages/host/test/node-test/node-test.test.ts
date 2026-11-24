@@ -429,23 +429,30 @@ void test("node-test baseline comparison ignores shared run arrangement, catches
       files: ["primary.test.mjs"],
       observations: [metric, extraUnused],
     });
-    const missingObsUpdate = await updateBaseline(
-      defineConfig({
-        root,
-        plugins: [nodeTest],
-        bindings: [
-          binding("alpha-metric-binding", [
-            nodeTestObservation(
-              "alpha-metric",
-              missingObsRun,
-              { file: "primary.test.mjs", name: "alpha passes" },
-              extraUnused,
-            ),
-          ]),
-        ],
-      }),
-      { binding: ["alpha-metric-binding"] },
+    const missingObsConfig = defineConfig({
+      root,
+      plugins: [nodeTest],
+      bindings: [
+        binding("alpha-metric-binding", [
+          nodeTestObservation(
+            "alpha-metric",
+            missingObsRun,
+            { file: "primary.test.mjs", name: "alpha passes" },
+            extraUnused,
+          ),
+        ]),
+      ],
+    });
+    const missingObsCheck = await check(missingObsConfig, {
+      binding: ["alpha-metric-binding"],
+    });
+    assert.equal(
+      missingObsCheck.bindings[0]?.errors?.[0]?.code,
+      "observation-missing",
     );
+    const missingObsUpdate = await updateBaseline(missingObsConfig, {
+      binding: ["alpha-metric-binding"],
+    });
     assert.equal(missingObsUpdate.status, "rejected");
     assert.equal(
       missingObsUpdate.report.bindings[0]?.errors?.[0]?.code,

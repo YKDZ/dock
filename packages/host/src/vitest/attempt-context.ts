@@ -124,7 +124,7 @@ export function recordVitestObservation<Value extends JsonValue>(
   return value;
 }
 
-/** Reads a reference via the host and attributes the read to the current Vitest attempt. */
+/** Reads a reference via the host and attributes the read (`reads`) to the current Vitest `attempt` for diagnostics. */
 export async function readReferenceInTest<
   const Plugins extends readonly ReferencePlugin[],
   const Ref extends ReadableReferenceOf<Plugins>,

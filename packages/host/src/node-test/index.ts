@@ -202,7 +202,7 @@ export function defineNodeTestObservation<
   };
 }
 
-/** Declares a typed Node native test run without starting the test process at declaration time. */
+/** Declares a typed Node native test run without starting the test process; references with the same run identity share one native execution per `collect` call. */
 export function defineNodeTestRun<
   const Observations extends readonly AnyNodeTestObservation[] = readonly [],
 >(
@@ -647,7 +647,9 @@ function factFromNodeRun(
       return { kind: "value", value: { status: "passed" } };
     }
     const observations = (test.observations ?? []).filter(
-      (observation) => observation.key === target.key,
+      (observation) =>
+        observation.key === target.key &&
+        observation.attempt === test.attemptCount,
     );
     if (observations.length === 0) {
       return nodeError(

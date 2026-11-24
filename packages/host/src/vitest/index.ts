@@ -252,7 +252,7 @@ export function defineVitestObservation<
   };
 }
 
-/** Declares a typed native Vitest run; declaration does not execute tests. */
+/** Declares a typed native Vitest run without executing tests; references with the same run identity share one native execution per `collect` call. */
 export function defineVitestRun<
   const Observations extends readonly AnyVitestObservation[] = readonly [],
 >(
