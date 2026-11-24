@@ -3,7 +3,7 @@ import { test } from "node:test";
 
 import { collectNodeRun } from "../src/event-mapper.ts";
 
-test("原生摘要与进程退出码冲突时不形成完整执行记录", () => {
+void test("原生摘要与进程退出码冲突时不形成完整执行记录", () => {
   const file = "/consumer/test/status.test.mts";
   const record = collectNodeRun(
     [
@@ -54,7 +54,7 @@ test("原生摘要与进程退出码冲突时不形成完整执行记录", () =>
   assert.equal(record.testExecutions, 1);
 });
 
-test("缺少原生最终摘要时不把零退出码当成成功回执", () => {
+void test("缺少原生最终摘要时不把零退出码当成成功回执", () => {
   const record = collectNodeRun([], {
     testRoot: "/consumer",
     files: [],
@@ -71,7 +71,7 @@ test("缺少原生最终摘要时不把零退出码当成成功回执", () => {
   assert.deepEqual(record.commandResult, { exitCode: 0, signal: null });
 });
 
-test("尚未开始的选中测试不计入实际尝试数", () => {
+void test("尚未开始的选中测试不计入实际尝试数", () => {
   const record = collectNodeRun([], {
     testRoot: "/consumer",
     files: ["/consumer/test/status.test.mts"],
@@ -87,7 +87,7 @@ test("尚未开始的选中测试不计入实际尝试数", () => {
   assert.equal(record.testExecutions, 0);
 });
 
-test("原生中断事件或进程信号都使运行记录失效", () => {
+void test("原生中断事件或进程信号都使运行记录失效", () => {
   const interruptedEvent = collectNodeRun([{ type: "test:interrupted" }], {
     testRoot: "/consumer",
     files: [],
@@ -116,7 +116,7 @@ test("原生中断事件或进程信号都使运行记录失效", () => {
   });
 });
 
-test("活动测试的观察和读取按原生测试身份保留真实值与位置", () => {
+void test("活动测试的观察和读取按原生测试身份保留真实值与位置", () => {
   const file = "/consumer/test/observations.test.mts";
   const record = collectNodeRun(
     [
@@ -195,7 +195,7 @@ test("活动测试的观察和读取按原生测试身份保留真实值与位�
   ]);
 });
 
-test("同一测试的重复观察保持可见而不被映射层去重", () => {
+void test("同一测试的重复观察保持可见而不被映射层去重", () => {
   const file = "/consumer/test/observations.test.mts";
   const record = collectNodeRun(
     [
@@ -251,7 +251,7 @@ test("同一测试的重复观察保持可见而不被映射层去重", () => {
   ]);
 });
 
-test("同一源码位置的活动按原生测试全名归属", () => {
+void test("同一源码位置的活动按原生测试全名归属", () => {
   const file = "/consumer/test/loop.test.mts";
   const source = {
     entryFile: file,

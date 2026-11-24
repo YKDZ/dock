@@ -639,7 +639,7 @@ function runConfigWorker<T>(
         rejectResult(
           new MaintenanceError(
             "config-worker-failed",
-            `Config maintenance worker failed: ${error.message}`,
+            `Config maintenance worker failed: ${error instanceof Error ? error.message : String(error)}`,
             { cause: error },
           ),
         ),

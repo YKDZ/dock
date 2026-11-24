@@ -7,11 +7,12 @@
     "format:write": "oxfmt --write .",
     "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix . --fix",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false",
     "dock:check": "node --input-type=module -e 'import \"@ykdz/dock/cli\"' -- dock check --config dock.config.ts",
     "dock:baseline": "node --input-type=module -e 'import \"@ykdz/dock/cli\"' -- dock baseline update --config dock.config.ts && oxfmt --write dock.baseline.json"
   },
   "devDependencies": {
+    "@dock/tooling-config": "workspace:*",
     "@types/node": "catalog:",
     "@ykdz/dock": "workspace:*",
     "@ykdz/dock-reference-file": "workspace:*",
@@ -20,10 +21,10 @@
     "dock": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "oxlint-tsgolint": "catalog:",
+    "tsrs": "catalog:",
     "typescript-7": "catalog:"
   },
   "engines": {
-    "node": "24.21.0"
+    "node": "^26.13.1"
   }
 }

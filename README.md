@@ -55,13 +55,14 @@ dock baseline update --config dock.config.ts
 ```js
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import { file } from "@ykdz/dock-reference-file";
+
 import {
   binding,
   createReference,
   defineConfig,
   definePlugin,
 } from "@ykdz/dock";
+import { file } from "@ykdz/dock-reference-file";
 
 const nodeEngine = definePlugin({
   id: "node-engine",

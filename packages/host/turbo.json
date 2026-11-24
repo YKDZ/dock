@@ -28,6 +28,7 @@
       "tags": ["work:repair"]
     },
     "lint": {
+      "dependsOn": ["^lint"],
       "outputs": [],
       "tags": ["quality:light"]
     },

@@ -26,7 +26,7 @@ function createConfig(root: string) {
   return defineConfig({ plugins: [markdown], bindings: [], root });
 }
 
-test("章节、完整标题路径和文本步骤连续取得原文 UTF-16 范围", async () => {
+void test("章节、完整标题路径和文本步骤连续取得原文 UTF-16 范围", async () => {
   const source =
     "😀前言\n\n# 概览\n\n## 状态\n\n  保留缩进：结果🟢\n\n> ## 内嵌标题\n> 仍属于本章节。\n\n# 其他\n\n## 状态\n\n另一个状态。\n";
   await withDocument(source, async (_root, config) => {
@@ -62,7 +62,7 @@ test("章节、完整标题路径和文本步骤连续取得原文 UTF-16 范围
   });
 });
 
-test("六类结构节点与表格行键选择保留 Markdown 原文", async () => {
+void test("六类结构节点与表格行键选择保留 Markdown 原文", async () => {
   const source = [
     "一段正文。",
     "",
@@ -157,7 +157,7 @@ test("六类结构节点与表格行键选择保留 Markdown 原文", async () =
   });
 });
 
-test("重复标题路径、表格列和行键明确报告歧义", async () => {
+void test("重复标题路径、表格列和行键明确报告歧义", async () => {
   const duplicateSections =
     "# 根\n\n## 同名\n\n第一段。\n\n## 同名\n\n第二段。\n";
   await withDocument(duplicateSections, async (_root, config) => {
@@ -201,7 +201,7 @@ test("重复标题路径、表格列和行键明确报告歧义", async () => {
   });
 });
 
-test("同一 Markdown 文件显式选普通文件插件时保留原文", async () => {
+void test("同一 Markdown 文件显式选普通文件插件时保留原文", async () => {
   const source = "# 标题\n\n<!-- 普通注释 -->\n";
   await withDocument(source, async (root) => {
     const config = defineConfig({
@@ -215,7 +215,7 @@ test("同一 Markdown 文件显式选普通文件插件时保留原文", async (
   });
 });
 
-test("标记选择读取段内当前内容并返回原文 UTF-16 范围", async () => {
+void test("标记选择读取段内当前内容并返回原文 UTF-16 范围", async () => {
   const source =
     "😀前言\n\n说明 <!-- dock:start port -->4173<!-- dock:end port --> 结束。\n";
   await withDocument(source, async (root, config) => {
@@ -247,7 +247,7 @@ test("标记选择读取段内当前内容并返回原文 UTF-16 范围", async 
   });
 });
 
-test("段内脚本字符串中的同形注释不参与标记选择或事实清理", async () => {
+void test("段内脚本字符串中的同形注释不参与标记选择或事实清理", async () => {
   const script =
     '前文 <script>const example = "<!-- dock:start sample -->fake<!-- dock:end sample -->";</script> 后文';
   await withDocument(script, async (_root, config) => {
@@ -283,7 +283,7 @@ test("段内脚本字符串中的同形注释不参与标记选择或事实清�
   });
 });
 
-test("比较事实只移除真实定位注释并保留普通注释与示例文字", async () => {
+void test("比较事实只移除真实定位注释并保留普通注释与示例文字", async () => {
   const source = [
     "😀事实 <!-- dock:start port -->4173<!-- dock:end port -->。",
     "<!-- 普通注释 -->",
@@ -335,7 +335,7 @@ test("比较事实只移除真实定位注释并保留普通注释与示例文�
   });
 });
 
-test("标记支持段落、表格单元格、跨块及有序连续收窄", async () => {
+void test("标记支持段落、表格单元格、跨块及有序连续收窄", async () => {
   const paragraph =
     "# 安装\n\n默认端口 <!-- dock:start port -->4173<!-- dock:end port -->。\n";
   await withDocument(paragraph, async (_root, config) => {
@@ -391,13 +391,13 @@ test("标记支持段落、表格单元格、跨块及有序连续收窄", async
   });
 });
 
-test("标记缺失、重复、倒序及越出当前结构范围时明确失败", async () => {
+void test("标记缺失、重复、倒序及越出当前结构范围时明确失败", async () => {
   const cases: {
     readonly source: string;
     readonly id: string;
     readonly selection?: (
       builder: ReturnType<typeof markdown.from>,
-    ) => ReturnType<typeof markdown.from>;
+    ) => ReturnType<ReturnType<typeof markdown.from>["section"]>;
     readonly code: string;
   }[] = [
     {
@@ -468,11 +468,12 @@ test("标记缺失、重复、倒序及越出当前结构范围时明确失败",
 
   for (const example of cases) {
     await withDocument(example.source, async (_root, config) => {
-      let builder = markdown.from("guide.md");
-      if (example.selection !== undefined) {
-        builder = example.selection(builder);
-      }
-      const reference = builder.marker(example.id).reference("value");
+      const builder = markdown.from("guide.md");
+      const reference = (
+        example.selection === undefined
+          ? builder.marker(example.id)
+          : example.selection(builder).marker(example.id)
+      ).reference("value");
       await assert.rejects(
         readReference(config, reference),
         (error: unknown) => {
@@ -499,7 +500,7 @@ test("标记缺失、重复、倒序及越出当前结构范围时明确失败",
   }
 });
 
-test("批量采集保留独立读取错误且不采集未选中的引用", async () => {
+void test("批量采集保留独立读取错误且不采集未选中的引用", async () => {
   const source = "# 概览\n\n当前内容。\n";
   const root = await mkdtemp(join(tmpdir(), "dock-markdown-batch-"));
   try {

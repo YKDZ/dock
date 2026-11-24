@@ -7,15 +7,16 @@
     "./package.json": "./package.json"
   },
   "scripts": {
-    "boundaries": "node --conditions=source scripts/run-turbo-boundaries.ts && node --conditions=source scripts/check-toolchain-versions.ts",
+    "boundaries": "turbo boundaries",
     "check": "node --conditions=source scripts/task-gates.ts check",
     "check:install": "node --conditions=source scripts/check-installed.ts",
     "fix": "node --conditions=source scripts/task-gates.ts fix",
-    "format:check": "oxfmt --list-different --no-error-on-unmatched-pattern README.md CHANGELOG.md package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",
-    "format:write": "oxfmt --write --no-error-on-unmatched-pattern README.md CHANGELOG.md package.json pnpm-workspace.yaml pnpm-lock.yaml turbo.json tsconfig.json tsconfig.config.json *.config.ts .pnpmfile.mjs .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .devcontainer scripts",
-    "lint": "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts",
-    "lint:fix": "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts .pnpmfile.mjs scripts --fix",
-    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "format:check": "oxfmt --list-different --no-error-on-unmatched-pattern README.md CHANGELOG.md *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer resources scripts template test",
+    "format:write": "oxfmt --write --no-error-on-unmatched-pattern README.md CHANGELOG.md *.json pnpm-workspace.yaml pnpm-lock.yaml *.config.ts .gitignore .dockerignore Dockerfile TODO.md rust-toolchain.toml .vscode .github .changeset/config.json .devcontainer resources scripts template test",
+    "lint": "oxlint --quiet --format=unix --no-error-on-unmatched-pattern *.config.ts scripts",
+    "lint:fix": "oxlint --format=unix --no-error-on-unmatched-pattern *.config.ts scripts --fix",
+    "typecheck": "tsc --build --noEmit --pretty false",
+    "test:task-gates": "node --conditions=source --test --test-reporter=spec scripts/task-gates.test.ts",
     "check:heavy": "node --conditions=source scripts/task-gates.ts check:heavy",
     "check:full": "node --conditions=source scripts/task-gates.ts check:full",
     "release:verify": "node scripts/release.ts verify",
@@ -25,12 +26,11 @@
     "test:release": "node --test scripts/release.test.ts"
   },
   "devDependencies": {
-    "@dock/typescript-config": "workspace:*",
+    "@dock/tooling-config": "workspace:*",
     "@types/node": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
-    "oxlint-tsgolint": "catalog:",
-    "smol-toml": "catalog:",
+    "tsrs": "catalog:",
     "turbo": "catalog:",
     "typescript-7": "catalog:"
   },

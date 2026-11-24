@@ -7,7 +7,7 @@ import {
   testIdentity,
 } from "../src/event-mapper.ts";
 
-test("目录从原生 parent/name 恢复嵌套路径并保留执行身份", () => {
+void test("目录从原生 parent/name 恢复嵌套路径并保留执行身份", () => {
   const outer = {
     type: "suite",
     name: "outer > label",
@@ -76,7 +76,7 @@ test("目录从原生 parent/name 恢复嵌套路径并保留执行身份", () =
   );
 });
 
-test("展开标题相同的不同原生路径仍有独立执行身份", () => {
+void test("展开标题相同的不同原生路径仍有独立执行身份", () => {
   const outer = { type: "suite", name: "outer", errors: () => [] };
   const flat = {
     type: "suite",
@@ -148,7 +148,7 @@ test("展开标题相同的不同原生路径仍有独立执行身份", () => {
   assert.notEqual(candidate.tests[0]?.identity, candidate.tests[1]?.identity);
 });
 
-test("缺少请求文件会标记部分目录并保留已有发现", () => {
+void test("缺少请求文件会标记部分目录并保留已有发现", () => {
   const requestedFile = "/consumer/test/tree.test.mts";
   const candidate = captureVitestCandidate(
     [
@@ -180,7 +180,7 @@ test("缺少请求文件会标记部分目录并保留已有发现", () => {
   assert.equal(record.complete, false);
 });
 
-test("原生收集错误会把目录标为部分，避免据此删除成员", () => {
+void test("原生收集错误会把目录标为部分，避免据此删除成员", () => {
   const requestedFile = "/consumer/test/tree.test.mts";
   const candidate = captureVitestCandidate(
     [
@@ -209,7 +209,7 @@ test("原生收集错误会把目录标为部分，避免据此删除成员", ()
   assert.deepEqual(candidate.catalog.tests, []);
 });
 
-test("retry 次数使用 setup 实际开始数并与最终原生摘要核对", () => {
+void test("retry 次数使用 setup 实际开始数并与最终原生摘要核对", () => {
   const candidate = captureVitestCandidate(
     [
       {
@@ -248,7 +248,7 @@ test("retry 次数使用 setup 实际开始数并与最终原生摘要核对", (
   assert.equal(candidate.tests[0]?.attemptCount, 2);
 });
 
-test("观察与读取保留原生尝试序号且不合并历史记录", () => {
+void test("观察与读取保留原生尝试序号且不合并历史记录", () => {
   const candidate = captureVitestCandidate(
     [
       {
@@ -320,7 +320,7 @@ test("观察与读取保留原生尝试序号且不合并历史记录", () => {
   ]);
 });
 
-test("共同收尾错误使运行无效，无关断言失败仍只作为测试状态", () => {
+void test("共同收尾错误使运行无效，无关断言失败仍只作为测试状态", () => {
   const candidate = captureVitestCandidate(
     [
       {
@@ -383,7 +383,7 @@ test("共同收尾错误使运行无效，无关断言失败仍只作为测试�
   );
 });
 
-test("可解释的无关断言失败不使已通过测试的运行事实无效", () => {
+void test("可解释的无关断言失败不使已通过测试的运行事实无效", () => {
   const receipt = {
     version: "5.0.3",
     closed: true,
@@ -434,7 +434,7 @@ test("可解释的无关断言失败不使已通过测试的运行事实无效",
   });
 });
 
-test("终态事件与原生命令结果冲突时不形成完整运行", () => {
+void test("终态事件与原生命令结果冲突时不形成完整运行", () => {
   const receipt = {
     version: "4.1.11",
     closed: true,
@@ -467,7 +467,7 @@ test("终态事件与原生命令结果冲突时不形成完整运行", () => {
   });
 });
 
-test("close 失败或缺少完整关闭收据使运行记录无效", () => {
+void test("close 失败或缺少完整关闭收据使运行记录无效", () => {
   const complete = {
     version: "4.1.11",
     completed: true,
@@ -507,7 +507,7 @@ test("close 失败或缺少完整关闭收据使运行记录无效", () => {
   assert.equal(missingClose.complete, false);
 });
 
-test("缺少运行版本或关闭摘要的部分收据不暴露测试事实", () => {
+void test("缺少运行版本或关闭摘要的部分收据不暴露测试事实", () => {
   const record = mapVitestRun(
     {
       closed: true,

@@ -13,7 +13,7 @@
       "tags": ["work:repair"]
     },
     "lint": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^lint", "^build"],
       "outputs": [],
       "tags": ["quality:light"]
     },
@@ -24,7 +24,7 @@
       "tags": ["work:repair"]
     },
     "typecheck": {
-      "dependsOn": ["^build"],
+      "dependsOn": ["^typecheck", "^build"],
       "outputs": [],
       "tags": ["quality:light"]
     },
