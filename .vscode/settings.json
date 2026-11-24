@@ -1,7 +1,7 @@
 {
   "editor.codeActionsOnSave": {
-    "source.fixAll.oxc": "always",
-    "source.format.oxc": "always"
+    "source.format.oxc": "always",
+    "source.fixAll.oxc": "always"
   },
   "editor.defaultFormatter": "oxc.oxc-vscode",
   "editor.formatOnPaste": true,
@@ -9,11 +9,5 @@
   "editor.formatOnSaveMode": "file",
   "oxc.configPath": "./oxlint.config.ts",
   "oxc.enable": true,
-  "oxc.fmt.configPath": "./oxfmt.config.ts",
-  "[typescript]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  },
-  "[json]": {
-    "editor.defaultFormatter": "oxc.oxc-vscode"
-  }
+  "oxc.fmt.configPath": "./oxfmt.config.ts"
 }

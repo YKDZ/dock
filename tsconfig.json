@@ -1,7 +1,11 @@
 {
-  "extends": "./tsconfig.config.json",
-  "compilerOptions": {
-    "noEmit": true
-  },
-  "include": ["*.config.ts", "scripts/**/*.ts"]
+  "files": [],
+  "references": [
+    {
+      "path": "./tsconfig.config.json"
+    },
+    {
+      "path": "./tsconfig.scripts.json"
+    }
+  ]
 }

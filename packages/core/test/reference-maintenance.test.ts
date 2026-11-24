@@ -250,7 +250,7 @@ void test("旧事实与旧定义的变化说明和输入基线双向独立", () 
 
   bindingChange.before.references[0] = "from-report";
   (referenceChange.before.target as { path: string }).path = "from-report";
-  (factChange.before as string[])[0] = "from-report";
+  factChange.before[0] = "from-report";
   assert.equal(oldBinding.definition.references[0], "from-input");
   assert.equal(
     (oldReference.definition.target as { path: string }).path,
@@ -274,8 +274,8 @@ void test("取消跟踪说明与输入基线双向独立", () => {
   assert.equal(Object.hasOwn(outcome.baseline.bindings, binding.id), false);
 
   const removal = outcome.report.bindings[0]!;
-  assert.ok("untracked" in removal && removal.untracked === true);
-  if (!("untracked" in removal) || removal.untracked !== true) return;
+  assert.ok("untracked" in removal && removal.untracked);
+  if (!("untracked" in removal) || !removal.untracked) return;
   const before = removal.changes[0].before;
   const oldDefinition = baseline.bindings[binding.id]!.definition;
   oldDefinition.references[0] = "from-input";

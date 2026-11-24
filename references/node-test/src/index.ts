@@ -171,7 +171,7 @@ export type NodeTestReference<Id extends string = string> =
   | NodeTestStatusReference<Id>
   | NodeTestObservationReference<Id>;
 
-type RuntimeNodeTestReference = Reference<typeof nodeTestPluginId, string>;
+type RuntimeNodeTestReference = Reference<typeof nodeTestPluginId>;
 
 type NodePreparedRun = {
   readonly identity: string;

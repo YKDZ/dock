@@ -60,6 +60,7 @@ const publicGateNames = new Set<TaskGate>([
   "fix",
 ]);
 
+const defaultEntryCommand = "node --conditions=source scripts/task-gates.ts";
 const maxTurboOutputBytes = 16 * 1024 * 1024;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -74,8 +75,14 @@ function report(message: string): void {
   process.stderr.write(`${message}\n`);
 }
 
-function runCaptured(cwd: string, args: readonly string[]): CommandResult {
-  const result = spawnSync("pnpm", ["exec", "turbo", ...args], {
+type TurboCommand = readonly [string, ...string[]];
+
+function runCaptured(
+  cwd: string,
+  args: readonly string[],
+  command: TurboCommand = ["pnpm", "exec", "turbo"],
+): CommandResult {
+  const result = spawnSync(command[0], [...command.slice(1), ...args], {
     cwd,
     encoding: "utf8",
     maxBuffer: maxTurboOutputBytes,
@@ -129,7 +136,7 @@ function runVisible(cwd: string, args: readonly string[]): Promise<number> {
     process.on("SIGTERM", forwardTerminate);
     child.once("error", (error) => {
       removeSignalHandlers();
-      report(`无法启动 Turbo 执行 ${args.join(" ")}：${error.message}`);
+      report(`Failed to start Turbo for ${args.join(" ")}: ${error.message}`);
       resolveStatus(1);
     });
     child.once("close", (code, signal) => {
@@ -150,9 +157,9 @@ function runVisible(cwd: string, args: readonly string[]): Promise<number> {
 function commandFailure(label: string, result: CommandResult): string {
   const details = result.stderr.trim();
   if (result.error !== undefined) {
-    return `无法运行 Turbo ${label}：${result.error.message}`;
+    return `Failed to run Turbo ${label}: ${result.error.message}`;
   }
-  return `Turbo ${label} 失败（退出码 ${String(result.status)}）${details === "" ? "" : `：\n${details}`}`;
+  return `Turbo ${label} failed (exit code ${String(result.status)})${details === "" ? "" : `:\n${details}`}`;
 }
 
 function roleTags(tags: readonly string[]): readonly string[] {
@@ -190,39 +197,39 @@ function assignRole(
   const isPublicGate = publicGateTask(task);
   if (roles.length === 0) {
     diagnostics.push(
-      `${task.fullName} 缺少唯一职责标签；请在 Turbo 任务标签中声明质量范围或工作用途`,
+      `${task.fullName} is missing a unique role tag; declare a quality scope or work purpose in its Turbo task tags`,
     );
     return undefined;
   }
   if (roles.length > 1) {
     diagnostics.push(
-      `${task.fullName} 有多个职责标签：${roles.join("、")}；每个可执行任务只能声明一个职责`,
+      `${task.fullName} has multiple role tags: ${roles.join(", ")}; each executable task may declare only one role`,
     );
     return undefined;
   }
 
   const role = roles[0]!;
   if (!validRoles.has(role as ScriptRole)) {
-    diagnostics.push(`${task.fullName} 使用未知职责标签 ${role}`);
+    diagnostics.push(`${task.fullName} uses unknown role tag ${role}`);
     return undefined;
   }
   const scriptRole = role as ScriptRole;
   const publicRole = task.name === "fix" ? "work:repair" : "quality:entry";
   if (isPublicGate && scriptRole !== publicRole) {
     diagnostics.push(
-      `${task.fullName} 是公共任务入口，职责必须为 ${publicRole}，当前为 ${scriptRole}`,
+      `${task.fullName} is a public gate entry and must declare role ${publicRole}, got ${scriptRole}`,
     );
     return undefined;
   }
   if (!isPublicGate && scriptRole === "quality:entry") {
     diagnostics.push(
-      `${task.fullName} 不能使用 quality:entry；该职责只允许根 check、check:heavy、check:full`,
+      `${task.fullName} cannot use quality:entry; that role is reserved for root check, check:heavy, and check:full`,
     );
     return undefined;
   }
   if (protectedVerificationTask(task) && !scriptRole.startsWith("quality:")) {
     diagnostics.push(
-      `${task.fullName} 是保留验收任务，不能归入非验收职责 ${scriptRole}`,
+      `${task.fullName} is a reserved verification task and cannot be assigned non-verification role ${scriptRole}`,
     );
     return undefined;
   }
@@ -233,14 +240,15 @@ function assignRole(
 function readTaskDirectory(
   cwd: string,
   entryCommand: string,
+  turboCommand?: TurboCommand,
 ): {
   readonly tasks: readonly TurboTask[];
   readonly diagnostics: readonly string[];
 } {
-  const result = runCaptured(cwd, ["query", turboTaskQuery]);
+  const result = runCaptured(cwd, ["query", turboTaskQuery], turboCommand);
   if (result.error !== undefined || result.status !== 0) {
     return {
-      diagnostics: [commandFailure("原生任务目录查询", result)],
+      diagnostics: [commandFailure("native task directory query", result)],
       tasks: [],
     };
   }
@@ -251,7 +259,7 @@ function readTaskDirectory(
   } catch (error) {
     return {
       diagnostics: [
-        `Turbo 原生任务目录不是有效 JSON：${error instanceof Error ? error.message : String(error)}`,
+        `Turbo native task directory is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
       ],
       tasks: [],
     };
@@ -264,7 +272,7 @@ function readTaskDirectory(
   const packageItems = isRecord(packages) ? packages.items : undefined;
   if (!Array.isArray(packageItems)) {
     return {
-      diagnostics: ["Turbo 原生任务目录缺少 packages.items"],
+      diagnostics: ["Turbo native task directory is missing packages.items"],
       tasks: [],
     };
   }
@@ -273,7 +281,9 @@ function readTaskDirectory(
   const tasks: TurboTask[] = [];
   for (const packageItem of packageItems) {
     if (!isRecord(packageItem) || !isNonEmptyString(packageItem.name)) {
-      diagnostics.push("Turbo 原生任务目录包含无法识别的工作区包");
+      diagnostics.push(
+        "Turbo native task directory contains an unrecognized workspace package",
+      );
       continue;
     }
     const taskConnection = packageItem.tasks;
@@ -281,13 +291,17 @@ function readTaskDirectory(
       ? taskConnection.items
       : undefined;
     if (!Array.isArray(taskItems)) {
-      diagnostics.push(`${packageItem.name} 的 Turbo 任务目录缺少 tasks.items`);
+      diagnostics.push(
+        `Turbo task directory for ${packageItem.name} is missing tasks.items`,
+      );
       continue;
     }
 
     for (const taskItem of taskItems) {
       if (!isRecord(taskItem)) {
-        diagnostics.push(`${packageItem.name} 的 Turbo 任务目录包含无效任务`);
+        diagnostics.push(
+          `Turbo task directory for ${packageItem.name} contains an invalid task`,
+        );
         continue;
       }
       const { name, fullName, tags, script, command } = taskItem;
@@ -297,7 +311,9 @@ function readTaskDirectory(
         !Array.isArray(tags) ||
         !tags.every((tag) => typeof tag === "string")
       ) {
-        diagnostics.push(`${packageItem.name} 的 Turbo 任务条目缺少名称或标签`);
+        diagnostics.push(
+          `Turbo task entry in ${packageItem.name} is missing a name or tags`,
+        );
         continue;
       }
 
@@ -313,7 +329,7 @@ function readTaskDirectory(
         const expectedCommand = `${entryCommand} ${name}`;
         if (script !== expectedCommand || command !== expectedCommand) {
           diagnostics.push(
-            `${fullName} 公共入口接线错误；package.json script 和有效 command 必须为 ${expectedCommand}`,
+            `${fullName} public gate entry is miswired; both package.json script and effective command must be ${expectedCommand}`,
           );
         }
       }
@@ -333,7 +349,7 @@ function readTaskDirectory(
     if (
       !tasks.some((task) => task.packageName === "//" && task.name === name)
     ) {
-      diagnostics.push(`缺少根公共任务入口 ${name}`);
+      diagnostics.push(`Missing root public gate entry ${name}`);
     }
   }
 
@@ -343,6 +359,7 @@ function readTaskDirectory(
 function parseDryRun(
   cwd: string,
   tasks: readonly TurboTask[],
+  turboCommand?: TurboCommand,
 ): {
   readonly taskIds: readonly string[];
   readonly diagnostics: readonly string[];
@@ -350,14 +367,14 @@ function parseDryRun(
   if (tasks.length === 0) {
     return { diagnostics: [], taskIds: [] };
   }
-  const result = runCaptured(cwd, [
-    "run",
-    ...tasks.map((task) => task.fullName),
-    "--dry=json",
-  ]);
+  const result = runCaptured(
+    cwd,
+    ["run", ...tasks.map((task) => task.fullName), "--dry=json"],
+    turboCommand,
+  );
   if (result.error !== undefined || result.status !== 0) {
     return {
-      diagnostics: [commandFailure("执行图预览", result)],
+      diagnostics: [commandFailure("execution graph dry run", result)],
       taskIds: [],
     };
   }
@@ -368,14 +385,14 @@ function parseDryRun(
   } catch (error) {
     return {
       diagnostics: [
-        `Turbo 执行图预览不是有效 JSON：${error instanceof Error ? error.message : String(error)}`,
+        `Turbo execution graph dry run is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
       ],
       taskIds: [],
     };
   }
   if (!isRecord(response) || !Array.isArray(response.tasks)) {
     return {
-      diagnostics: ["Turbo 执行图预览缺少 tasks"],
+      diagnostics: ["Turbo execution graph dry run is missing tasks"],
       taskIds: [],
     };
   }
@@ -384,7 +401,9 @@ function parseDryRun(
   const diagnostics: string[] = [];
   for (const task of response.tasks) {
     if (!isRecord(task) || !isNonEmptyString(task.taskId)) {
-      diagnostics.push("Turbo 执行图预览包含无法识别的任务标识");
+      diagnostics.push(
+        "Turbo execution graph dry run contains an unrecognized taskId",
+      );
       continue;
     }
     taskIds.push(task.taskId);
@@ -403,13 +422,13 @@ function validateLayerClosure(
     const dependency = tasksByName.get(taskId);
     if (dependency === undefined) {
       diagnostics.push(
-        `${layer.label} 执行图包含任务目录中不存在的任务 ${taskId}`,
+        `${layer.label} execution graph contains task ${taskId} which is missing from the task directory`,
       );
       continue;
     }
     if (publicGateTask(dependency)) {
       diagnostics.push(
-        `${layer.label} 执行图包含 ${dependency.fullName}：叶任务不能依赖公共聚合入口`,
+        `${layer.label} execution graph includes ${dependency.fullName}: leaf tasks cannot depend on public aggregate gate entries`,
       );
     } else if (
       dependency.role !== undefined &&
@@ -419,12 +438,12 @@ function validateLayerClosure(
     ) {
       const scope =
         layer.role === "quality:light" && dependency.role === "quality:heavy"
-          ? "轻检查不能间接启动重验收"
+          ? "light check cannot transitively trigger heavy verification"
           : dependency.role === "quality:conditional"
-            ? "常规验收不能间接启动条件验收"
-            : `不允许间接启动职责 ${dependency.role}`;
+            ? "standard verification cannot transitively trigger conditional verification"
+            : `transitively triggering role ${dependency.role} is not allowed`;
       diagnostics.push(
-        `${layer.label} 执行图包含 ${dependency.fullName}：${scope}`,
+        `${layer.label} execution graph includes ${dependency.fullName}: ${scope}`,
       );
     }
   }
@@ -437,10 +456,10 @@ function layerFor(role: GateLayer["role"]): GateLayer {
     role,
     label:
       role === "quality:light"
-        ? "轻检查"
+        ? "Light check"
         : role === "quality:heavy"
-          ? "重验收"
-          : "修复",
+          ? "Heavy verification"
+          : "Fix",
   };
 }
 
@@ -458,20 +477,38 @@ function layersFor(gate: TaskGate): readonly GateLayer[] {
   return [layerFor("quality:light"), layerFor("quality:heavy")];
 }
 
-export async function runTaskGate(
+/**
+ * Validates workspace Turbo task role tags, public gate wiring, and layer execution closures
+ * without running any tasks.
+ */
+export function inspectTaskGate(
   gate: TaskGate,
   cwd = process.cwd(),
-  entryCommand = "node --conditions=source scripts/task-gates.ts",
-): Promise<number> {
+  entryCommand = defaultEntryCommand,
+  turboCommand?: TurboCommand,
+): {
+  readonly diagnostics: readonly string[];
+  readonly plans: readonly {
+    readonly layer: GateLayer;
+    readonly tasks: readonly TurboTask[];
+  }[];
+  readonly conditionalTasks: readonly TurboTask[];
+} {
   if (!publicGateNames.has(gate)) {
-    report(`未知公共任务入口：${String(gate)}`);
-    return 1;
+    return {
+      diagnostics: [`Unknown public gate entry: ${String(gate)}`],
+      plans: [],
+      conditionalTasks: [],
+    };
   }
 
-  const directory = readTaskDirectory(cwd, entryCommand);
+  const directory = readTaskDirectory(cwd, entryCommand, turboCommand);
   if (directory.diagnostics.length > 0) {
-    report(directory.diagnostics.join("\n"));
-    return 1;
+    return {
+      diagnostics: directory.diagnostics,
+      plans: [],
+      conditionalTasks: [],
+    };
   }
   const tasksByName = new Map(
     directory.tasks.map((task) => [task.fullName, task]),
@@ -487,7 +524,7 @@ export async function runTaskGate(
     if (task.executable || task.role === undefined) {
       continue;
     }
-    const dryRun = parseDryRun(cwd, [task]);
+    const dryRun = parseDryRun(cwd, [task], turboCommand);
     diagnostics.push(...dryRun.diagnostics);
     if (
       dryRun.diagnostics.length === 0 &&
@@ -496,7 +533,7 @@ export async function runTaskGate(
       )
     ) {
       diagnostics.push(
-        `${task.fullName} 声明悬空职责标签 ${task.role}：无命令节点的原生执行图没有可执行工作`,
+        `${task.fullName} declares dangling role tag ${task.role}: commandless node has no executable work in its native execution graph`,
       );
     }
   }
@@ -505,7 +542,7 @@ export async function runTaskGate(
     const selected = directory.tasks.filter(
       (task) => task.role === layer.role && !publicGateTask(task),
     );
-    const dryRun = parseDryRun(cwd, selected);
+    const dryRun = parseDryRun(cwd, selected, turboCommand);
     diagnostics.push(...dryRun.diagnostics);
     diagnostics.push(
       ...validateLayerClosure(layer, dryRun.taskIds, tasksByName),
@@ -517,29 +554,46 @@ export async function runTaskGate(
       )
     ) {
       diagnostics.push(
-        "轻检查没有选中有效任务；请为实际验收任务声明 quality:light",
+        "Light check selected no executable tasks; declare quality:light on actual verification tasks",
       );
     }
     plans.push({ layer, tasks: selected });
   }
 
+  const conditionalTasks = directory.tasks.filter(
+    (task) => task.role === "quality:conditional",
+  );
+  return { diagnostics, plans, conditionalTasks };
+}
+
+/**
+ * Validates the workspace task graph via `inspectTaskGate` and executes each selected layer in
+ * sequence. Returns `0` on success, `1` on validation failure, or the failing Turbo exit status.
+ */
+export async function runTaskGate(
+  gate: TaskGate,
+  cwd = process.cwd(),
+  entryCommand = defaultEntryCommand,
+): Promise<number> {
+  const { diagnostics, plans, conditionalTasks } = inspectTaskGate(
+    gate,
+    cwd,
+    entryCommand,
+  );
   if (diagnostics.length > 0) {
     report(diagnostics.join("\n"));
     return 1;
   }
 
-  const conditionalTasks = directory.tasks.filter(
-    (task) => task.role === "quality:conditional",
-  );
   if (gate !== "fix" && conditionalTasks.length > 0) {
     report(
-      `条件验收未执行：${conditionalTasks.map((task) => task.fullName).join("、")}`,
+      `Conditional verification tasks not run: ${conditionalTasks.map((task) => task.fullName).join(", ")}`,
     );
   }
 
   for (const plan of plans) {
     if (plan.tasks.length === 0) {
-      report(`${plan.layer.label}没有选中任务，跳过执行`);
+      report(`${plan.layer.label} selected no tasks; skipping execution`);
       continue;
     }
     const status = await runVisible(cwd, [
@@ -558,32 +612,42 @@ export async function runTaskGate(
   return 0;
 }
 
+/**
+ * Parses CLI gate arguments from `process.argv` and runs the requested public task gate,
+ * setting `process.exitCode` to `2` on usage errors and `1` on unexpected failures.
+ */
+export async function runTaskGateCli(
+  entryCommand = defaultEntryCommand,
+): Promise<void> {
+  const [gate, ...extraArguments] = process.argv.slice(2);
+  if (
+    gate === undefined ||
+    !publicGateNames.has(gate as TaskGate) ||
+    extraArguments.length > 0
+  ) {
+    report(`Usage: ${entryCommand} <check|check:heavy|check:full|fix>`);
+    process.exitCode = 2;
+    return;
+  }
+
+  try {
+    process.exitCode = await runTaskGate(
+      gate as TaskGate,
+      process.cwd(),
+      entryCommand,
+    );
+  } catch (error) {
+    report(
+      `Public gate entry failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    process.exitCode = 1;
+  }
+}
+
 const mainFile = process.argv[1];
 if (
   mainFile !== undefined &&
   pathToFileURL(resolve(mainFile)).href === import.meta.url
 ) {
-  const gate = process.argv[2];
-  if (
-    gate !== "check" &&
-    gate !== "check:heavy" &&
-    gate !== "check:full" &&
-    gate !== "fix"
-  ) {
-    report(
-      "用法：node scripts/task-gates.ts <check|check:heavy|check:full|fix>",
-    );
-    process.exitCode = 2;
-  } else {
-    void runTaskGate(gate)
-      .then((status) => {
-        process.exitCode = status;
-      })
-      .catch((error: unknown) => {
-        report(
-          `公共任务入口失败：${error instanceof Error ? error.message : String(error)}`,
-        );
-        process.exitCode = 1;
-      });
-  }
+  void runTaskGateCli();
 }

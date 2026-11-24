@@ -1,0 +1,10 @@
+{
+  "extends": "@dock/tooling-config/node.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["dock.config.ts", "scripts/**/*.ts"]
+}

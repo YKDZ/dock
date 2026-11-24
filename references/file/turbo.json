@@ -28,6 +28,7 @@
       "tags": ["quality:light"]
     },
     "lint": {
+      "dependsOn": ["^lint"],
       "outputs": [],
       "tags": ["quality:light"]
     },

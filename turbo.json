@@ -38,7 +38,6 @@
       }
     }
   },
-  "globalPassThroughEnv": ["CARGO_HOME", "RUSTUP_HOME", "RUSTUP_TOOLCHAIN"],
   "tasks": {
     "//#check": {
       "tags": ["quality:entry"]
@@ -74,6 +73,7 @@
       "tags": ["quality:light"]
     },
     "//#lint": {
+      "dependsOn": ["^lint"],
       "outputs": [],
       "tags": ["quality:light"]
     },
@@ -87,6 +87,10 @@
       "tags": ["work:repair"]
     },
     "//#typecheck": {
+      "outputs": [],
+      "tags": ["quality:light"]
+    },
+    "//#test:task-gates": {
       "outputs": [],
       "tags": ["quality:light"]
     },
@@ -111,5 +115,11 @@
       "tags": ["quality:light"]
     }
   },
-  "globalDependencies": ["LICENSE"]
+  "globalDependencies": [
+    "LICENSE",
+    "oxfmt.config.ts",
+    "oxlint.config.ts",
+    "packages/tooling-config/oxfmt.config.ts",
+    "packages/tooling-config/oxlint.config.ts"
+  ]
 }

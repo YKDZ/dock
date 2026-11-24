@@ -640,7 +640,7 @@ function runConfigWorker<T>(
         rejectResult(
           new MaintenanceError(
             "config-worker-failed",
-            `配置维护 Worker 失败：${error.message}`,
+            `配置维护 Worker 失败：${error instanceof Error ? error.message : String(error)}`,
             { cause: error },
           ),
         ),
