@@ -46,7 +46,7 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
 
     const initial = await runDock(
       bin,
-      ["check", "--config", "dock.config.mjs", "--json"],
+      ["check", "--config", "dock.config.mjs", "--output", "structured"],
       directory,
     );
     assert.equal(initial.code, 1, initial.stderr);
@@ -68,7 +68,14 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
 
     const update = await runDock(
       bin,
-      ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+      [
+        "baseline",
+        "update",
+        "--config",
+        "dock.config.mjs",
+        "--output",
+        "structured",
+      ],
       directory,
     );
     assert.equal(update.code, 0, update.stderr);
@@ -78,7 +85,7 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
     await writeFile(join(directory, "guide.md"), movedSource, "utf8");
     const moved = await runDock(
       bin,
-      ["check", "--config", "dock.config.mjs", "--json"],
+      ["check", "--config", "dock.config.mjs", "--output", "structured"],
       directory,
     );
     assert.equal(moved.code, 0, moved.stderr);
@@ -104,7 +111,7 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
     assert.match(
       movedText.stdout,
       new RegExp(
-        `文本偏移 ${movedSource.indexOf("4173")}–${movedSource.indexOf("4173") + 4}`,
+        `text offset ${movedSource.indexOf("4173")}-${movedSource.indexOf("4173") + 4}`,
       ),
     );
 
@@ -112,7 +119,7 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
     await writeFile(join(directory, "guide.md"), changedSource, "utf8");
     const changed = await runDock(
       bin,
-      ["check", "--config", "dock.config.mjs", "--json"],
+      ["check", "--config", "dock.config.mjs", "--output", "structured"],
       directory,
     );
     assert.equal(changed.code, 1, changed.stderr);
@@ -144,7 +151,7 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
     );
     const invalidRead = await runDock(
       bin,
-      ["check", "--config", "dock.config.mjs", "--json"],
+      ["check", "--config", "dock.config.mjs", "--output", "structured"],
       directory,
     );
     assert.equal(invalidRead.code, 1, invalidRead.stderr);
@@ -155,7 +162,14 @@ export async function verifyInstalledTextRead(consumer: string): Promise<void> {
     );
     const invalidUpdate = await runDock(
       bin,
-      ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+      [
+        "baseline",
+        "update",
+        "--config",
+        "dock.config.mjs",
+        "--output",
+        "structured",
+      ],
       directory,
     );
     assert.equal(invalidUpdate.code, 1, invalidUpdate.stderr);
@@ -228,7 +242,7 @@ async function verifyInstalledExistence(
   );
   const initial = await runDock(
     bin,
-    ["check", "--config", "dock.config-exists.mjs", "--json"],
+    ["check", "--config", "dock.config-exists.mjs", "--output", "structured"],
     directory,
   );
   assert.equal(initial.code, 1, initial.stderr);
@@ -242,7 +256,14 @@ async function verifyInstalledExistence(
   );
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config-exists.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config-exists.mjs",
+      "--output",
+      "structured",
+    ],
     directory,
   );
   assert.equal(update.code, 0, update.stderr);
@@ -252,7 +273,7 @@ async function verifyInstalledExistence(
   await rm(join(directory, "guide.md"));
   const missing = await runDock(
     bin,
-    ["check", "--config", "dock.config-exists.mjs", "--json"],
+    ["check", "--config", "dock.config-exists.mjs", "--output", "structured"],
     directory,
   );
   assert.equal(missing.code, 1, missing.stderr);
@@ -260,7 +281,14 @@ async function verifyInstalledExistence(
   assert.equal(findReferenceError(missing.stdout, "missing-file"), true);
   const rejected = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config-exists.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config-exists.mjs",
+      "--output",
+      "structured",
+    ],
     directory,
   );
   assert.equal(rejected.code, 1, rejected.stderr);
@@ -286,7 +314,14 @@ async function verifyInstalledAuthorSelection(
   );
   const initialUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", "baseline-config.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "baseline-config.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(initialUpdate.code, 0, initialUpdate.stderr);
@@ -305,12 +340,19 @@ async function verifyInstalledAuthorSelection(
   );
   const invalidCheck = await runDock(
     bin,
-    ["check", "--config", "invalid-selection.mjs", "--json"],
+    ["check", "--config", "invalid-selection.mjs", "--output", "structured"],
     consumer,
   );
   const invalidUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", "invalid-selection.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "invalid-selection.mjs",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   const currentBaseline = await readFile(baselinePath);
@@ -368,6 +410,8 @@ function findReferenceError(output: string, code: string): boolean {
 function parseEnvelope(output: string): RecordValue {
   const value: unknown = JSON.parse(output);
   assert.ok(isRecord(value));
+  assert.equal(value.schemaVersion, "3", output);
+  assert.equal(value.outputMode, "structured", output);
   return value;
 }
 

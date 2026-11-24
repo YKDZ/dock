@@ -105,26 +105,26 @@ await test(exampleTest.name, async () => {
 
     const unchanged = runDock(source.check);
     assert.equal(unchanged.status, 0, unchanged.stdout);
-    assert.match(unchanged.stdout, /与基线一致。/u);
+    assert.match(unchanged.stdout, /Consistent with baseline\./u);
 
     manifest.version = "1.0.1";
     await writeFile(join(project, "package.json"), JSON.stringify(manifest));
     const unrelated = runDock(source.check);
     assert.equal(unrelated.status, 0, unrelated.stdout);
-    assert.match(unrelated.stdout, /与基线一致。/u);
+    assert.match(unrelated.stdout, /Consistent with baseline\./u);
 
     manifest.engines.node = source.nextVersion;
     await writeFile(join(project, "package.json"), JSON.stringify(manifest));
     const changed = runDock(source.check);
     assert.equal(changed.status, 1, changed.stdout);
-    assert.match(changed.stdout, /关联 installation/u);
+    assert.match(changed.stdout, /Binding installation/u);
     assert.ok(
       changed.stdout.includes(
-        `变化：node-version 事实：旧值 ${JSON.stringify(initialVersion)}；新值 ${JSON.stringify(source.nextVersion)}`,
+        `Change: node-version fact: before ${JSON.stringify(initialVersion)}; after ${JSON.stringify(source.nextVersion)}`,
       ),
       changed.stdout,
     );
-    assert.match(changed.stdout, /引用 install-guide，文件 install\.md/u);
+    assert.match(changed.stdout, /Reference install-guide, file install\.md/u);
     assert.ok(changed.stdout.includes(JSON.stringify(`${source.guide}\n`)));
     assert.equal(
       await readFile(join(project, "dock.baseline.json"), "utf8"),
@@ -135,7 +135,7 @@ await test(exampleTest.name, async () => {
     await writeFile(join(project, "package.json"), JSON.stringify(manifest));
     const missing = runDock(source.check);
     assert.equal(missing.status, 1, missing.stdout);
-    assert.match(missing.stdout, /错误 node-version/u);
+    assert.match(missing.stdout, /Error node-version/u);
 
     // “如何使用”里的 TypeScript 配置入口也执行同一份示例。
     manifest.engines.node = source.nextVersion;
@@ -149,7 +149,7 @@ await test(exampleTest.name, async () => {
     );
     const confirmed = runDock(source.usageCheck);
     assert.equal(confirmed.status, 0, confirmed.stdout);
-    assert.match(confirmed.stdout, /与基线一致。/u);
+    assert.match(confirmed.stdout, /Consistent with baseline\./u);
   } finally {
     await rm(project, { recursive: true, force: true });
   }

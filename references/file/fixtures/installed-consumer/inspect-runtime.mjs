@@ -145,7 +145,8 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
     "inspect",
     "--config",
     "../dock.config.mjs",
-    "--json",
+    "--output",
+    "structured",
   ]);
   assert.equal(initialCli.status, 0, initialCli.stderr);
   const initialEnvelope = JSON.parse(initialCli.stdout);
@@ -244,7 +245,8 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
     "check",
     "--config",
     "../dock.config.mjs",
-    "--json",
+    "--output",
+    "structured",
   ]);
   assert.equal(initialCheck.status, 1, initialCheck.stderr);
   assert.deepEqual(JSON.parse(initialCheck.stdout).data.report, initialReport);
@@ -313,7 +315,8 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
     "--config",
     "../dock.config.mjs",
     ...cliScope,
-    "--json",
+    "--output",
+    "structured",
   ]);
   assert.equal(selectedCli.status, 0, selectedCli.stderr);
   assert.deepEqual(JSON.parse(selectedCli.stdout).data.resolution, selected);
@@ -358,7 +361,8 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
     "--config",
     "../dock.config.mjs",
     ...cliScope,
-    "--json",
+    "--output",
+    "structured",
   ]);
   assert.equal(selectedCheck.status, 1, selectedCheck.stderr);
   assert.deepEqual(
@@ -400,7 +404,8 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
     "--config",
     "../dock.config.mjs",
     ...cliScope,
-    "--json",
+    "--output",
+    "structured",
   ]);
   assert.equal(selectedCliUpdate.status, 0, selectedCliUpdate.stderr);
   assert.equal(JSON.parse(selectedCliUpdate.stdout).variant, "updated");
@@ -461,7 +466,8 @@ export function createConfig(root = ".", target = "old.txt", includeRetired = tr
         "--config",
         failure.config,
         ...failure.args,
-        "--json",
+        "--output",
+        "structured",
       ]);
       assert.equal(failed.status, 1, failed.stderr);
       const envelope = JSON.parse(failed.stderr);

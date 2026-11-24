@@ -26,6 +26,8 @@ type ProcessResult = {
 };
 
 type CliEnvelope = {
+  readonly schemaVersion: string;
+  readonly outputMode?: string;
   readonly kind: string;
   readonly variant?: string;
   readonly data?: {
@@ -327,7 +329,7 @@ async function verifyHappyRoundTrip(
 ): Promise<void> {
   const firstCheck = await runDock(
     bin,
-    ["check", "--config", "dock.config.mts", "--json"],
+    ["check", "--config", "dock.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(firstCheck.code, 1, firstCheck.stderr);
@@ -353,7 +355,14 @@ async function verifyHappyRoundTrip(
 
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", "dock.config.mts", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(update.code, 0, `${update.stderr}\n${update.stdout}`);
@@ -364,7 +373,7 @@ async function verifyHappyRoundTrip(
 
   const current = await runDock(
     bin,
-    ["check", "--config", "dock.config.mts", "--json"],
+    ["check", "--config", "dock.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(current.code, 0, current.stderr);
@@ -380,13 +389,13 @@ async function verifyHappyRoundTrip(
   assert.equal(currentText.code, 0, currentText.stderr);
   assert.match(
     currentText.stdout,
-    /引用 主要业务状态，文件 .*test\/happy\.test\.mts/,
+    /Reference 主要业务状态, file .*test\/happy\.test\.mts/,
   );
   assert.match(
     currentText.stdout,
-    /引用 辅助业务状态，文件 .*test\/happy\.test\.mts/,
+    /Reference 辅助业务状态, file .*test\/happy\.test\.mts/,
   );
-  assert.match(currentText.stdout, /当前事实：\{"status":"passed"\}/);
+  assert.match(currentText.stdout, /Current fact: \{"status":"passed"\}/);
   assert.doesNotMatch(
     currentText.stdout,
     /"pluginId"|"kind"|"files"|"testRoot"|"observationKeys"|"namePattern"/,
@@ -406,7 +415,14 @@ async function verifyObservationAndReadScenarios(
 
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", "observations.config.mts", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "observations.config.mts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(update.code, 0, `${update.stdout}\n${update.stderr}`);
@@ -434,7 +450,7 @@ async function verifyObservationAndReadScenarios(
 
   const check = await runDock(
     bin,
-    ["check", "--config", "observations.config.mts", "--json"],
+    ["check", "--config", "observations.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(check.code, 0, check.stderr);
@@ -462,7 +478,7 @@ async function verifyObservationAndReadScenarios(
   await writeFile(join(consumer, "read-business.txt"), changedBusinessText);
   const changed = await runDock(
     bin,
-    ["check", "--config", "observations.config.mts", "--json"],
+    ["check", "--config", "observations.config.mts", "--output", "structured"],
     consumer,
   );
   const changedEnvelope = parseEnvelope(changed.stdout);
@@ -481,7 +497,14 @@ async function verifyObservationAndReadScenarios(
 
   const driftUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", "observations.config.mts", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "observations.config.mts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(driftUpdate.code, 0, driftUpdate.stderr);
@@ -489,7 +512,7 @@ async function verifyObservationAndReadScenarios(
 
   const driftCheck = await runDock(
     bin,
-    ["check", "--config", "observations.config.mts", "--json"],
+    ["check", "--config", "observations.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(driftCheck.code, 0, driftCheck.stderr);
@@ -498,7 +521,13 @@ async function verifyObservationAndReadScenarios(
 
   const diagnostics = await runDock(
     bin,
-    ["check", "--config", "diagnostic-observations.config.mts", "--json"],
+    [
+      "check",
+      "--config",
+      "diagnostic-observations.config.mts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(diagnostics.code, 1, diagnostics.stderr);
@@ -518,7 +547,8 @@ async function verifyObservationAndReadScenarios(
       "update",
       "--config",
       "diagnostic-observations.config.mts",
-      "--json",
+      "--output",
+      "structured",
     ],
     consumer,
   );
@@ -541,7 +571,8 @@ async function verifyLoopObservedRegistrations(
       "update",
       "--config",
       "loop-observations.config.mts",
-      "--json",
+      "--output",
+      "structured",
     ],
     consumer,
   );
@@ -563,7 +594,13 @@ async function verifyLoopObservedRegistrations(
 
   const check = await runDock(
     bin,
-    ["check", "--config", "loop-observations.config.mts", "--json"],
+    [
+      "check",
+      "--config",
+      "loop-observations.config.mts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(check.code, 0, check.stderr);
@@ -584,7 +621,7 @@ async function verifyReadFailureDiagnostics(
   const baselinePath = join(consumer, "failed-read.baseline.json");
   const initialUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", configuration, "--json"],
+    ["baseline", "update", "--config", configuration, "--output", "structured"],
     consumer,
   );
   assert.equal(initialUpdate.code, 0, initialUpdate.stderr);
@@ -595,7 +632,7 @@ async function verifyReadFailureDiagnostics(
   try {
     const check = await runDock(
       bin,
-      ["check", "--config", configuration, "--json"],
+      ["check", "--config", configuration, "--output", "structured"],
       consumer,
     );
     assert.equal(check.code, 1, check.stderr);
@@ -622,7 +659,14 @@ async function verifyReadFailureDiagnostics(
 
     const update = await runDock(
       bin,
-      ["baseline", "update", "--config", configuration, "--json"],
+      [
+        "baseline",
+        "update",
+        "--config",
+        configuration,
+        "--output",
+        "structured",
+      ],
       consumer,
     );
     assert.equal(update.code, 1, update.stderr);
@@ -669,7 +713,12 @@ async function verifyEffectiveRoot(
   bin: string,
   consumer: string,
 ): Promise<void> {
-  const arguments_ = ["--config", "configurations/rooted.config.mts", "--json"];
+  const arguments_ = [
+    "--config",
+    "configurations/rooted.config.mts",
+    "--output",
+    "structured",
+  ];
   const update = await runDock(
     bin,
     ["baseline", "update", ...arguments_],
@@ -698,7 +747,7 @@ async function verifyFailureIsolation(
 ): Promise<void> {
   const check = await runDock(
     bin,
-    ["check", "--config", "isolation.config.mts", "--json"],
+    ["check", "--config", "isolation.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(check.code, 1, check.stderr);
@@ -715,7 +764,14 @@ async function verifyFailureIsolation(
 
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", "isolation.config.mts", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "isolation.config.mts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(update.code, 1, update.stderr);
@@ -744,7 +800,7 @@ async function verifyRunLifecycle(
 ): Promise<void> {
   const closeFailure = await runDock(
     bin,
-    ["check", "--config", "close-failure.config.mts", "--json"],
+    ["check", "--config", "close-failure.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(closeFailure.code, 1, closeFailure.stderr);
@@ -758,7 +814,7 @@ async function verifyRunLifecycle(
 
   const cancelled = await runDock(
     bin,
-    ["check", "--config", "cancelled.config.mts", "--json"],
+    ["check", "--config", "cancelled.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(cancelled.code, 1, cancelled.stderr);
@@ -771,7 +827,13 @@ async function verifyRunLifecycle(
 
   const startupFailure = await runDock(
     bin,
-    ["check", "--config", "startup-failure.config.mts", "--json"],
+    [
+      "check",
+      "--config",
+      "startup-failure.config.mts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(startupFailure.code, 1, startupFailure.stderr);
@@ -791,7 +853,14 @@ async function verifyInterruptedProcess(
   const baselinePath = join(consumer, "interrupted.baseline.json");
   const initial = await runDock(
     bin,
-    ["baseline", "update", "--config", "interrupted.config.mts", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "interrupted.config.mts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(initial.code, 0, initial.stderr);
@@ -801,7 +870,7 @@ async function verifyInterruptedProcess(
 
   const check = await runDock(
     bin,
-    ["check", "--config", "interrupted.config.mts", "--json"],
+    ["check", "--config", "interrupted.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(check.code, 1, check.stderr);
@@ -816,7 +885,14 @@ async function verifyInterruptedProcess(
 
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", "interrupted.config.mts", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "interrupted.config.mts",
+      "--output",
+      "structured",
+    ],
     consumer,
   );
   assert.equal(update.code, 1, update.stderr);
@@ -839,7 +915,7 @@ async function verifyAfterEndFailure(
   const baselinePath = join(consumer, "after-end.baseline.json");
   const initialUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", configuration, "--json"],
+    ["baseline", "update", "--config", configuration, "--output", "structured"],
     consumer,
   );
   assert.equal(initialUpdate.code, 0, initialUpdate.stderr);
@@ -851,12 +927,19 @@ async function verifyAfterEndFailure(
     try {
       const check = await runDock(
         bin,
-        ["check", "--config", configuration, "--json"],
+        ["check", "--config", configuration, "--output", "structured"],
         consumer,
       );
       const update = await runDock(
         bin,
-        ["baseline", "update", "--config", configuration, "--json"],
+        [
+          "baseline",
+          "update",
+          "--config",
+          configuration,
+          "--output",
+          "structured",
+        ],
         consumer,
       );
       assert.equal(
@@ -893,7 +976,7 @@ async function verifyStatusesAndIdentity(
 ): Promise<void> {
   const statuses = await runDock(
     bin,
-    ["check", "--config", "statuses.config.mts", "--json"],
+    ["check", "--config", "statuses.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(statuses.code, 1, statuses.stderr);
@@ -903,7 +986,7 @@ async function verifyStatusesAndIdentity(
 
   const filtered = await runDock(
     bin,
-    ["check", "--config", "filtered.config.mts", "--json"],
+    ["check", "--config", "filtered.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(filtered.code, 1, filtered.stderr);
@@ -914,7 +997,7 @@ async function verifyStatusesAndIdentity(
 
   const duplicate = await runDock(
     bin,
-    ["check", "--config", "duplicate.config.mts", "--json"],
+    ["check", "--config", "duplicate.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(duplicate.code, 1, duplicate.stderr);
@@ -930,7 +1013,7 @@ async function verifyConflictPreflight(
   const marker = join(consumer, "test-workspace", "conflict-started.marker");
   const check = await runDock(
     bin,
-    ["check", "--config", "conflict.config.mts", "--json"],
+    ["check", "--config", "conflict.config.mts", "--output", "structured"],
     consumer,
   );
   assert.equal(check.code, 1, check.stderr);
@@ -1027,7 +1110,10 @@ function run(
 }
 
 function parseEnvelope(output: string): CliEnvelope {
-  return JSON.parse(output) as CliEnvelope;
+  const envelope = JSON.parse(output) as CliEnvelope;
+  assert.equal(envelope.schemaVersion, "3", output);
+  assert.equal(envelope.outputMode, "structured", output);
+  return envelope;
 }
 
 function requireReport(envelope: CliEnvelope): MaintenanceReport {

@@ -23,7 +23,8 @@ const updated = invoke(bin, [
   "update",
   "--config",
   "scope.config.mjs",
-  "--json",
+  "--output",
+  "structured",
 ]);
 assert.equal(updated.status, 0, updated.stderr);
 const initialBaseline = await readFile("scope.baseline.json");
@@ -35,7 +36,8 @@ const inspection = invoke(bin, [
   "scope.config.mjs",
   "--binding",
   "scope-happy",
-  "--json",
+  "--output",
+  "structured",
 ]);
 assert.equal(inspection.status, 0, inspection.stderr);
 const inspectedPlugin = parse(inspection.stdout).data.resolution.plugins.find(
@@ -61,7 +63,8 @@ const currentFile = invoke(bin, [
   "scope.config.mjs",
   "--file",
   "test-workspace/test/happy.test.mts",
-  "--json",
+  "--output",
+  "structured",
 ]);
 assert.equal(currentFile.status, 0, currentFile.stderr);
 assert.deepEqual(parse(currentFile.stdout).data.report.scope, ["scope-happy"]);
@@ -74,7 +77,8 @@ const movedFile = invoke(
     "scope.config.mjs",
     "--file",
     "test-workspace/test/happy.test.mts",
-    "--json",
+    "--output",
+    "structured",
   ],
   { DOCK_NODE_SCOPE_TARGET: "test/moved.test.mts" },
 );
@@ -95,7 +99,8 @@ const localUpdate = invoke(
     "scope.config.mjs",
     "--file",
     "test-workspace/test/happy.test.mts",
-    "--json",
+    "--output",
+    "structured",
   ],
   { DOCK_NODE_SCOPE_TARGET: "test/moved.test.mts" },
 );
@@ -118,7 +123,8 @@ const union = invoke(
     "test-workspace/test/moved.test.mts",
     "--reference",
     "scope-ordinary-ref",
-    "--json",
+    "--output",
+    "structured",
   ],
   { DOCK_NODE_SCOPE_TARGET: "test/moved.test.mts" },
 );
@@ -134,7 +140,8 @@ const unmatched = invoke(bin, [
   "scope.config.mjs",
   "--file",
   "test-workspace/missing.test.mts",
-  "--json",
+  "--output",
+  "structured",
 ]);
 assert.equal(unmatched.status, 1);
 assert.equal(parse(unmatched.stderr).data.code, "scope-selector-unmatched");
@@ -151,7 +158,8 @@ const preflight = invoke(bin, [
   "scope-conflict.config.mjs",
   "--binding",
   "selected-conflict",
-  "--json",
+  "--output",
+  "structured",
 ]);
 assert.equal(preflight.status, 1);
 assert.equal(parse(preflight.stderr).data.code, "plugin-prepare-failed");
@@ -169,7 +177,8 @@ const selectedUpdate = invoke(bin, [
   "selected-runs.config.mjs",
   "--binding",
   "selected-run-binding",
-  "--json",
+  "--output",
+  "structured",
 ]);
 assert.equal(selectedUpdate.status, 0, selectedUpdate.stderr);
 const selectedReport = parse(selectedUpdate.stdout).data.report;
@@ -188,5 +197,8 @@ function invoke(executable, arguments_, env = {}) {
 }
 
 function parse(output) {
-  return JSON.parse(output);
+  const envelope = JSON.parse(output);
+  assert.equal(envelope.schemaVersion, "3", output);
+  assert.equal(envelope.outputMode, "structured", output);
+  return envelope;
 }

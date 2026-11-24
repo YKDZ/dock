@@ -174,16 +174,28 @@ export default defineConfig({
     { cwd: process.cwd(), encoding: "utf8" },
   );
   assert.equal(textResult.status, 0, textResult.stderr);
-  assert.match(textResult.stdout, /插件 @fixture\/cli-first：执行完成/u);
-  assert.match(textResult.stdout, /插件 @fixture\/cli-second：执行完成/u);
+  assert.match(textResult.stdout, /Plugin @fixture\/cli-first: 执行完成/u);
+  assert.match(textResult.stdout, /Plugin @fixture\/cli-second: 执行完成/u);
 
   const jsonResult = spawnSync(
     process.execPath,
-    [installedCli, "check", "--config", cliConfigPath, "--json"],
+    [
+      installedCli,
+      "check",
+      "--config",
+      cliConfigPath,
+      "--output",
+      "structured",
+    ],
     { cwd: process.cwd(), encoding: "utf8" },
   );
   assert.equal(jsonResult.status, 0, jsonResult.stderr);
-  const jsonOutput = JSON.stringify(JSON.parse(jsonResult.stdout));
+  const jsonEnvelope = JSON.parse(jsonResult.stdout);
+  assert.equal(jsonEnvelope.schemaVersion, "3");
+  assert.equal(jsonEnvelope.outputMode, "structured");
+  assert.equal(jsonEnvelope.kind, "data");
+  assert.equal(jsonEnvelope.variant, "consistent");
+  const jsonOutput = JSON.stringify(jsonEnvelope);
   assert.ok(jsonOutput.includes('"pluginId":"@fixture/cli-first"'));
   assert.ok(jsonOutput.includes('"pluginId":"@fixture/cli-second"'));
   assert.ok(jsonOutput.includes('"data":{"owner":"@fixture/cli-first"}'));

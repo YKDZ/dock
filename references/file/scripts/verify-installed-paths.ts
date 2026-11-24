@@ -18,6 +18,8 @@ type ProcessResult = {
 };
 
 type CliEnvelope = {
+  readonly schemaVersion: string;
+  readonly outputMode?: string;
   readonly data?: { readonly report?: unknown };
   readonly variant?: string;
 };
@@ -52,7 +54,14 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
     );
     const initial = await runDock(
       bin,
-      ["baseline", "update", "--config", "dock.config.mjs", "--json"],
+      [
+        "baseline",
+        "update",
+        "--config",
+        "dock.config.mjs",
+        "--output",
+        "structured",
+      ],
       original,
     );
     assert.equal(initial.code, 0, initial.stdout + initial.stderr);
@@ -71,7 +80,14 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
     );
     const externalBaseline = await runDock(
       bin,
-      ["baseline", "update", "--config", "external.config.mjs", "--json"],
+      [
+        "baseline",
+        "update",
+        "--config",
+        "external.config.mjs",
+        "--output",
+        "structured",
+      ],
       original,
     );
     assert.equal(
@@ -94,7 +110,14 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
     );
     const sharedBaseline = await runDock(
       bin,
-      ["baseline", "update", "--config", "shared.config.mjs", "--json"],
+      [
+        "baseline",
+        "update",
+        "--config",
+        "shared.config.mjs",
+        "--output",
+        "structured",
+      ],
       original,
     );
     assert.equal(
@@ -112,7 +135,8 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
         "external.config.mjs",
         "--file",
         external,
-        "--json",
+        "--output",
+        "structured",
       ],
       relocated,
     );
@@ -130,7 +154,8 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
         "shared.config.mjs",
         "--file",
         "../../docs/guide.md",
-        "--json",
+        "--output",
+        "structured",
       ],
       relocated,
     );
@@ -162,7 +187,8 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
         "shared.config.mjs",
         "--file",
         "../../docs/guide.md",
-        "--json",
+        "--output",
+        "structured",
       ],
       relocated,
     );
@@ -177,7 +203,15 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
     ]);
     const unchanged = await runDock(
       bin,
-      ["check", "--config", "dock.config.mjs", "--file", "guide.md", "--json"],
+      [
+        "check",
+        "--config",
+        "dock.config.mjs",
+        "--file",
+        "guide.md",
+        "--output",
+        "structured",
+      ],
       relocated,
     );
     assert.equal(unchanged.code, 0, unchanged.stdout + unchanged.stderr);
@@ -200,7 +234,15 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
     );
     const historical = await runDock(
       bin,
-      ["check", "--config", "dock.config.mjs", "--file", "guide.md", "--json"],
+      [
+        "check",
+        "--config",
+        "dock.config.mjs",
+        "--file",
+        "guide.md",
+        "--output",
+        "structured",
+      ],
       relocated,
     );
     assert.equal(historical.code, 1, historical.stdout + historical.stderr);
@@ -219,7 +261,8 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
         "dock.config.mjs",
         "--file",
         "guide.md",
-        "--json",
+        "--output",
+        "structured",
       ],
       relocated,
     );
@@ -232,7 +275,8 @@ export async function verifyInstalledPaths(consumer: string): Promise<void> {
         "dock.config.mjs",
         "--file",
         "renamed.md",
-        "--json",
+        "--output",
+        "structured",
       ],
       relocated,
     );
@@ -405,7 +449,7 @@ async function verifyCheckout(
   const workspace = join(checkout, "workspace");
   const firstCheck = await runDock(
     bin,
-    ["check", "--config", "config/entry.mjs", "--json"],
+    ["check", "--config", "config/entry.mjs", "--output", "structured"],
     checkout,
   );
   assert.equal(firstCheck.code, 1, firstCheck.stderr);
@@ -434,7 +478,14 @@ async function verifyCheckout(
 
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", "config/entry.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "config/entry.mjs",
+      "--output",
+      "structured",
+    ],
     checkout,
   );
   assert.equal(update.code, 0, update.stderr);
@@ -444,7 +495,13 @@ async function verifyCheckout(
   const nestedCwd = join(workspace, "packages", "beta");
   const unchanged = await runDock(
     bin,
-    ["check", "--config", "../../../config/entry.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "../../../config/entry.mjs",
+      "--output",
+      "structured",
+    ],
     nestedCwd,
   );
   assert.equal(unchanged.code, 0, unchanged.stderr);
@@ -493,7 +550,7 @@ async function verifyRootSwitchPathBases(
   );
   const movedRoot = await runDock(
     bin,
-    ["check", "--config", configPath, "--json"],
+    ["check", "--config", configPath, "--output", "structured"],
     checkout,
   );
   assert.equal(movedRoot.code, 1, movedRoot.stderr);
@@ -522,7 +579,7 @@ async function verifyDefaultRoot(
   const configPath = "workspace/default-config.mjs";
   const initial = await runDock(
     bin,
-    ["check", "--config", configPath, "--json"],
+    ["check", "--config", configPath, "--output", "structured"],
     checkout,
   );
   assert.equal(initial.code, 1, initial.stderr);
@@ -535,7 +592,7 @@ async function verifyDefaultRoot(
   );
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", configPath, "--json"],
+    ["baseline", "update", "--config", configPath, "--output", "structured"],
     checkout,
   );
   assert.equal(update.code, 0, update.stderr);
@@ -551,7 +608,7 @@ async function verifyDefaultRoot(
   );
   const movedRootCheck = await runDock(
     bin,
-    ["check", "--config", movedRootConfig, "--json"],
+    ["check", "--config", movedRootConfig, "--output", "structured"],
     checkout,
   );
   assert.equal(movedRootCheck.code, 1, movedRootCheck.stderr);
@@ -565,7 +622,14 @@ async function verifyDefaultRoot(
   );
   const movedRootUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", movedRootConfig, "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      movedRootConfig,
+      "--output",
+      "structured",
+    ],
     checkout,
   );
   assert.equal(movedRootUpdate.code, 0, movedRootUpdate.stderr);
@@ -583,7 +647,7 @@ async function verifyPackageConfigs(
   const alphaConfig = "workspace/packages/alpha/dock.config.mjs";
   const alphaCheck = await runDock(
     bin,
-    ["check", "--config", alphaConfig, "--json"],
+    ["check", "--config", alphaConfig, "--output", "structured"],
     checkout,
   );
   assert.equal(alphaCheck.code, 1, alphaCheck.stderr);
@@ -596,7 +660,7 @@ async function verifyPackageConfigs(
   );
   const alphaUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", alphaConfig, "--json"],
+    ["baseline", "update", "--config", alphaConfig, "--output", "structured"],
     checkout,
   );
   assert.equal(alphaUpdate.code, 0, alphaUpdate.stderr);
@@ -604,7 +668,7 @@ async function verifyPackageConfigs(
 
   const fromBetaCwd = await runDock(
     bin,
-    ["check", "--config", "../alpha/dock.config.mjs", "--json"],
+    ["check", "--config", "../alpha/dock.config.mjs", "--output", "structured"],
     join(workspace, "packages", "beta"),
   );
   assert.equal(fromBetaCwd.code, 0, fromBetaCwd.stderr);
@@ -613,7 +677,7 @@ async function verifyPackageConfigs(
   const betaConfig = "workspace/packages/beta/dock.config.mjs";
   const betaCheck = await runDock(
     bin,
-    ["check", "--config", betaConfig, "--json"],
+    ["check", "--config", betaConfig, "--output", "structured"],
     checkout,
   );
   assert.equal(betaCheck.code, 1, betaCheck.stderr);
@@ -626,7 +690,7 @@ async function verifyPackageConfigs(
   );
   const betaUpdate = await runDock(
     bin,
-    ["baseline", "update", "--config", betaConfig, "--json"],
+    ["baseline", "update", "--config", betaConfig, "--output", "structured"],
     checkout,
   );
   assert.equal(betaUpdate.code, 0, betaUpdate.stderr);
@@ -642,7 +706,14 @@ async function verifyIndependentConfigs(
   for (const name of ["independent-one.mjs", "independent-two.mjs"]) {
     const update = await runDock(
       bin,
-      ["baseline", "update", "--config", `config/${name}`, "--json"],
+      [
+        "baseline",
+        "update",
+        "--config",
+        `config/${name}`,
+        "--output",
+        "structured",
+      ],
       checkout,
     );
     assert.equal(update.code, 0, update.stderr);
@@ -651,7 +722,13 @@ async function verifyIndependentConfigs(
   const secondBytes = await readFile(secondBaseline);
   const second = await runDock(
     bin,
-    ["check", "--config", "config/independent-two.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "config/independent-two.mjs",
+      "--output",
+      "structured",
+    ],
     checkout,
   );
   assert.equal(second.code, 0, second.stderr);
@@ -677,14 +754,26 @@ async function verifyIndependentConfigs(
   );
   const removed = await runDock(
     bin,
-    ["check", "--config", "config/independent-one.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "config/independent-one.mjs",
+      "--output",
+      "structured",
+    ],
     checkout,
   );
   assert.equal(removed.code, 1, removed.stderr);
   assert.equal(readEnvelope(removed.stdout).variant, "changed");
   const other = await runDock(
     bin,
-    ["check", "--config", "config/independent-two.mjs", "--json"],
+    [
+      "check",
+      "--config",
+      "config/independent-two.mjs",
+      "--output",
+      "structured",
+    ],
     checkout,
   );
   assert.equal(other.code, 0, other.stderr);
@@ -705,7 +794,7 @@ async function verifyChangedTarget(
   const configPath = join(checkout, "config", "target-change.mjs");
   const update = await runDock(
     bin,
-    ["baseline", "update", "--config", configPath, "--json"],
+    ["baseline", "update", "--config", configPath, "--output", "structured"],
     checkout,
   );
   assert.equal(update.code, 0, update.stderr);
@@ -721,7 +810,7 @@ async function verifyChangedTarget(
   );
   const changed = await runDock(
     bin,
-    ["check", "--config", configPath, "--json"],
+    ["check", "--config", configPath, "--output", "structured"],
     checkout,
   );
   assert.equal(changed.code, 1, changed.stderr);
@@ -756,7 +845,7 @@ async function verifyMaintainedModuleMove(
   );
   const unchanged = await runDock(
     bin,
-    ["check", "--config", "config/entry.mjs", "--json"],
+    ["check", "--config", "config/entry.mjs", "--output", "structured"],
     checkout,
   );
   assert.equal(unchanged.code, 0, unchanged.stderr);
@@ -785,7 +874,7 @@ async function verifyChangedBoundTarget(
   );
   const changed = await runDock(
     bin,
-    ["check", "--config", "config/entry.mjs", "--json"],
+    ["check", "--config", "config/entry.mjs", "--output", "structured"],
     checkout,
   );
   assert.equal(changed.code, 1, changed.stderr);
@@ -805,7 +894,14 @@ async function verifyFailedUpdateKeepsBaseline(
   await rm(target);
   const failed = await runDock(
     bin,
-    ["baseline", "update", "--config", "config/entry.mjs", "--json"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "config/entry.mjs",
+      "--output",
+      "structured",
+    ],
     checkout,
   );
   assert.equal(failed.code, 1, failed.stderr);
@@ -852,7 +948,10 @@ function findChangeKind(output: string, kind: string): boolean {
 }
 
 function readEnvelope(output: string): CliEnvelope {
-  return JSON.parse(output) as CliEnvelope;
+  const envelope = JSON.parse(output) as CliEnvelope;
+  assert.equal(envelope.schemaVersion, "3", output);
+  assert.equal(envelope.outputMode, "structured", output);
+  return envelope;
 }
 
 function readReport(output: string): RecordValue {
