@@ -13,7 +13,7 @@ void test("creates a baseline directly and updates valid differences without req
   const created = updateBaseline(input);
   assert.equal(created.status, "updated");
   if (created.status !== "updated") return;
-  assert.equal(created.baseline.version, 2);
+  assert.equal(created.baseline.version, 3);
   assert.equal(created.report.bindings[0]?.consistency, "inconsistent");
 
   const current: CheckInput = {
@@ -52,16 +52,34 @@ void test("unsupported or corrupted baselines fail explicitly instead of pretend
   assert.equal(created.status, "updated");
   if (created.status !== "updated") return;
 
-  const unsupported = {
+  const unsupportedV1 = {
     ...created.baseline,
     version: 1,
   } as unknown as Baseline;
+  const unsupportedV2 = {
+    ...created.baseline,
+    version: 2,
+  } as unknown as Baseline;
+  for (const unsupported of [unsupportedV1, unsupportedV2]) {
+    const versionPattern = new RegExp(
+      `Unsupported baseline version ${String((unsupported as { version: number }).version)}; expected version 3[\\s\\S]*dock baseline update --config`,
+    );
+    assert.throws(
+      () => check({ ...input, baseline: unsupported }),
+      versionPattern,
+    );
+    assert.throws(
+      () => updateBaseline({ ...input, baseline: unsupported }),
+      versionPattern,
+    );
+  }
   const damaged = structuredClone(created.baseline);
   damaged.bindings.configuration!.references.setting!.value = Number.NaN;
-  for (const baseline of [unsupported, damaged]) {
-    assert.throws(() => check({ ...input, baseline }), TypeError);
-    assert.throws(() => updateBaseline({ ...input, baseline }), TypeError);
-  }
+  assert.throws(() => check({ ...input, baseline: damaged }), TypeError);
+  assert.throws(
+    () => updateBaseline({ ...input, baseline: damaged }),
+    TypeError,
+  );
 });
 
 void test("empty update scope cannot implicitly clear an existing baseline", () => {

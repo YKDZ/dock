@@ -414,3 +414,84 @@ void test("reports maintenanceFailed on stderr in text and structured modes incl
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("CLI check and baseline update reject legacy version 2 baseline without altering bytes and pass after rebuild", async () => {
+  const root = await createConfigWorkspace();
+  const configPath = join(root, "dock.config.mjs");
+  const baselinePath = join(root, "dock.baseline.json");
+  const factPath = join(root, "fact.txt");
+
+  try {
+    await writeFile(factPath, "current fact\n", "utf8");
+    const legacyBaseline = `${JSON.stringify(
+      {
+        version: 2,
+        bindings: {
+          "doc-policy": {
+            definition: { id: "doc-policy", references: ["fact-ref"] },
+            references: {
+              "fact-ref": {
+                definition: {
+                  id: "fact-ref",
+                  target: {
+                    pluginId: "@ykdz/dock-reference-file",
+                    target: "fact.txt",
+                    fileInfo: "fact.txt",
+                  },
+                },
+                value: "current fact\n",
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`;
+    await writeFile(baselinePath, legacyBaseline, "utf8");
+    await writeFile(
+      configPath,
+      [
+        'import { binding, defineConfig, file } from "@ykdz/dock";',
+        "export default defineConfig({",
+        "  plugins: [file],",
+        '  bindings: [binding("doc-policy", [file.from("fact.txt").reference("fact-ref")])],',
+        "});",
+      ].join("\n"),
+      "utf8",
+    );
+
+    for (const argv of [
+      ["check", "--config", configPath],
+      ["baseline", "update", "--config", configPath],
+    ]) {
+      const outcome = await runCli(argv);
+      assert.equal(outcome.result.exitCode, 1);
+      assert.equal(outcome.stdout, "");
+      assert.match(outcome.stderr, /Maintenance failed \(baseline-invalid\)/);
+      assert.match(
+        outcome.stderr,
+        /Unsupported baseline version 2; expected version 3\./,
+      );
+      assert.match(outcome.stderr, /dock baseline update --config/);
+      assert.equal(await readFile(baselinePath, "utf8"), legacyBaseline);
+    }
+
+    await rm(baselinePath);
+    const rebuilt = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      configPath,
+    ]);
+    assert.equal(rebuilt.result.exitCode, 0);
+    const verified = await runCli(["check", "--config", configPath]);
+    assert.equal(verified.result.exitCode, 0);
+    const saved = JSON.parse(await readFile(baselinePath, "utf8")) as {
+      version: number;
+    };
+    assert.equal(saved.version, 3);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

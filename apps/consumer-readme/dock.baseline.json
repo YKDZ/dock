@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "bindings": {
     "readme-extension": {
       "definition": {
@@ -14,12 +14,6 @@
               "pluginId": "@ykdz/dock-reference-node-test",
               "target": {
                 "kind": "node-test-status",
-                "run": {
-                  "identity": "README example",
-                  "files": ["apps/consumer-readme/scripts/readme.test.ts"],
-                  "observationKeys": []
-                },
-                "file": "apps/consumer-readme/scripts/readme.test.ts",
                 "name": "README example completes check and baseline update"
               },
               "fileInfo": "scripts/readme.test.ts"
@@ -84,12 +78,6 @@
               "pluginId": "@ykdz/dock-reference-node-test",
               "target": {
                 "kind": "node-test-status",
-                "run": {
-                  "identity": "README example",
-                  "files": ["apps/consumer-readme/scripts/readme.test.ts"],
-                  "observationKeys": []
-                },
-                "file": "apps/consumer-readme/scripts/readme.test.ts",
                 "name": "README example completes check and baseline update"
               },
               "fileInfo": "scripts/readme.test.ts"

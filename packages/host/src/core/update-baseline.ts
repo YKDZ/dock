@@ -56,7 +56,7 @@ export function updateBaseline(input: CheckInput): BaselineUpdateOutcome {
 
   return {
     status: "updated",
-    baseline: { version: 2, bindings: nextBindings },
+    baseline: { version: 3, bindings: nextBindings },
     report,
   };
 }

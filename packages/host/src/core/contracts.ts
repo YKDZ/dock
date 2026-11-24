@@ -58,7 +58,7 @@ export type BindingBaseline = {
   references: Record<string, BaselineReferenceFact>;
 };
 export type Baseline = {
-  version: 2;
+  version: 3;
   bindings: Record<string, BindingBaseline>;
 };
 
@@ -271,9 +271,9 @@ export function assertBaseline(value: Baseline | undefined): void {
   if (!isRecord(value) || !isRecord(value.bindings)) {
     throw new TypeError("Invalid baseline format.");
   }
-  if (value.version !== 2) {
+  if (value.version !== 3) {
     throw new TypeError(
-      `Unsupported baseline version ${String(value.version)}; expected version 2.`,
+      `Unsupported baseline version ${String(value.version)}; expected version 3. Review current bindings and references, remove or replace the old baseline, rebuild with \`dock baseline update --config <config>\`, and verify with \`dock check --config <config>\`.`,
     );
   }
   for (const [id, binding] of Object.entries(value.bindings)) {

@@ -489,6 +489,19 @@ const vitestImplementation: VitestPlugin = definePlugin({
       target.file,
     );
   },
+  comparableTarget(reference: VitestReference): JsonValue {
+    const target = getVitestTarget(reference.target);
+    if (target.kind === "vitest-suite") {
+      return {
+        kind: target.kind,
+        suitePath: [...target.suitePath],
+        observationKeys: [...target.observationKeys],
+      };
+    }
+    return target.kind === "vitest-test-observation"
+      ? { kind: target.kind, name: target.name, key: target.key }
+      : { kind: target.kind, name: target.name };
+  },
   prepare(
     references: readonly VitestReference[],
     context: PluginContext,

@@ -355,7 +355,7 @@ await rm("mixed-file.baseline.json");
 await writeFile(
   "legacy.baseline.json",
   JSON.stringify({
-    version: 2,
+    version: 3,
     bindings: {
       legacy: {
         definition: { id: "legacy", references: ["legacy-ref"] },

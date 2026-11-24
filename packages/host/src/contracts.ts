@@ -106,6 +106,11 @@ export interface ReferencePlugin<
     [reference: Ref, context: PluginContext],
     string | URL
   >;
+  /** Projects a reference target to the comparable JSON definition stored in baselines and checked for definition diffs. */
+  readonly comparableTarget?: BivariantHandler<
+    [reference: Ref, context: PluginContext],
+    JsonValue
+  >;
   /** Runs one preflight pass over all references of a plugin and may return isolated prepared data. */
   readonly prepare?: BivariantHandler<
     [references: readonly Ref[], context: PluginContext],

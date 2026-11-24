@@ -311,6 +311,7 @@ function referenceDefinitions(
   const projectDirectory = isWithinDirectory(baselineDirectory, config.root)
     ? baselineDirectory
     : config.root;
+  const context = Object.freeze({ root: config.root });
   return config.references.map((reference) => {
     const location = fileInfo.get(reference.id);
     let snapshot = location ?? null;
@@ -321,11 +322,24 @@ function referenceDefinitions(
     ) {
       snapshot = relative(baselineDirectory, location) || ".";
     }
+    const plugin = config.plugins.get(reference.pluginId);
+    let target = reference.target;
+    if (plugin?.comparableTarget !== undefined) {
+      try {
+        target = ownJsonValue(plugin.comparableTarget(reference, context));
+      } catch (error) {
+        throw new MaintenanceError(
+          "plugin-comparable-target-failed",
+          `Plugin ${plugin.id} failed to describe comparable target for reference ${reference.id}: ${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
+    }
     return {
       id: reference.id,
       target: {
         pluginId: reference.pluginId,
-        target: reference.target,
+        target,
         fileInfo: snapshot,
       },
       ...(reference.selection === undefined
