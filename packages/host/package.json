@@ -40,6 +40,11 @@
       "types": "./dist/typescript/index.d.ts",
       "default": "./dist/typescript/index.js"
     },
+    "./node-test": {
+      "source": "./src/node-test/index.ts",
+      "types": "./dist/node-test/index.d.ts",
+      "default": "./dist/node-test/index.js"
+    },
     "./cli": "./dist/cli.js"
   },
   "publishConfig": {
