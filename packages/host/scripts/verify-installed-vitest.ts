@@ -1134,19 +1134,16 @@ async function verifyGroupsFull(dock: string, consumer: string): Promise<void> {
   const maintenanceRoot = join(consumer, "maintenance-root");
   const baselinePath = join(maintenanceRoot, "groups.baseline.json");
   const primaryMemberId = JSON.stringify([
-    "test/groups.test.mts",
     "preview config",
     "inner > label",
     "primary",
   ]);
   const renamedMemberId = JSON.stringify([
-    "test/groups.test.mts",
     "preview config",
     "inner > label",
     "primary renamed",
   ]);
   const sameNamedNestedMemberId = JSON.stringify([
-    "test/groups.test.mts",
     "preview config",
     "other nested",
     "primary",

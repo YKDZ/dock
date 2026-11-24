@@ -433,7 +433,9 @@ export function assertBaseline(value: Baseline | undefined): void {
       `Unsupported baseline version ${String(version)}; expected version 3. Review current bindings and references, remove or replace the old baseline, rebuild with \`dock baseline update --config <config>\`, and verify with \`dock check --config <config>\`.`,
     );
   }
-  for (const [id, binding] of Object.entries(bindingsProperty.value)) {
+  for (const id of Object.keys(bindingsProperty.value)) {
+    const bindingProperty = readOwnDataProperty(bindingsProperty.value, id);
+    const binding = bindingProperty.present ? bindingProperty.value : undefined;
     if (!isRecord(binding)) {
       throw new TypeError(`Invalid baseline format for binding ${id}.`);
     }
@@ -460,9 +462,14 @@ export function assertBaseline(value: Baseline | undefined): void {
         `Baseline for binding ${id} is missing required references.`,
       );
     }
-    for (const [referenceId, reference] of Object.entries(
-      referencesProperty.value,
-    )) {
+    for (const referenceId of actual) {
+      const referenceProperty = readOwnDataProperty(
+        referencesProperty.value,
+        referenceId,
+      );
+      const reference = referenceProperty.present
+        ? referenceProperty.value
+        : undefined;
       if (!isRecord(reference)) {
         throw new TypeError(
           `Invalid baseline format for reference ${referenceId}.`,

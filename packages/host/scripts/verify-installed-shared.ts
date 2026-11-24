@@ -26,7 +26,6 @@ export type CliEnvelope = {
     readonly report?: unknown;
     readonly resolution?: unknown;
     readonly errors?: readonly {
-      readonly bindingId?: string;
       readonly code: string;
       readonly message: string;
     }[];

@@ -130,8 +130,19 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
     await writeFile(
       altFile,
       [
-        'import { expect, it } from "vitest";',
+        'import { describe, expect, it } from "vitest";',
+        `import { defineVitestObservation } from ${JSON.stringify(vitestSourceUrl)};`,
+        "",
+        'const metric = defineVitestObservation("metric", 0);',
+        "",
         'it("alpha passes", () => { expect(true).toBe(true); });',
+        "",
+        'describe("group", () => {',
+        '  it("member one", () => {',
+        "    expect(true).toBe(true);",
+        "    metric.record(100);",
+        "  });",
+        "});",
       ].join("\n"),
       "utf8",
     );
@@ -264,7 +275,7 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
       ["consistent", "consistent", "consistent"],
     );
 
-    // Extracting testRoot while resolving to the exact same fileInfo also keeps status/observation consistent.
+    // Extracting testRoot while resolving to the exact same fileInfo also keeps status/observation/suite consistent.
     const movedTestRootRun = defineVitestRun("moved-test-root-run", {
       testRoot: "suite",
       configFile: "vitest.beta.config.mjs",
@@ -294,13 +305,27 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
               metric,
             ),
           ]),
+          binding("group-suite-binding", [
+            vitestSuite(
+              "group-suite",
+              movedTestRootRun,
+              { file: "primary.test.mjs", suitePath: ["group"] },
+              [metric],
+            ),
+          ]),
         ],
       }),
-      { binding: ["alpha-status-binding", "alpha-metric-binding"] },
+      {
+        binding: [
+          "alpha-status-binding",
+          "alpha-metric-binding",
+          "group-suite-binding",
+        ],
+      },
     );
     assert.deepEqual(
       afterMovedTestRoot.bindings.map((entry) => entry.consistency),
-      ["consistent", "consistent"],
+      ["consistent", "consistent", "consistent"],
     );
 
     // Same-identity conflicting run configurations still fail full-config preflight.
@@ -334,10 +359,11 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
         error.code === "plugin-prepare-failed",
     );
 
-    // Retargeting to another actual file with a passing test of the same name reports definition diff.
+    // Retargeting to another actual file with a passing test/suite of the same name reports definition diff.
     const retargetedFileRun = defineVitestRun("retargeted-file", {
       testRoot: "suite/alt",
       files: ["primary.test.mjs"],
+      observations: [metric],
     });
     const retargetedFileCheck = await check(
       defineConfig({
@@ -351,9 +377,17 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
               name: "alpha passes",
             }),
           ]),
+          binding("group-suite-binding", [
+            vitestSuite(
+              "group-suite",
+              retargetedFileRun,
+              { file: "primary.test.mjs", suitePath: ["group"] },
+              [metric],
+            ),
+          ]),
         ],
       }),
-      { binding: ["alpha-status-binding"] },
+      { binding: ["alpha-status-binding", "group-suite-binding"] },
     );
     assert.equal(retargetedFileCheck.bindings[0]?.consistency, "inconsistent");
     assert.equal(
@@ -361,6 +395,15 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
         (change) =>
           change.kind === "reference-definition" &&
           change.referenceId === "alpha-status",
+      ),
+      true,
+    );
+    assert.equal(retargetedFileCheck.bindings[1]?.consistency, "inconsistent");
+    assert.equal(
+      retargetedFileCheck.bindings[1]?.changes.some(
+        (change) =>
+          change.kind === "reference-definition" &&
+          change.referenceId === "group-suite",
       ),
       true,
     );
