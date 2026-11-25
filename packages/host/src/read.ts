@@ -1,3 +1,5 @@
+import { copyJsonValue, type JsonValue, type TextRange } from "@dock/core";
+
 import type {
   Config,
   PluginContext,
@@ -7,7 +9,6 @@ import type {
   ReferencePlugin,
   ReferenceValue,
 } from "./contracts.ts";
-import { copyJsonValue, type JsonValue, type TextRange } from "./core/index.ts";
 import { MaintenanceError } from "./errors.ts";
 import { ownReference } from "./owned-data.ts";
 import { prepareConfig } from "./resolution.ts";

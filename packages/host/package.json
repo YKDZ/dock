@@ -56,12 +56,12 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "build": "rm -rf dist && tsc -p tsconfig.build.json --pretty false && chmod +x dist/cli.js",
+    "build": "node scripts/build.ts",
     "pack": "mkdir -p .artifacts && pnpm pack --out .artifacts/package.tgz",
     "test": "node --conditions=source --test --test-reporter=spec 'test/**/*.test.ts'",
     "format:check": "oxfmt --list-different .",
     "format:write": "oxfmt --write .",
-    "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules . && node scripts/check-core-import-boundaries.ts",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
     "lint:fix": "oxlint --format=unix . --fix",
     "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false"
   },
@@ -75,6 +75,7 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@dock/core": "workspace:*",
     "@dock/tooling-config": "workspace:*",
     "@types/node": "catalog:",
     "oxfmt": "catalog:",

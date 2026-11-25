@@ -1,5 +1,10 @@
 import { readFileSync } from "node:fs";
 
+import type {
+  BaselineUpdateIssue,
+  BindingCheckResult,
+  TextRange,
+} from "@dock/core";
 import {
   defineCli,
   helpCapability,
@@ -8,11 +13,6 @@ import {
 } from "@ykdz/cli-contract";
 import { z } from "zod";
 
-import type {
-  BaselineUpdateIssue,
-  BindingCheckResult,
-  TextRange,
-} from "./core/index.ts";
 import { lineRangeKey, type LineRangeRecord } from "./line-range.ts";
 import {
   checkForCli,

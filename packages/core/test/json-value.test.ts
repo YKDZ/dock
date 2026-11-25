@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { canonicalJson, copyJsonValue, isJsonValue } from "@ykdz/dock/core";
+import {
+  assertJsonValue,
+  canonicalJson,
+  copyJsonValue,
+  isJsonValue,
+} from "@dock/core";
 
 void test("comparable values reject special properties and cycles without invoking accessors or toJSON", () => {
   let getterCalls = 0;
@@ -89,4 +94,6 @@ void test("comparable values copy isolated data, preserve shared subvalues, and 
     JSON.parse('{"nested":[null,true],"__proto__":"data"}'),
   );
   assert.throws(() => copyJsonValue(new Date()), TypeError);
+  assertJsonValue({ ok: true, items: [1, "two", null] });
+  assert.throws(() => assertJsonValue(Number.NaN), TypeError);
 });

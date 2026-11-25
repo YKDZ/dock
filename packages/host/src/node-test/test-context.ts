@@ -1,10 +1,7 @@
 import { getTestContext } from "node:test";
 
-import {
-  copyJsonValue,
-  type JsonValue,
-  type TextRange,
-} from "../core/index.ts";
+import { copyJsonValue, type JsonValue, type TextRange } from "@dock/core";
+
 import type { NodeReadRecord } from "./types.ts";
 
 export const nodeObservationMessagePrefix = "dock:observation:";

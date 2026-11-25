@@ -1,6 +1,7 @@
 import { relative, resolve } from "node:path";
 
-import type { JsonValue } from "../core/json-value.ts";
+import type { JsonValue } from "@dock/core";
+
 import {
   nodeObservationMessagePrefix,
   nodeReadMessagePrefix,

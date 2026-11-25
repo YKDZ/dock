@@ -4,7 +4,6 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Worker } from "node:worker_threads";
 
-import type { Config, PluginRequest } from "./contracts.ts";
 import {
   check as checkCore,
   copyJsonValue,
@@ -16,7 +15,9 @@ import {
   type ReferenceMemberResult,
   type ReferenceResult,
   type TextRange,
-} from "./core/index.ts";
+} from "@dock/core";
+
+import type { Config, PluginRequest } from "./contracts.ts";
 import { MaintenanceError } from "./errors.ts";
 import {
   computeLineRange,
