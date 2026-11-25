@@ -3,12 +3,18 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  computeLineRange,
   createReference,
   definePlugin,
   recordLineRange,
+  type DeclarationSource,
   type JsonValue,
   type PluginBatchResult,
   type PluginContext,
+  type PluginDeclarationSource,
+  type PluginDiscoveryInput,
+  type PluginDiscoveryIssue,
+  type PluginDiscoveryResult,
   type PluginReadResult,
   type PluginReferenceResult,
   type PluginRequest,
@@ -72,6 +78,11 @@ export type MarkdownReferenceOptions = Pick<
   "note" | "declaredAt"
 >;
 
+export type MarkdownDeclarationSource = PluginDeclarationSource<
+  typeof markdownPluginId,
+  string
+>;
+
 export type MarkdownReferenceBuilder<
   Selection extends JsonValue = MarkdownSelection,
 > = {
@@ -91,9 +102,15 @@ export type MarkdownReferenceBuilder<
 export type MarkdownPlugin = ReadableReferencePlugin<
   typeof markdownPluginId,
   MarkdownReference,
-  string
+  string,
+  never,
+  MarkdownDeclarationSource
 > & {
   from(target: string | URL): MarkdownReferenceBuilder<never>;
+  source(
+    target: string | URL,
+    options?: { readonly declaredAt?: DeclarationSource },
+  ): MarkdownDeclarationSource;
 };
 
 type MarkdownNode = {
@@ -145,6 +162,61 @@ const implementation = definePlugin({
         { cause: error },
       );
     }
+  },
+  validateSource(source: MarkdownDeclarationSource): void {
+    assertMarkdownTarget(source.target);
+  },
+  async discover(
+    input: PluginDiscoveryInput<MarkdownReference, MarkdownDeclarationSource>,
+    context: PluginContext,
+  ): Promise<PluginDiscoveryResult> {
+    const loadSource = createMarkdownBatchLoader();
+    const explicitSourcePaths = new Set<string>();
+    const referencedPaths = new Set<string>();
+    const missingBaselinePaths = new Set<string>(input.missingBaselineFiles);
+
+    for (const source of input.sources) {
+      assertMarkdownTarget(source.target);
+      explicitSourcePaths.add(resolveTarget(source.target, context.root));
+    }
+    for (const reference of input.references) {
+      assertMarkdownTarget(reference.target);
+      referencedPaths.add(resolveTarget(reference.target, context.root));
+    }
+
+    const filesToValidate = new Set<string>([
+      ...explicitSourcePaths,
+      ...missingBaselinePaths,
+    ]);
+    const issues: PluginDiscoveryIssue[] = [];
+    for (const absolutePath of filesToValidate) {
+      const displayPath = displayTarget(absolutePath, context.root);
+      let fileState: MarkdownFileState;
+      try {
+        fileState = await loadSource(absolutePath, displayPath);
+      } catch (error) {
+        issues.push({
+          code: "declaration-source-read-failed",
+          message: `Cannot read Markdown declaration source ${displayPath}: ${errorMessage(error)}`,
+        });
+        continue;
+      }
+
+      if (
+        explicitSourcePaths.has(absolutePath) &&
+        !referencedPaths.has(absolutePath)
+      ) {
+        const directiveIssues = fileState.directives().issues;
+        if (directiveIssues.length > 0) {
+          issues.push({
+            code: "invalid-marker",
+            message: formatDirectiveIssues(displayPath, directiveIssues),
+          });
+        }
+      }
+    }
+
+    return { bindings: [], issues };
   },
   fileInfo(reference: MarkdownReference, context: PluginContext): string {
     return resolveTarget(reference.target, context.root);
@@ -201,6 +273,46 @@ export const markdown: MarkdownPlugin = {
       target instanceof URL ? target.href : target,
       [],
     );
+  },
+  source(
+    target: string | URL,
+    options: { readonly declaredAt?: DeclarationSource } = {},
+  ): MarkdownDeclarationSource {
+    assertMarkdownTarget(target);
+    if (
+      typeof options !== "object" ||
+      options === null ||
+      Array.isArray(options)
+    ) {
+      throw new TypeError("Markdown source options must be an object.");
+    }
+    const declaredAtDescriptor = Object.getOwnPropertyDescriptor(
+      options,
+      "declaredAt",
+    );
+    if (
+      declaredAtDescriptor !== undefined &&
+      !("value" in declaredAtDescriptor)
+    ) {
+      throw new TypeError("Markdown source declaredAt cannot be an accessor.");
+    }
+    const declaredAt = declaredAtDescriptor?.value as
+      | DeclarationSource
+      | undefined;
+    if (
+      declaredAt !== undefined &&
+      typeof declaredAt !== "string" &&
+      !(declaredAt instanceof URL)
+    ) {
+      throw new TypeError(
+        "Markdown source declaredAt must be a path string or URL.",
+      );
+    }
+    return {
+      pluginId: markdownPluginId,
+      target: target instanceof URL ? target.href : target,
+      ...(declaredAt === undefined ? {} : { declaredAt }),
+    };
   },
 };
 
@@ -291,7 +403,8 @@ type CachedOutcome<Value> =
 type MarkdownFileState = {
   readonly source: string;
   parseRange(start: number, end: number): MarkdownRoot;
-  markers(): readonly MarkdownMarker[];
+  directives(): ScannedDocumentDirectives;
+  markers(): readonly DockDirective[];
 };
 
 type MarkdownSourceLoader = (
@@ -303,7 +416,7 @@ const markerPrefixPattern = /<!--\s*dock:/u;
 
 function createMarkdownFileState(source: string): MarkdownFileState {
   const astByRange = new Map<string, MarkdownRoot>();
-  let cachedMarkers: CachedOutcome<readonly MarkdownMarker[]> | undefined;
+  let cachedDirectives: CachedOutcome<ScannedDocumentDirectives> | undefined;
 
   const parseRange = (start: number, end: number): MarkdownRoot => {
     const key = `${start}:${end}`;
@@ -315,24 +428,29 @@ function createMarkdownFileState(source: string): MarkdownFileState {
     return root;
   };
 
+  const directives = (): ScannedDocumentDirectives => {
+    if (cachedDirectives === undefined) {
+      try {
+        cachedDirectives = {
+          ok: true,
+          value: scanDocumentDirectives(source, () =>
+            parseRange(0, source.length),
+          ),
+        };
+      } catch (error) {
+        cachedDirectives = { ok: false, error };
+      }
+    }
+    if (!cachedDirectives.ok) throw cachedDirectives.error;
+    return cachedDirectives.value;
+  };
+
   return {
     source,
     parseRange,
-    markers(): readonly MarkdownMarker[] {
-      if (cachedMarkers === undefined) {
-        try {
-          cachedMarkers = {
-            ok: true,
-            value: scanDocumentMarkers(source, () =>
-              parseRange(0, source.length),
-            ),
-          };
-        } catch (error) {
-          cachedMarkers = { ok: false, error };
-        }
-      }
-      if (!cachedMarkers.ok) throw cachedMarkers.error;
-      return cachedMarkers.value;
+    directives,
+    markers(): readonly DockDirective[] {
+      return directives().markers;
     },
   };
 }
@@ -427,14 +545,36 @@ async function readMarkdownReference(
         current = selectMarkdownRange(fileState, current, step);
       } catch (error) {
         recordLineRange(current, fileState.source);
-        throw new MarkdownReferenceError(
-          errorCode(error),
-          errorMessage(error),
-          current,
-          { cause: error },
-        );
+        const issues = safeDirectiveIssues(fileState);
+        const extraIssues =
+          step.kind === "marker"
+            ? issues.filter((issue) => issue.markerId !== step.id)
+            : issues;
+        const message =
+          extraIssues.length === 0
+            ? errorMessage(error)
+            : `${errorMessage(error)}\n${formatDirectiveIssues(path, extraIssues)}`;
+        throw new MarkdownReferenceError(errorCode(error), message, current, {
+          cause: error,
+        });
       }
     }
+  }
+
+  const directiveIssues = fileState.directives().issues;
+  if (directiveIssues.length > 0) {
+    const firstIssue = directiveIssues[0]!;
+    const issueRange: TextRange = {
+      path,
+      start: firstIssue.start,
+      end: firstIssue.end,
+    };
+    recordLineRange(issueRange, fileState.source);
+    throw new MarkdownReferenceError(
+      "invalid-marker",
+      formatDirectiveIssues(path, directiveIssues),
+      issueRange,
+    );
   }
 
   recordLineRange(current, fileState.source);
@@ -480,11 +620,29 @@ function selectMarkdownRange(
   };
 }
 
-type MarkdownMarker = {
-  readonly id: string;
+type DockDirective = {
   readonly kind: "start" | "end";
+  readonly id: string;
   readonly start: number;
   readonly end: number;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly raw: string;
+};
+
+type DockDirectiveIssue = {
+  readonly code: string;
+  readonly start: number;
+  readonly end: number;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly markerId?: string;
+  readonly message: (displayPath: string) => string;
+};
+
+type ScannedDocumentDirectives = {
+  readonly markers: readonly DockDirective[];
+  readonly issues: readonly DockDirectiveIssue[];
 };
 
 type HtmlNode = {
@@ -497,16 +655,19 @@ type HtmlNode = {
   } | null;
 };
 
-function scanDocumentMarkers(
+const dockDirectiveCommentPattern = /^<!--\s*dock:/u;
+
+function scanDocumentDirectives(
   source: string,
   getFullDocumentRoot: () => MarkdownRoot,
-): readonly MarkdownMarker[] {
+): ScannedDocumentDirectives {
   // Skip full-document Markdown + HTML fragment scanning when no dock: comment prefix is present.
   if (!markerPrefixPattern.test(source)) {
-    return [];
+    return { markers: [], issues: [] };
   }
 
-  const markers: MarkdownMarker[] = [];
+  const markers: DockDirective[] = [];
+  const issues: DockDirectiveIssue[] = [];
   const nodes = allNodes(getFullDocumentRoot());
   const masked: string[] = source
     .split("")
@@ -532,25 +693,247 @@ function scanDocumentMarkers(
       location !== null &&
       location !== undefined
     ) {
-      const markerStart = location.startOffset;
-      const markerEnd = location.endOffset;
-      const match = /^<!--\s*dock:(start|end)\s+([^\s]+)\s*-->$/u.exec(
-        source.slice(markerStart, markerEnd),
-      );
-      if (match !== null) {
-        markers.push({
-          id: match[2]!,
-          kind: match[1]! as MarkdownMarker["kind"],
-          start: markerStart,
-          end: markerEnd,
-        });
+      const start = location.startOffset;
+      const end = location.endOffset;
+      const raw = source.slice(start, end);
+      if (dockDirectiveCommentPattern.test(raw)) {
+        const parsed = parseDockDirective(source, start, end, raw);
+        if (parsed.kind === "issue") {
+          issues.push(parsed.issue);
+        } else {
+          markers.push(parsed.directive);
+        }
       }
     }
     html.childNodes?.forEach(visit);
     if (html.content !== undefined) visit(html.content);
   };
   visit(fragment);
-  return markers.sort((left, right) => left.start - right.start);
+
+  markers.sort((left, right) => left.start - right.start);
+  validateMarkerPairing(markers, issues);
+  issues.sort((left, right) => left.start - right.start);
+  return { markers, issues };
+}
+
+function parseDockDirective(
+  source: string,
+  start: number,
+  end: number,
+  raw: string,
+):
+  | { readonly kind: "directive"; readonly directive: DockDirective }
+  | { readonly kind: "issue"; readonly issue: DockDirectiveIssue } {
+  const { startLine, endLine } = computeLineRange(source, start, end);
+  if (!raw.endsWith("-->")) {
+    return {
+      kind: "issue",
+      issue: {
+        code: "invalid-marker",
+        start,
+        end,
+        startLine,
+        endLine,
+        message: (displayPath) =>
+          `${displayPath}:${startLine}: Unclosed Dock directive comment (${previewDirective(raw)}): missing closing "-->".`,
+      },
+    };
+  }
+
+  const body = raw.slice(4, -3).trim();
+  const headerMatch = /^dock:([^\s{]*)(?:([\s\S]*))?$/u.exec(body);
+  const name = headerMatch?.[1] ?? "";
+  const rest = (headerMatch?.[2] ?? "").trim();
+
+  if (name.length === 0) {
+    return {
+      kind: "issue",
+      issue: {
+        code: "invalid-marker",
+        start,
+        end,
+        startLine,
+        endLine,
+        message: (displayPath) =>
+          `${displayPath}:${startLine}: Empty Dock directive (${previewDirective(raw)}). Expected dock:start or dock:end.`,
+      },
+    };
+  }
+
+  if (name === "start" || name === "end") {
+    if (rest.length === 0) {
+      return {
+        kind: "issue",
+        issue: {
+          code: "invalid-marker",
+          start,
+          end,
+          startLine,
+          endLine,
+          message: (displayPath) =>
+            `${displayPath}:${startLine}: Invalid Dock directive "dock:${name}" (${previewDirective(raw)}): missing marker ID.`,
+        },
+      };
+    }
+    if (/\s/u.test(rest)) {
+      return {
+        kind: "issue",
+        issue: {
+          code: "invalid-marker",
+          start,
+          end,
+          startLine,
+          endLine,
+          message: (displayPath) =>
+            `${displayPath}:${startLine}: Invalid Dock directive "dock:${name}" (${previewDirective(raw)}): marker ID must be a single non-empty token without whitespace.`,
+        },
+      };
+    }
+    return {
+      kind: "directive",
+      directive: {
+        kind: name,
+        id: rest,
+        start,
+        end,
+        startLine,
+        endLine,
+        raw,
+      },
+    };
+  }
+
+  return {
+    kind: "issue",
+    issue: {
+      code: "invalid-marker",
+      start,
+      end,
+      startLine,
+      endLine,
+      message: (displayPath) =>
+        `${displayPath}:${startLine}: Unknown Dock directive "dock:${name}" (${previewDirective(raw)}). Expected dock:start or dock:end.`,
+    },
+  };
+}
+
+function validateMarkerPairing(
+  markers: readonly DockDirective[],
+  issues: DockDirectiveIssue[],
+): void {
+  const byId = new Map<string, DockDirective[]>();
+  for (const marker of markers) {
+    const group = byId.get(marker.id) ?? [];
+    group.push(marker);
+    byId.set(marker.id, group);
+  }
+
+  for (const [id, group] of byId) {
+    const starts = group.filter((marker) => marker.kind === "start");
+    const ends = group.filter((marker) => marker.kind === "end");
+
+    if (starts.length > 1) {
+      const target = starts[1]!;
+      const lineList = starts.map((marker) => marker.startLine).join(", ");
+      issues.push({
+        code: "invalid-marker",
+        start: target.start,
+        end: target.end,
+        startLine: target.startLine,
+        endLine: target.endLine,
+        markerId: id,
+        message: (displayPath) =>
+          `${displayPath}:${target.startLine}: Duplicate start marker for "${id}" (lines ${lineList}): ${target.raw}.`,
+      });
+    }
+
+    if (ends.length > 1) {
+      const target = ends[1]!;
+      const lineList = ends.map((marker) => marker.startLine).join(", ");
+      issues.push({
+        code: "invalid-marker",
+        start: target.start,
+        end: target.end,
+        startLine: target.startLine,
+        endLine: target.endLine,
+        markerId: id,
+        message: (displayPath) =>
+          `${displayPath}:${target.startLine}: Duplicate end marker for "${id}" (lines ${lineList}): ${target.raw}.`,
+      });
+    }
+
+    if (starts.length >= 1 && ends.length === 0) {
+      const opening = starts[0]!;
+      issues.push({
+        code: "invalid-marker",
+        start: opening.start,
+        end: opening.end,
+        startLine: opening.startLine,
+        endLine: opening.endLine,
+        markerId: id,
+        message: (displayPath) =>
+          `${displayPath}:${opening.startLine}: Unclosed start marker ${opening.raw}: missing matching <!-- dock:end ${id} -->.`,
+      });
+    }
+
+    if (starts.length === 0 && ends.length >= 1) {
+      const closing = ends[0]!;
+      issues.push({
+        code: "invalid-marker",
+        start: closing.start,
+        end: closing.end,
+        startLine: closing.startLine,
+        endLine: closing.endLine,
+        markerId: id,
+        message: (displayPath) =>
+          `${displayPath}:${closing.startLine}: Orphan end marker ${closing.raw}: missing matching <!-- dock:start ${id} -->.`,
+      });
+    }
+
+    if (
+      starts.length === 1 &&
+      ends.length === 1 &&
+      starts[0]!.end > ends[0]!.start
+    ) {
+      const opening = starts[0]!;
+      const closing = ends[0]!;
+      issues.push({
+        code: "invalid-marker",
+        start: closing.start,
+        end: closing.end,
+        startLine: closing.startLine,
+        endLine: closing.endLine,
+        markerId: id,
+        message: (displayPath) =>
+          `${displayPath}:${closing.startLine}: Reversed markers for "${id}": ${closing.raw} (line ${closing.startLine}) precedes ${opening.raw} (line ${opening.startLine}).`,
+      });
+    }
+  }
+}
+
+function previewDirective(raw: string): string {
+  const singleLine = raw.replace(/\s+/gu, " ").trim();
+  return singleLine.length <= 80 ? singleLine : `${singleLine.slice(0, 77)}...`;
+}
+
+function formatDirectiveIssues(
+  displayPath: string,
+  issues: readonly DockDirectiveIssue[],
+): string {
+  if (issues.length === 1) {
+    return issues[0]!.message(displayPath);
+  }
+  return `Invalid Dock directives in ${displayPath}:\n${issues.map((issue) => `  - ${issue.message(displayPath)}`).join("\n")}`;
+}
+
+function safeDirectiveIssues(
+  fileState: MarkdownFileState,
+): readonly DockDirectiveIssue[] {
+  try {
+    return fileState.directives().issues;
+  } catch {
+    return [];
+  }
 }
 
 function markdownFact(fileState: MarkdownFileState, input: TextRange): string {
@@ -568,7 +951,7 @@ function markdownFact(fileState: MarkdownFileState, input: TextRange): string {
 }
 
 function selectMarker(
-  documentMarkers: readonly MarkdownMarker[],
+  documentMarkers: readonly DockDirective[],
   input: TextRange,
   id: string,
 ): TextRange {

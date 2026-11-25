@@ -446,8 +446,9 @@ function formatReport(
     lines.push("All checked bindings are consistent with baseline.");
     return lines;
   }
+  const seenErrors = new Map<string, string>();
   for (const binding of activeBindings) {
-    lines.push(...formatBinding(binding, lineRanges));
+    lines.push(...formatBinding(binding, lineRanges, seenErrors));
   }
   return lines;
 }
@@ -521,8 +522,9 @@ function formatRejectedUpdate(
   lineRanges?: LineRangeRecord,
 ): [string, ...string[]] {
   const lines = createReportLines(report);
+  const seenErrors = new Map<string, string>();
   for (const binding of activeReportBindings(report)) {
-    lines.push(...formatBinding(binding, lineRanges));
+    lines.push(...formatBinding(binding, lineRanges, seenErrors));
   }
   for (const error of errors) {
     lines.push(`Update error (${error.code}): ${error.message}`);
@@ -534,6 +536,7 @@ function formatRejectedUpdate(
 function formatBinding(
   binding: BindingCheckResult,
   lineRanges?: LineRangeRecord,
+  seenErrors?: Map<string, string>,
 ): string[] {
   const lines = [`Binding ${binding.bindingId}`];
   const erroredIds = new Set<string>();
@@ -545,9 +548,26 @@ function formatBinding(
       const identity = [error.referenceId, error.memberId]
         .filter(Boolean)
         .join(" / ");
-      lines.push(
-        `Error${identity === "" ? "" : ` ${identity}`} (${error.code})${formatLocationSuffix(error.range, undefined, lineRanges, error.referenceId)}: ${error.message}`,
+      const location = formatLocation(
+        error.range,
+        undefined,
+        lineRanges,
+        error.referenceId,
       );
+      const locSuffix = location === undefined ? "" : ` (${location})`;
+      const rootCauseKey = `${error.code}\0${location ?? ""}\0${error.message}`;
+      const priorLabel = seenErrors?.get(rootCauseKey);
+      const label = identity === "" ? `binding ${binding.bindingId}` : identity;
+      if (priorLabel !== undefined) {
+        lines.push(
+          `Error${identity === "" ? "" : ` ${identity}`} (${error.code})${locSuffix}: same root cause as ${priorLabel}`,
+        );
+      } else {
+        seenErrors?.set(rootCauseKey, label);
+        lines.push(
+          `Error${identity === "" ? "" : ` ${identity}`} (${error.code})${locSuffix}: ${error.message}`,
+        );
+      }
     }
   }
 

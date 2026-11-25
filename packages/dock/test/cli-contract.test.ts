@@ -1419,3 +1419,223 @@ void test("CLI and JS API distinguish V3 baseline corruption diagnostics from no
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("deduplicates repeated root-cause explanations in default CLI text while preserving structured errors and unreadable source protection", async () => {
+  const root = await createConfigWorkspace();
+  const configPath = join(root, "dock.config.mjs");
+  const guidePath = join(root, "guide.md");
+  const baselinePath = join(root, "dock.baseline.json");
+
+  try {
+    await writeFile(
+      guidePath,
+      [
+        "# Usage",
+        "",
+        "Run dock check.",
+        "",
+        "# Notes",
+        "",
+        "Keep baselines clean.",
+        "",
+        "<!-- dock:start unused -->",
+        "",
+        "<!-- dock:strat typo -->",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const savedBaseline = `${JSON.stringify(
+      {
+        version: 3,
+        bindings: {
+          "usage-policy": {
+            definition: {
+              id: "usage-policy",
+              references: ["usage-para", "usage-heading"],
+            },
+            references: {
+              "usage-para": {
+                definition: {
+                  id: "usage-para",
+                  target: {
+                    pluginId: "@ykdz/dock-reference-markdown",
+                    target: "guide.md",
+                    fileInfo: "guide.md",
+                  },
+                  selection: {
+                    kind: "markdown",
+                    steps: [{ kind: "section", heading: "Usage" }],
+                  },
+                },
+                value: "Run dock check.",
+              },
+              "usage-heading": {
+                definition: {
+                  id: "usage-heading",
+                  target: {
+                    pluginId: "@ykdz/dock-reference-markdown",
+                    target: "guide.md",
+                    fileInfo: "guide.md",
+                  },
+                  selection: {
+                    kind: "markdown",
+                    steps: [{ kind: "quote", text: "Run dock check." }],
+                  },
+                },
+                value: "Run dock check.",
+              },
+            },
+          },
+          "notes-policy": {
+            definition: {
+              id: "notes-policy",
+              references: ["notes-para"],
+            },
+            references: {
+              "notes-para": {
+                definition: {
+                  id: "notes-para",
+                  target: {
+                    pluginId: "@ykdz/dock-reference-markdown",
+                    target: "guide.md",
+                    fileInfo: "guide.md",
+                  },
+                  selection: {
+                    kind: "markdown",
+                    steps: [{ kind: "section", heading: "Notes" }],
+                  },
+                },
+                value: "Keep baselines clean.",
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`;
+    await writeFile(baselinePath, savedBaseline, "utf8");
+
+    await writeFile(
+      configPath,
+      [
+        'import { binding, defineConfig } from "@ykdz/dock";',
+        'import { markdown } from "@ykdz/dock/markdown";',
+        "export default defineConfig({",
+        "  plugins: [markdown],",
+        "  bindings: [",
+        '    binding("usage-policy", [',
+        '      markdown.from("guide.md").section("Usage").reference("usage-para"),',
+        '      markdown.from("guide.md").quote("Run dock check.").reference("usage-heading"),',
+        "    ]),",
+        '    binding("notes-policy", [',
+        '      markdown.from("guide.md").section("Notes").reference("notes-para"),',
+        "    ]),",
+        "  ],",
+        "});",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const checkText = await runCli(["check", "--config", configPath]);
+    assert.equal(checkText.result.exitCode, 1);
+    assert.equal(checkText.stderr, "");
+    assert.equal(
+      checkText.stdout.match(/Invalid Dock directives in guide\.md:/g)?.length,
+      1,
+      checkText.stdout,
+    );
+    assert.equal(
+      checkText.stdout.match(/guide\.md:9: Unclosed start marker/g)?.length,
+      1,
+    );
+    assert.equal(
+      checkText.stdout.match(/guide\.md:11: Unknown Dock directive/g)?.length,
+      1,
+    );
+    assert.match(checkText.stdout, /Binding usage-policy/);
+    assert.match(checkText.stdout, /Binding notes-policy/);
+    assert.match(
+      checkText.stdout,
+      /Error usage-heading \(invalid-marker\) \(guide\.md:9\): same root cause as notes-para/,
+    );
+    assert.match(
+      checkText.stdout,
+      /Error usage-para \(invalid-marker\) \(guide\.md:9\): same root cause as notes-para/,
+    );
+
+    const checkStructured = await runCli([
+      "check",
+      "--config",
+      configPath,
+      "--output",
+      "structured",
+    ]);
+    assert.equal(checkStructured.result.exitCode, 1);
+    const structuredEnvelope = JSON.parse(checkStructured.stdout) as {
+      variant: string;
+      data: {
+        report: {
+          bindings: Array<{
+            bindingId: string;
+            errors?: Array<{
+              referenceId?: string;
+              code: string;
+              message: string;
+            }>;
+          }>;
+        };
+      };
+    };
+    assert.equal(structuredEnvelope.variant, "errors");
+    for (const item of structuredEnvelope.data.report.bindings) {
+      assert.ok(item.errors && item.errors.length > 0, item.bindingId);
+      assert.equal(item.errors[0]?.code, "invalid-marker");
+    }
+
+    const updateText = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      configPath,
+    ]);
+    assert.equal(updateText.result.exitCode, 1);
+    assert.equal(
+      updateText.stdout.match(/Invalid Dock directives in guide\.md:/g)?.length,
+      1,
+      updateText.stdout,
+    );
+    assert.equal(await readFile(baselinePath, "utf8"), savedBaseline);
+
+    const missingSourceConfig = join(root, "missing-source.config.mjs");
+    await writeFile(
+      missingSourceConfig,
+      [
+        'import { defineConfig } from "@ykdz/dock";',
+        'import { markdown } from "@ykdz/dock/markdown";',
+        "export default defineConfig({",
+        `  baseline: ${JSON.stringify(baselinePath)},`,
+        "  plugins: [markdown],",
+        '  sources: [markdown.source("missing-guide.md")],',
+        "});",
+      ].join("\n"),
+      "utf8",
+    );
+    const missingSourceUpdate = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      missingSourceConfig,
+    ]);
+    assert.equal(missingSourceUpdate.result.exitCode, 1);
+    assert.match(
+      missingSourceUpdate.stderr,
+      /Maintenance failed \(declaration-source-read-failed\)/,
+    );
+    assert.equal(await readFile(baselinePath, "utf8"), savedBaseline);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

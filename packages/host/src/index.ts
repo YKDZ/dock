@@ -18,6 +18,11 @@ export type {
   DeclarationSource,
   PluginBatchResult,
   PluginContext,
+  PluginDeclarationSource,
+  PluginDiscoveredBinding,
+  PluginDiscoveryInput,
+  PluginDiscoveryIssue,
+  PluginDiscoveryResult,
   PluginIdentityMatches,
   PluginInformation,
   PluginMemberResult,
@@ -30,6 +35,7 @@ export type {
   Reference,
   ReferencePlugin,
   ReferenceValue,
+  RegisteredDeclarationSource,
   RegisteredReference,
 } from "./contracts.ts";
 export {

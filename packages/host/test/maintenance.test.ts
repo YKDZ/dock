@@ -1287,3 +1287,163 @@ void test("host inspect, check, and updateBaseline reject corrupted V3 baselines
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("declaration discovery source read failures preserve baseline bytes and reject untracked inference", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-source-discovery-"));
+  const baselinePath = join(root, "dock.baseline.json");
+  const missingSourcePath = join(root, "missing-guide.md");
+
+  try {
+    const unusedRef = localTextFileReference("unused-ref", "unused.txt");
+    let executedUnused = false;
+    const trackingFilePlugin = definePlugin({
+      ...localTextFilePlugin,
+      async collect(
+        request: PluginRequest<LocalTextFileReference>,
+        context: PluginContext,
+      ) {
+        for (const reference of request.selectedReferences) {
+          if (reference.id === "unused-ref") executedUnused = true;
+        }
+        return await localTextFilePlugin.collect(request, context);
+      },
+    });
+
+    const discoveryPlugin = definePlugin({
+      id: "fixture:discovery",
+      validate() {},
+      validateSource(source: { readonly target: unknown }) {
+        if (typeof source.target !== "string" || source.target.length === 0) {
+          throw new TypeError("Source target must be a non-empty string.");
+        }
+      },
+      async discover(input, context) {
+        const issues = [];
+        for (const source of input.sources) {
+          const target =
+            typeof source.target === "string"
+              ? source.target
+              : JSON.stringify(source.target);
+          const targetPath = join(context.root, target);
+          try {
+            await readFile(targetPath, "utf8");
+          } catch (error) {
+            issues.push({
+              code: "declaration-source-read-failed",
+              message: `Cannot read declaration source ${target}: ${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
+        }
+        for (const missingPath of input.missingBaselineFiles) {
+          try {
+            await readFile(missingPath, "utf8");
+          } catch (error) {
+            issues.push({
+              code: "declaration-source-read-failed",
+              message: `Cannot read historical declaration source ${missingPath}: ${error instanceof Error ? error.message : String(error)}`,
+            });
+          }
+        }
+        return { bindings: [], issues };
+      },
+      collect(request) {
+        return {
+          results: request.selectedReferences.map((reference) => ({
+            referenceId: reference.id,
+            kind: "value" as const,
+            value: "ok",
+          })),
+        };
+      },
+    });
+
+    assert.throws(
+      () => Reflect.apply(defineConfig, undefined, [{ plugins: [] }]),
+      /bindings or sources/i,
+    );
+
+    const standaloneConfig = defineConfig({
+      root,
+      plugins: [trackingFilePlugin, discoveryPlugin],
+      references: [unusedRef],
+      sources: [],
+    });
+    const emptyCheck = await check(standaloneConfig);
+    assert.deepEqual(emptyCheck.scope, []);
+    assert.equal(executedUnused, false);
+
+    const baselineRaw = `${JSON.stringify(
+      {
+        version: 3,
+        bindings: {
+          "inline-policy": {
+            definition: {
+              id: "inline-policy",
+              references: ["inline-body"],
+            },
+            references: {
+              "inline-body": {
+                definition: {
+                  id: "inline-body",
+                  target: {
+                    pluginId: "fixture:discovery",
+                    target: "missing-guide.md",
+                    fileInfo: "missing-guide.md",
+                  },
+                },
+                value: "Original statement",
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`;
+    await writeFile(baselinePath, baselineRaw, "utf8");
+
+    const explicitSourceConfig = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [discoveryPlugin],
+      sources: [{ pluginId: "fixture:discovery", target: "missing-guide.md" }],
+    });
+
+    for (const op of [
+      () => inspect(explicitSourceConfig),
+      () => check(explicitSourceConfig),
+      () => updateBaseline(explicitSourceConfig),
+    ]) {
+      await assert.rejects(op, (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "declaration-source-read-failed");
+        assert.match(error.message, /missing-guide\.md/);
+        return true;
+      });
+      assert.equal(await readFile(baselinePath, "utf8"), baselineRaw);
+    }
+
+    // Even without explicit sources, an unreadable missing historical source must fail instead of inferring untracked.
+    const refOnlyConfig = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [discoveryPlugin],
+      bindings: [
+        binding("other-policy", [
+          createReference("fixture:discovery", "other-ref", "other.md"),
+        ]),
+      ],
+    });
+    assert.ok(!missingSourcePath.endsWith("other.md"));
+    await assert.rejects(
+      () => updateBaseline(refOnlyConfig),
+      (error: unknown) =>
+        error instanceof MaintenanceError &&
+        error.code === "declaration-source-read-failed" &&
+        error.message.includes("missing-guide.md"),
+    );
+    assert.equal(await readFile(baselinePath, "utf8"), baselineRaw);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

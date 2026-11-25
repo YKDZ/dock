@@ -6,7 +6,11 @@ import {
   type PluginReadResult,
   type ReferenceValue,
 } from "@ykdz/dock";
-import { markdown, type MarkdownReference } from "@ykdz/dock/markdown";
+import {
+  markdown,
+  type MarkdownDeclarationSource,
+  type MarkdownReference,
+} from "@ykdz/dock/markdown";
 
 const chapter = markdown
   .from("guide.md")
@@ -57,9 +61,17 @@ const fileValue: Promise<PluginReadResult<string>> = readReference(
 );
 const selectedValue: ReferenceValue<typeof chapter> = "const answer = 42";
 
+const markdownSource: MarkdownDeclarationSource = markdown.source("guide.md");
+const sourceOnlyConfig = defineConfig({
+  plugins: [markdown],
+  sources: [markdownSource],
+  references: [chapter],
+});
+
 void markdownValue;
 void independentRead;
 void independentMarkerRead;
 void tableRead;
 void fileValue;
 void selectedValue;
+void sourceOnlyConfig;
