@@ -1658,6 +1658,182 @@ async function verifyInstalledMarkdownSmoke(
     ambiguousTargetCheck.stdout,
     /Error stable-port \(ambiguous-selection\) \(guide\.md:46-50\):/,
   );
+
+  // Verify whole-document directive checking, code-example preservation, root-cause deduplication, and unreadable source protection.
+  const guideWithCodeExamples = [
+    originalGuide,
+    "",
+    "```md",
+    "<!-- dock:start ignored-in-fence -->",
+    "<!-- dock:strat ignored-typo-in-fence -->",
+    "```",
+    "",
+    "    <!-- dock:start ignored-in-indented-code -->",
+    "",
+    "Inline example `<!-- dock:start ignored-in-inline -->`.",
+    '<div data-example="<!-- dock:start ignored-in-attr -->"></div>',
+    '<script>const example = "<!-- dock:start ignored-in-script -->";</script>',
+    "",
+    "<!-- dock:start standalone-only -->ok<!-- dock:end standalone-only -->",
+    "",
+  ].join("\n");
+  await writeFile(guidePath, guideWithCodeExamples, "utf8");
+  await writeFile(
+    join(dir, "unrelated-broken.md"),
+    "<!-- dock:start out-of-scope-unclosed -->\n<!-- dock:strat out-of-scope-typo -->\n",
+    "utf8",
+  );
+  const cleanWithExamples = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs", "--binding", "markdown-policy"],
+    dir,
+  );
+  assert.equal(
+    cleanWithExamples.code,
+    0,
+    cleanWithExamples.stdout + cleanWithExamples.stderr,
+  );
+  await writeFile(
+    join(dir, "read-standalone-only.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { defineConfig, readReference } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      "const cfg = defineConfig({ plugins: [markdown], bindings: [] });",
+      'const read = await readReference(cfg, markdown.from("guide.md").marker("standalone-only").reference("standalone-only"));',
+      'assert.equal(read.value, "ok");',
+    ].join("\n"),
+    "utf8",
+  );
+  const standaloneRead = await run(
+    process.execPath,
+    [join(dir, "read-standalone-only.mjs")],
+    dir,
+  );
+  assert.equal(
+    standaloneRead.code,
+    0,
+    standaloneRead.stdout + standaloneRead.stderr,
+  );
+
+  // Inject two independent broken directives outside selected sections/markers and verify multi-binding deduplication.
+  await writeFile(
+    join(dir, "multi-binding-markers.config.mjs"),
+    [
+      'import { binding, defineConfig } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      "export default defineConfig({",
+      '  baseline: "markdown.baseline.json",',
+      "  plugins: [markdown],",
+      "  bindings: [",
+      '    binding("alpha-policy", [',
+      '      markdown.from("guide.md").section(["指南", "安装"]).node({ type: "paragraph", contains: "安装片段" }).reference("alpha-chapter"),',
+      '      markdown.from("guide.md").node({ type: "table" }).reference("alpha-table"),',
+      "    ]),",
+      '    binding("beta-policy", [',
+      '      markdown.from("guide.md").section(["其他", "准备"]).reference("beta-prep"),',
+      "    ]),",
+      "  ],",
+      "});",
+    ].join("\n"),
+    "utf8",
+  );
+  const brokenGuide = [
+    guideWithCodeExamples,
+    "<!-- dock:start unclosed-extra -->",
+    "",
+    "<!-- dock:strat bad-directive -->",
+    "",
+  ].join("\n");
+  await writeFile(guidePath, brokenGuide, "utf8");
+  const linesBeforeExtra = guideWithCodeExamples.split("\n").length;
+  const unclosedLine = linesBeforeExtra + 1;
+  const typoLine = linesBeforeExtra + 3;
+
+  const multiMarkerCheck = await run(
+    bin,
+    ["check", "--config", "multi-binding-markers.config.mjs"],
+    dir,
+  );
+  assert.equal(multiMarkerCheck.code, 1, multiMarkerCheck.stderr);
+  assert.match(
+    multiMarkerCheck.stdout,
+    new RegExp(`guide\\.md:${unclosedLine}.*dock:start unclosed-extra`),
+  );
+  assert.match(
+    multiMarkerCheck.stdout,
+    new RegExp(`guide\\.md:${typoLine}.*dock:strat bad-directive`),
+  );
+  assert.equal(
+    multiMarkerCheck.stdout.match(/Invalid Dock directives in guide\.md:/g)
+      ?.length,
+    1,
+    multiMarkerCheck.stdout,
+  );
+  assert.match(
+    multiMarkerCheck.stdout,
+    /same root cause as alpha-chapter/,
+    multiMarkerCheck.stdout,
+  );
+
+  const multiMarkerStructured = await run(
+    bin,
+    [
+      "check",
+      "--config",
+      "multi-binding-markers.config.mjs",
+      "--output",
+      "structured",
+    ],
+    dir,
+  );
+  assert.equal(multiMarkerStructured.code, 1, multiMarkerStructured.stderr);
+  const multiStructuredReport = requireReport(
+    parseEnvelope(multiMarkerStructured.stdout),
+  );
+  assertBindingError(multiStructuredReport, "alpha-policy", "invalid-marker");
+  assertBindingError(multiStructuredReport, "beta-policy", "invalid-marker");
+
+  const multiMarkerUpdate = await run(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "multi-binding-markers.config.mjs",
+      "--output",
+      "structured",
+    ],
+    dir,
+  );
+  assert.equal(multiMarkerUpdate.code, 1, multiMarkerUpdate.stderr);
+  assert.equal(parseEnvelope(multiMarkerUpdate.stdout).variant, "rejected");
+  assert.deepEqual(await readFile(baselinePath), savedBaseline);
+
+  await writeFile(
+    join(dir, "unreadable-source.config.mjs"),
+    [
+      'import { defineConfig } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      "export default defineConfig({",
+      '  baseline: "markdown.baseline.json",',
+      "  plugins: [markdown],",
+      '  sources: [markdown.source("missing-source.md")],',
+      "});",
+    ].join("\n"),
+    "utf8",
+  );
+  const unreadableSourceUpdate = await run(
+    bin,
+    ["baseline", "update", "--config", "unreadable-source.config.mjs"],
+    dir,
+  );
+  assert.equal(unreadableSourceUpdate.code, 1);
+  assert.match(
+    unreadableSourceUpdate.stderr,
+    /Maintenance failed \(declaration-source-read-failed\)/,
+  );
+  assert.deepEqual(await readFile(baselinePath), savedBaseline);
 }
 
 async function verifyInstalledTypeScriptSmoke(

@@ -5,13 +5,15 @@ import type {
   Config,
   ConfigInput,
   DeclarationSource,
+  PluginDeclarationSource,
   PluginIdentityMatches,
   Reference,
   ReferencePlugin,
   ReferenceValue,
+  RegisteredDeclarationSource,
   RegisteredReference,
 } from "./contracts.ts";
-import { ownReference } from "./owned-data.ts";
+import { ownJsonValue, ownReference } from "./owned-data.ts";
 
 export type {
   Binding,
@@ -302,14 +304,20 @@ export function defineConfig<
   const Plugins extends readonly ReferencePlugin[],
   const Bindings extends readonly Binding<
     readonly RegisteredReference<Plugins>[]
-  >[],
+  >[] = readonly [],
+  const References extends readonly RegisteredReference<Plugins>[] =
+    readonly [],
+  const Sources extends readonly RegisteredDeclarationSource<Plugins>[] =
+    readonly [],
 >(
-  input: ConfigInput<Plugins, Bindings> & {
+  input: ConfigInput<Plugins, Bindings, References, Sources> & {
     readonly plugins: ValidatedPlugins<Plugins>;
   },
-): Config<Plugins, Bindings> {
+): Config<Plugins, Bindings, References, Sources> {
   validateConfig(input);
-  return input;
+  return input.bindings === undefined
+    ? { ...input, bindings: [] as unknown as Bindings }
+    : input;
 }
 
 export type NormalizedReference = Reference & {
@@ -319,6 +327,7 @@ export type NormalizedReference = Reference & {
 export type NormalizedConfig = {
   readonly config: Config;
   readonly references: readonly NormalizedReference[];
+  readonly sources: readonly PluginDeclarationSource[];
 };
 
 export function validateConfig(value: unknown): asserts value is Config {
@@ -340,6 +349,8 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
       throw new TypeError(`Duplicate reference plugin ID: ${candidate.id}`);
     }
     const read = "read" in candidate ? candidate.read : undefined;
+    const validateSource = candidate.validateSource;
+    const discover = candidate.discover;
     const fileInfo = candidate.fileInfo;
     const comparableTarget = candidate.comparableTarget;
     const prepare = candidate.prepare;
@@ -351,6 +362,12 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
         id: candidate.id,
         validate: candidate.validate.bind(candidate),
         collect: candidate.collect.bind(candidate),
+        ...(validateSource === undefined
+          ? {}
+          : { validateSource: validateSource.bind(candidate) }),
+        ...(discover === undefined
+          ? {}
+          : { discover: discover.bind(candidate) }),
         ...(fileInfo === undefined
           ? {}
           : { fileInfo: fileInfo.bind(candidate) }),
@@ -366,8 +383,17 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     );
   }
 
-  if (!Array.isArray(config.bindings)) {
+  if (config.bindings === undefined && config.sources === undefined) {
+    throw new TypeError("Config must provide bindings or sources.");
+  }
+  if (config.bindings !== undefined && !Array.isArray(config.bindings)) {
     throw new TypeError("Config must provide a bindings list.");
+  }
+  if (config.references !== undefined && !Array.isArray(config.references)) {
+    throw new TypeError("Config references must be a list.");
+  }
+  if (config.sources !== undefined && !Array.isArray(config.sources)) {
+    throw new TypeError("Config sources must be a list.");
   }
   if (
     config.root !== undefined &&
@@ -399,7 +425,7 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
   )?.map((source) => (source instanceof URL ? source.href : source));
   const bindings = new Map<string, Binding>();
   const references = new Map<string, NormalizedReference>();
-  for (const candidate of config.bindings) {
+  for (const candidate of config.bindings ?? []) {
     if (
       typeof candidate !== "object" ||
       candidate === null ||
@@ -435,28 +461,46 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
     });
 
     for (const reference of current.references) {
-      const candidate = readReferenceMetadata(reference);
-      const prior = references.get(candidate.id);
-      if (prior === undefined) {
-        references.set(candidate.id, {
-          ...ownNormalizedReference(candidate),
-          declarationSources: declarationSources([candidate.declaredAt]),
-        });
-        continue;
-      }
-      if (!sameReferenceDefinition(prior, candidate)) {
+      registerNormalizedReference(references, reference);
+    }
+  }
+
+  for (const reference of config.references ?? []) {
+    registerNormalizedReference(references, reference);
+  }
+
+  const normalizedSources: PluginDeclarationSource[] = [];
+  for (const rawSource of config.sources ?? []) {
+    const parsedSource = readDeclarationSourceMetadata(rawSource);
+    const ownedSource: PluginDeclarationSource = Object.freeze({
+      pluginId: parsedSource.pluginId,
+      target: ownSourceTarget(parsedSource),
+      ...(parsedSource.declaredAt === undefined
+        ? {}
+        : {
+            declaredAt:
+              parsedSource.declaredAt instanceof URL
+                ? parsedSource.declaredAt.href
+                : parsedSource.declaredAt,
+          }),
+    });
+    const plugin = plugins.get(ownedSource.pluginId);
+    if (plugin === undefined) {
+      throw new TypeError(
+        `Declaration source uses an unregistered plugin: ${ownedSource.pluginId}${formatDeclarationSources([ownedSource.declaredAt])}.`,
+      );
+    }
+    if (plugin.validateSource !== undefined) {
+      try {
+        plugin.validateSource(ownedSource);
+      } catch (error) {
         throw new TypeError(
-          `Reference ID ${candidate.id} maps to multiple distinct definitions${formatDeclarationSources([...prior.declarationSources, candidate.declaredAt])}.`,
+          `Plugin ${ownedSource.pluginId} rejected declaration source: ${errorMessage(error)}${formatDeclarationSources([ownedSource.declaredAt])}`,
+          { cause: error },
         );
       }
-      references.set(candidate.id, {
-        ...prior,
-        declarationSources: declarationSources([
-          ...prior.declarationSources,
-          candidate.declaredAt,
-        ]),
-      });
     }
+    normalizedSources.push(ownedSource);
   }
 
   for (const [id, reference] of references) {
@@ -486,6 +530,18 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
         }),
       ),
     ),
+    ...(config.references === undefined
+      ? {}
+      : {
+          references: Object.freeze(
+            config.references.map((reference) =>
+              references.get((reference as Reference).id)!,
+            ),
+          ),
+        }),
+    ...(config.sources === undefined
+      ? {}
+      : { sources: Object.freeze(normalizedSources) }),
     ...(root === undefined ? {} : { root }),
     ...(baseline === undefined ? {} : { baseline }),
     ...(sources === undefined
@@ -512,11 +568,92 @@ export function normalizeConfig(value: unknown): NormalizedConfig {
   return {
     config: normalizedConfig,
     references: Object.freeze([...references.values()]),
+    sources: Object.freeze(normalizedSources),
   };
+}
+
+function registerNormalizedReference(
+  references: Map<string, NormalizedReference>,
+  value: unknown,
+): void {
+  const candidate = readReferenceMetadata(value);
+  const prior = references.get(candidate.id);
+  if (prior === undefined) {
+    references.set(candidate.id, {
+      ...ownNormalizedReference(candidate),
+      declarationSources: declarationSources([candidate.declaredAt]),
+    });
+    return;
+  }
+  if (!sameReferenceDefinition(prior, candidate)) {
+    throw new TypeError(
+      `Reference ID ${candidate.id} maps to multiple distinct definitions${formatDeclarationSources([...prior.declarationSources, candidate.declaredAt])}.`,
+    );
+  }
+  references.set(candidate.id, {
+    ...prior,
+    declarationSources: declarationSources([
+      ...prior.declarationSources,
+      candidate.declaredAt,
+    ]),
+  });
+}
+
+function readDeclarationSourceMetadata(
+  value: unknown,
+): PluginDeclarationSource {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError(
+      "Declaration source must be created by plugin-provided source helpers.",
+    );
+  }
+  const pluginIdProperty = readOwnReferenceProperty(value, "pluginId");
+  const pluginId = pluginIdProperty.present
+    ? pluginIdProperty.value
+    : undefined;
+  if (typeof pluginId !== "string" || pluginId.length === 0) {
+    throw new TypeError("Declaration source is missing pluginId.");
+  }
+  const targetProperty = readOwnReferenceProperty(value, "target");
+  if (!targetProperty.present) {
+    throw new TypeError("Declaration source is missing target.");
+  }
+  const declaredAtProperty = readOwnReferenceProperty(value, "declaredAt");
+  const declaredAt = declaredAtProperty.present
+    ? (declaredAtProperty.value as DeclarationSource | undefined)
+    : undefined;
+  assertDeclarationSource(declaredAt, "Declaration source");
+  return {
+    pluginId,
+    target: targetProperty.value as JsonValue,
+    ...(declaredAt === undefined ? {} : { declaredAt }),
+  };
+}
+
+function ownSourceTarget(source: PluginDeclarationSource): JsonValue {
+  try {
+    return ownJsonValue(source.target);
+  } catch (error) {
+    if (error instanceof TypeError) {
+      throw new TypeError(
+        "Declaration source target must be a valid JSON value.",
+        {
+          cause: error,
+        },
+      );
+    }
+    throw error;
+  }
 }
 
 function assertPlugin(value: unknown): asserts value is ReferencePlugin {
   const isObject = typeof value === "object" && value !== null;
+  const validateSource = isObject
+    ? (value as { readonly validateSource?: unknown }).validateSource
+    : undefined;
+  const discover = isObject
+    ? (value as { readonly discover?: unknown }).discover
+    : undefined;
   const fileInfo = isObject
     ? (value as { readonly fileInfo?: unknown }).fileInfo
     : undefined;
@@ -536,6 +673,8 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     (value as { id: string }).id.length === 0 ||
     typeof (value as { collect?: unknown }).collect !== "function" ||
     typeof (value as { validate?: unknown }).validate !== "function" ||
+    (validateSource !== undefined && typeof validateSource !== "function") ||
+    (discover !== undefined && typeof discover !== "function") ||
     (fileInfo !== undefined && typeof fileInfo !== "function") ||
     (comparableTarget !== undefined &&
       typeof comparableTarget !== "function") ||
@@ -545,7 +684,7 @@ function assertPlugin(value: unknown): asserts value is ReferencePlugin {
     "validateReferences" in value
   ) {
     throw new TypeError(
-      "Reference plugin must provide non-empty id, validate, and collect functions; optional fileInfo, comparableTarget, prepare, and describe must be functions; legacy execution protocols are unsupported.",
+      "Reference plugin must provide non-empty id, validate, and collect functions; optional validateSource, discover, fileInfo, comparableTarget, prepare, and describe must be functions; legacy execution protocols are unsupported.",
     );
   }
 }

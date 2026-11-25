@@ -68,7 +68,16 @@ export function resolveScope(
     selectors.binding.length > 0 ||
     selectors.reference.length > 0 ||
     selectors.file.length > 0;
-  if (!hasSelectors) return { references: config.references };
+  if (!hasSelectors) {
+    const boundReferenceIds = new Set(
+      config.bindings.flatMap((binding) => binding.references),
+    );
+    return {
+      references: config.references.filter((reference) =>
+        boundReferenceIds.has(reference.id),
+      ),
+    };
+  }
 
   const selectedBindings = new Set<string>();
   const currentBindingIds = new Set(

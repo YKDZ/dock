@@ -23,4 +23,10 @@ const fileReference = file.from("guide.md").reference("file-only");
 // @ts-expect-error Plain file plugin is not registered in this config.
 void readReference(config, fileReference);
 
+// @ts-expect-error Markdown source target must be a path string or file: URL.
+markdown.source(42);
+
+// @ts-expect-error Config must register the plugin used by the declaration source.
+defineConfig({ plugins: [file], sources: [markdown.source("guide.md")] });
+
 void builder;

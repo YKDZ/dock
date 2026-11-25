@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
+  canonicalJson,
   BaselineValidationError,
   cstToJsonValue,
   isWellFormedJsonString,
@@ -22,12 +23,19 @@ import { normalizeConfig, type NormalizedReference } from "./authoring.ts";
 import type {
   Config,
   DeclarationSource,
+  PluginDeclarationSource,
+  PluginDiscoveryIssue,
   PluginInformation,
   PluginRequest,
+  Reference,
   ReferencePlugin,
 } from "./contracts.ts";
 import { MaintenanceError } from "./errors.ts";
-import { ownJsonValue, ownPluginInformation } from "./owned-data.ts";
+import {
+  ownJsonValue,
+  ownPluginInformation,
+  ownReference,
+} from "./owned-data.ts";
 import {
   normalizeFilePath,
   resolveScope,
@@ -84,6 +92,7 @@ type PreparedConfig = {
   readonly baselinePath: string;
   readonly plugins: ReadonlyMap<string, Config["plugins"][number]>;
   readonly references: readonly NormalizedReference[];
+  readonly sources: readonly PluginDeclarationSource[];
   readonly bindings: BindingDefinition[];
   readonly declarationSources: ResolvedMaintenance["declarationSources"];
 };
@@ -101,7 +110,7 @@ export async function resolveMaintenance(
   scope?: MaintenanceScope,
   configPath?: string,
 ): Promise<ResolvedOperation> {
-  const config = prepareConfig(value, defaultRoot);
+  const initialConfig = prepareConfig(value, defaultRoot);
   let requestedScope: MaintenanceScope;
   try {
     requestedScope = snapshotScope(scope);
@@ -111,9 +120,10 @@ export async function resolveMaintenance(
     }
     throw error;
   }
+  const baseline = await readBaseline(initialConfig.baselinePath);
+  const config = await discoverPluginDeclarations(initialConfig, baseline);
   const preparedPlugins = await preparePlugins(config);
   const fileInfo = currentFileInfo(config);
-  const baseline = await readBaseline(config.baselinePath);
   const selection = resolveMaintenanceScope(
     requestedScope,
     config,
@@ -199,7 +209,7 @@ export function prepareConfig(
   defaultRoot: string,
 ): PreparedConfig {
   const normalized = normalizeConfig(value);
-  const { config, references } = normalized;
+  const { config, references, sources } = normalized;
   const root = resolve(defaultRoot, config.root ?? ".");
   const baselinePath = resolve(root, config.baseline ?? "dock.baseline.json");
   const plugins = new Map(config.plugins.map((plugin) => [plugin.id, plugin]));
@@ -218,6 +228,7 @@ export function prepareConfig(
     baselinePath,
     plugins,
     references,
+    sources,
     bindings,
     declarationSources: {
       config: (config.declarationSources ?? []).map(sourceText),
@@ -237,6 +248,251 @@ export function prepareConfig(
       ),
     },
   };
+}
+
+async function discoverPluginDeclarations(
+  config: PreparedConfig,
+  baseline: Baseline | undefined,
+): Promise<PreparedConfig> {
+  const missingBaselineFilesByPlugin = collectMissingBaselineFilesByPlugin(
+    config,
+    baseline,
+  );
+  const context = Object.freeze({ root: config.root });
+  const discoveryOutcomes = await Promise.all(
+    [...config.plugins.values()].map(async (plugin) => {
+      if (plugin.discover === undefined) return undefined;
+      const pluginReferences = Object.freeze(
+        config.references.filter(
+          (reference) => reference.pluginId === plugin.id,
+        ),
+      );
+      const pluginSources = Object.freeze(
+        config.sources.filter((source) => source.pluginId === plugin.id),
+      );
+      const missingBaselineFiles = Object.freeze([
+        ...(missingBaselineFilesByPlugin.get(plugin.id) ?? []),
+      ]);
+      if (
+        pluginReferences.length === 0 &&
+        pluginSources.length === 0 &&
+        missingBaselineFiles.length === 0
+      ) {
+        return undefined;
+      }
+      try {
+        return {
+          plugin,
+          result: await plugin.discover(
+            {
+              references: pluginReferences,
+              sources: pluginSources,
+              missingBaselineFiles,
+            },
+            context,
+          ),
+        };
+      } catch (error) {
+        if (error instanceof MaintenanceError) throw error;
+        throw new MaintenanceError(
+          "declaration-discovery-failed",
+          `Plugin ${plugin.id} declaration discovery failed: ${errorMessage(error)}`,
+          { cause: error },
+        );
+      }
+    }),
+  );
+
+  const issues: PluginDiscoveryIssue[] = [];
+  const discoveredBindings: {
+    readonly plugin: ReferencePlugin;
+    readonly binding: {
+      readonly id: string;
+      readonly ownReferences: readonly Reference[];
+      readonly referenceIds: readonly string[];
+      readonly note?: string;
+      readonly declaredAt?: DeclarationSource;
+    };
+  }[] = [];
+
+  for (const outcome of discoveryOutcomes) {
+    if (outcome === undefined) continue;
+    issues.push(...outcome.result.issues);
+    for (const binding of outcome.result.bindings) {
+      discoveredBindings.push({ plugin: outcome.plugin, binding });
+    }
+  }
+
+  if (discoveredBindings.length === 0) {
+    if (issues.length > 0) {
+      throw discoveryIssuesError(issues);
+    }
+    return config;
+  }
+
+  const referencesById = new Map<string, NormalizedReference>(
+    config.references.map((reference) => [reference.id, reference]),
+  );
+  const bindingsById = new Map<string, BindingDefinition>(
+    config.bindings.map((binding) => [binding.id, binding]),
+  );
+  const bindingDeclarationSources: Record<string, readonly string[]> = {
+    ...config.declarationSources.bindings,
+  };
+  const referenceDeclarationSources: Record<string, readonly string[]> = {
+    ...config.declarationSources.references,
+  };
+
+  for (const { plugin, binding } of discoveredBindings) {
+    const declaredAtText =
+      binding.declaredAt === undefined
+        ? undefined
+        : sourceText(binding.declaredAt);
+    const existingBinding = bindingsById.get(binding.id);
+    if (existingBinding !== undefined) {
+      const priorSources = bindingDeclarationSources[binding.id] ?? [];
+      const priorLabel =
+        priorSources.length > 0
+          ? priorSources.join(", ")
+          : "TypeScript config bindings";
+      issues.push({
+        code: "declaration-invalid",
+        message: `Duplicate binding ID ${JSON.stringify(binding.id)} declared at ${declaredAtText ?? plugin.id} conflicts with existing declaration (${priorLabel}).`,
+      });
+      continue;
+    }
+
+    for (const rawReference of binding.ownReferences) {
+      const owned = ownReference(rawReference);
+      try {
+        plugin.validate(owned);
+      } catch (error) {
+        issues.push({
+          code: "declaration-invalid",
+          message: `Plugin ${plugin.id} rejected discovered reference ${owned.id}: ${errorMessage(error)}`,
+        });
+        continue;
+      }
+      const ownedDeclarationSources =
+        owned.declaredAt === undefined ? [] : [sourceText(owned.declaredAt)];
+      const existingRef = referencesById.get(owned.id);
+      if (existingRef === undefined) {
+        referencesById.set(owned.id, {
+          ...owned,
+          declarationSources: ownedDeclarationSources,
+        });
+        referenceDeclarationSources[owned.id] = ownedDeclarationSources;
+      } else if (
+        existingRef.pluginId !== owned.pluginId ||
+        canonicalJson(existingRef.target) !== canonicalJson(owned.target) ||
+        (existingRef.selection === undefined || owned.selection === undefined
+          ? existingRef.selection !== owned.selection
+          : canonicalJson(existingRef.selection) !==
+            canonicalJson(owned.selection))
+      ) {
+        const priorSources = (referenceDeclarationSources[owned.id] ?? []).join(
+          ", ",
+        );
+        issues.push({
+          code: "declaration-invalid",
+          message: `Discovered reference ID ${JSON.stringify(owned.id)} at ${declaredAtText ?? plugin.id} conflicts with existing reference definition${priorSources.length > 0 ? ` (${priorSources})` : ""}.`,
+        });
+      }
+    }
+
+    const seenMembers = new Set<string>();
+    let bindingValid = true;
+    for (const referenceId of binding.referenceIds) {
+      if (seenMembers.has(referenceId)) {
+        issues.push({
+          code: "declaration-invalid",
+          message: `Duplicate reference ID ${JSON.stringify(referenceId)} in binding ${JSON.stringify(binding.id)}${declaredAtText === undefined ? "" : ` at ${declaredAtText}`}.`,
+        });
+        bindingValid = false;
+        continue;
+      }
+      seenMembers.add(referenceId);
+      if (!referencesById.has(referenceId)) {
+        issues.push({
+          code: "declaration-invalid",
+          message: `Unknown reference ID ${JSON.stringify(referenceId)} in binding ${JSON.stringify(binding.id)}${declaredAtText === undefined ? "" : ` at ${declaredAtText}`}.`,
+        });
+        bindingValid = false;
+      }
+    }
+
+    if (bindingValid) {
+      bindingsById.set(binding.id, {
+        id: binding.id,
+        references: [...binding.referenceIds],
+        ...(binding.note === undefined ? {} : { note: binding.note }),
+      });
+      bindingDeclarationSources[binding.id] =
+        declaredAtText === undefined ? [] : [declaredAtText];
+    }
+  }
+
+  if (issues.length > 0) {
+    throw discoveryIssuesError(issues);
+  }
+
+  return {
+    ...config,
+    references: Object.freeze([...referencesById.values()]),
+    bindings: [...bindingsById.values()],
+    declarationSources: {
+      config: config.declarationSources.config,
+      bindings: bindingDeclarationSources,
+      references: referenceDeclarationSources,
+    },
+  };
+}
+
+function collectMissingBaselineFilesByPlugin(
+  config: PreparedConfig,
+  baseline: Baseline | undefined,
+): Map<string, Set<string>> {
+  const byPlugin = new Map<string, Set<string>>();
+  if (baseline === undefined) return byPlugin;
+  const currentBindingIds = new Set(
+    config.bindings.map((binding) => binding.id),
+  );
+  const baselineDirectory = dirname(config.baselinePath);
+  for (const [bindingId, entry] of Object.entries(baseline.bindings)) {
+    if (currentBindingIds.has(bindingId)) continue;
+    for (const referenceId of entry.definition.references) {
+      const fact = entry.references[referenceId];
+      const target = fact?.definition.target;
+      if (
+        typeof target !== "object" ||
+        target === null ||
+        Array.isArray(target) ||
+        typeof target.pluginId !== "string" ||
+        typeof target.fileInfo !== "string" ||
+        target.fileInfo.length === 0
+      ) {
+        continue;
+      }
+      const files = byPlugin.get(target.pluginId) ?? new Set<string>();
+      files.add(normalizeFilePath(target.fileInfo, baselineDirectory));
+      byPlugin.set(target.pluginId, files);
+    }
+  }
+  return byPlugin;
+}
+
+function discoveryIssuesError(
+  issues: readonly PluginDiscoveryIssue[],
+): MaintenanceError {
+  const readIssue = issues.find(
+    (issue) => issue.code === "declaration-source-read-failed",
+  );
+  const code = readIssue?.code ?? issues[0]!.code;
+  const message =
+    issues.length === 1
+      ? issues[0]!.message
+      : `Invalid declarations:\n${issues.map((issue) => `  - ${issue.message}`).join("\n")}`;
+  return new MaintenanceError(code, message);
 }
 
 async function preparePlugins(

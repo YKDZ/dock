@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { binding, check, defineConfig, readReference } from "@dock/host";
+import {
+  binding,
+  check,
+  defineConfig,
+  inspect,
+  MaintenanceError,
+  readReference,
+  updateBaseline,
+} from "@dock/host";
 import { markdown, markdownPluginId } from "@dock/markdown";
 
 async function withDocument<T>(
@@ -1058,6 +1067,198 @@ void test("batch collection reuses file reads, range parses, and marker scans wh
       start: markedSourceV2.indexOf("- item B"),
       end: markedSourceV2.indexOf("- item B") + "- item B".length,
     });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("whole-document directive check reports multiple independent marker errors outside selected ranges", async () => {
+  const source = [
+    "# Usage",
+    "",
+    "Run dock check to verify documentation.",
+    "",
+    "<!-- dock:start orphan-unclosed -->",
+    "Some unclosed content.",
+    "",
+    "<!-- dock:strat typo-directive -->",
+    "",
+    "<!-- dock:end orphan-end -->",
+    "",
+    "<!-- dock:start dup -->a<!-- dock:start dup -->b<!-- dock:end dup -->",
+    "",
+    "<!-- dock:end rev -->c<!-- dock:start rev -->",
+    "",
+    "<!-- dock:start -->",
+    "",
+  ].join("\n");
+
+  await withDocument(source, async (root, config) => {
+    const usage = markdown
+      .from("guide.md")
+      .section("Usage")
+      .node({ type: "paragraph", contains: "Run dock check" })
+      .reference("usage");
+
+    await assert.rejects(
+      readReference(config, usage),
+      (error: unknown) =>
+        error instanceof Error &&
+        "code" in error &&
+        error.code === "invalid-marker" &&
+        error.message.includes("guide.md:5") &&
+        error.message.includes("<!-- dock:start orphan-unclosed -->") &&
+        error.message.includes("guide.md:8") &&
+        error.message.includes("<!-- dock:strat typo-directive -->") &&
+        error.message.includes("guide.md:10") &&
+        error.message.includes("<!-- dock:end orphan-end -->") &&
+        error.message.includes("guide.md:12") &&
+        error.message.includes("guide.md:14") &&
+        error.message.includes("guide.md:16") &&
+        error.message.includes("<!-- dock:start -->"),
+    );
+
+    const report = await check(
+      defineConfig({
+        root,
+        plugins: [markdown],
+        bindings: [binding("usage-policy", [usage])],
+      }),
+    );
+    const checked = report.bindings[0];
+    assert.ok(checked && "errors" in checked);
+    assert.equal(checked.errors.length, 1);
+    assert.equal(checked.errors[0]?.code, "invalid-marker");
+    const message = checked.errors[0]?.message ?? "";
+    assert.match(message, /guide\.md:5.*dock:start orphan-unclosed/u);
+    assert.match(message, /guide\.md:8.*dock:strat typo-directive/u);
+    assert.match(message, /guide\.md:10.*dock:end orphan-end/u);
+    assert.match(message, /guide\.md:12.*lines 12, 12/u);
+    assert.match(message, /guide\.md:14.*precedes/u);
+    assert.match(message, /guide\.md:16.*dock:start/u);
+  });
+});
+
+void test("code examples, unused valid markers, and unreferenced files do not trigger directive errors", async () => {
+  const source = [
+    "# Documentation",
+    "",
+    "Primary statement.",
+    "",
+    "```md",
+    "<!-- dock:start broken-in-fence -->",
+    "<!-- dock:strat typo-in-fence -->",
+    "```",
+    "",
+    "    <!-- dock:start broken-in-indented-code -->",
+    "    <!-- dock:end orphan-in-indented-code -->",
+    "",
+    "Inline `<!-- dock:start broken-in-inline -->` example.",
+    '<div data-example="<!-- dock:start broken-in-attr -->"></div>',
+    '<script>const example = "<!-- dock:start broken-in-script -->";</script>',
+    "",
+    "<!-- dock:start standalone-test-only -->4173<!-- dock:end standalone-test-only -->",
+    "",
+  ].join("\n");
+
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-scope-ignore-"));
+  try {
+    await writeFile(join(root, "guide.md"), source, "utf8");
+    await writeFile(
+      join(root, "unrelated.md"),
+      "<!-- dock:start unclosed-elsewhere -->\n<!-- dock:strat bad -->\n",
+      "utf8",
+    );
+
+    const primary = markdown
+      .from("guide.md")
+      .section("Documentation")
+      .node({ type: "paragraph", contains: "Primary statement" })
+      .reference("primary");
+    const standalone = markdown
+      .from("guide.md")
+      .marker("standalone-test-only")
+      .reference("standalone");
+
+    const config = defineConfig({
+      root,
+      plugins: [markdown],
+      bindings: [binding("doc-policy", [primary])],
+    });
+
+    const report = await check(config);
+    const checked = report.bindings[0];
+    assert.ok(checked && "current" in checked);
+    assert.equal(checked.errors, undefined);
+    assert.equal(
+      checked.current.references.primary?.value,
+      "Primary statement.",
+    );
+
+    const standaloneRead = await readReference(config, standalone);
+    assert.equal(standaloneRead.value, "4173");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("explicit markdown.source fails with declaration-source-read-failed when unreadable and preserves baseline", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-source-"));
+  const baselinePath = join(root, "dock.baseline.json");
+  try {
+    const baselineRaw = `${JSON.stringify(
+      {
+        version: 3,
+        bindings: {
+          "existing-policy": {
+            definition: { id: "existing-policy", references: ["body"] },
+            references: {
+              body: {
+                definition: {
+                  id: "body",
+                  target: {
+                    pluginId: markdownPluginId,
+                    target: "missing-guide.md",
+                    fileInfo: "missing-guide.md",
+                  },
+                },
+                value: "Original",
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`;
+    await writeFile(baselinePath, baselineRaw, "utf8");
+
+    assert.throws(() => markdown.source(""), TypeError);
+    assert.throws(
+      () => markdown.source(new URL("https://example.test/a.md")),
+      TypeError,
+    );
+
+    const config = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [markdown],
+      sources: [markdown.source("missing-guide.md")],
+    });
+
+    for (const op of [
+      () => inspect(config),
+      () => check(config),
+      () => updateBaseline(config),
+    ]) {
+      await assert.rejects(op, (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "declaration-source-read-failed");
+        assert.match(error.message, /missing-guide\.md/);
+        return true;
+      });
+      assert.equal(await readFile(baselinePath, "utf8"), baselineRaw);
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

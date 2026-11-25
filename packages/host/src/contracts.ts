@@ -10,6 +10,42 @@ export type { JsonValue, TextRange } from "@dock/core";
 /** Explicitly recorded declaration source, independent of reference target and config entry. */
 export type DeclarationSource = string | URL;
 
+export type PluginDeclarationSource<
+  PluginId extends string = string,
+  Target extends JsonValue = JsonValue,
+> = {
+  readonly pluginId: PluginId;
+  readonly target: Target;
+  readonly declaredAt?: DeclarationSource;
+};
+
+export type PluginDiscoveryInput<
+  Ref extends Reference = Reference,
+  Source extends PluginDeclarationSource = PluginDeclarationSource,
+> = {
+  readonly references: readonly Ref[];
+  readonly sources: readonly Source[];
+  readonly missingBaselineFiles: readonly string[];
+};
+
+export type PluginDiscoveredBinding = {
+  readonly id: string;
+  readonly ownReferences: readonly Reference[];
+  readonly referenceIds: readonly string[];
+  readonly note?: string;
+  readonly declaredAt?: DeclarationSource;
+};
+
+export type PluginDiscoveryIssue = {
+  readonly code: string;
+  readonly message: string;
+};
+
+export type PluginDiscoveryResult = {
+  readonly bindings: readonly PluginDiscoveredBinding[];
+  readonly issues: readonly PluginDiscoveryIssue[];
+};
+
 export type Reference<
   PluginId extends string = string,
   Id extends string = string,
@@ -94,6 +130,8 @@ export interface ReferencePlugin<
   Ref extends Reference<PluginId> = Reference<PluginId>,
   Value extends ReferenceValue<Ref> = ReferenceValue<Ref>,
   Prepared extends JsonValue = JsonValue,
+  Source extends PluginDeclarationSource<PluginId> =
+    PluginDeclarationSource<PluginId>,
 > {
   readonly id: PluginId;
   readonly validate: BivariantHandler<[reference: Ref], void>;
@@ -101,6 +139,13 @@ export interface ReferencePlugin<
   readonly collect: BivariantHandler<
     [request: PluginRequest<Ref, Prepared>, context: PluginContext],
     Awaitable<PluginBatchResult<Value>>
+  >;
+  /** Validates an explicit plugin declaration source registered via `config.sources`. */
+  readonly validateSource?: BivariantHandler<[source: Source], void>;
+  /** Discovers inline declarations from plugin references and explicit sources before scope resolution. */
+  readonly discover?: BivariantHandler<
+    [input: PluginDiscoveryInput<Ref, Source>, context: PluginContext],
+    Awaitable<PluginDiscoveryResult>
   >;
   /** Provides a single file target path for a reference by plugin semantics; must not read file contents. */
   readonly fileInfo?: BivariantHandler<
@@ -135,7 +180,9 @@ export interface ReadableReferencePlugin<
   Ref extends Reference<PluginId> = Reference<PluginId>,
   Value extends ReferenceValue<Ref> = ReferenceValue<Ref>,
   Prepared extends JsonValue = JsonValue,
-> extends ReferencePlugin<PluginId, Ref, Value, Prepared> {
+  Source extends PluginDeclarationSource<PluginId> =
+    PluginDeclarationSource<PluginId>,
+> extends ReferencePlugin<PluginId, Ref, Value, Prepared, Source> {
   readonly read: BivariantHandler<
     [reference: Ref, context: PluginContext],
     Awaitable<PluginReadResult<Value>>
@@ -154,9 +201,14 @@ export type Binding<
 export type Config<
   Plugins extends readonly ReferencePlugin[] = readonly ReferencePlugin[],
   Bindings extends readonly Binding[] = readonly Binding[],
+  References extends readonly Reference[] = readonly Reference[],
+  Sources extends readonly PluginDeclarationSource[] =
+    readonly PluginDeclarationSource[],
 > = {
   readonly plugins: Plugins;
   readonly bindings: Bindings;
+  readonly references?: References;
+  readonly sources?: Sources;
   readonly root?: string;
   readonly baseline?: string;
   readonly declarationSources?: readonly DeclarationSource[];
@@ -165,19 +217,23 @@ export type Config<
 export type RegisteredReference<Plugins extends readonly ReferencePlugin[]> =
   PluginReference<Plugins[number]>;
 
+export type RegisteredDeclarationSource<
+  Plugins extends readonly ReferencePlugin[],
+> = PluginSource<Plugins[number]>;
+
 export type ReferenceValue<Ref extends Reference = Reference> =
   Ref extends Reference<string, string, JsonValue, infer Value> ? Value : never;
 
-/** Requires plugin ID and reference pluginId to match exactly when both static identities are narrowed. */
+/** Requires plugin ID and target item pluginId to match exactly when both static identities are narrowed. */
 export type PluginIdentityMatches<
   PluginId extends string,
-  Ref extends Reference,
+  Item extends { readonly pluginId: string },
 > = string extends PluginId
   ? true
-  : string extends Ref["pluginId"]
+  : string extends Item["pluginId"]
     ? true
-    : [PluginId] extends [Ref["pluginId"]]
-      ? [Ref["pluginId"]] extends [PluginId]
+    : [PluginId] extends [Item["pluginId"]]
+      ? [Item["pluginId"]] extends [PluginId]
         ? true
         : false
       : false;
@@ -203,14 +259,45 @@ type PluginReadableReference<Plugin> =
       : Ref
     : never;
 
+type PluginSource<Plugin> =
+  Plugin extends ReferencePlugin<
+    string,
+    infer _Ref,
+    infer _Value,
+    infer _Prepared,
+    infer Source
+  >
+    ? Plugin extends { readonly id: infer PluginId extends string }
+      ? PluginIdentityMatches<PluginId, Source> extends true
+        ? Source
+        : never
+      : Source
+    : never;
+
 export type ConfigInput<
   Plugins extends readonly ReferencePlugin[],
   Bindings extends readonly Binding<readonly RegisteredReference<Plugins>[]>[] =
     readonly Binding<readonly RegisteredReference<Plugins>[]>[],
-> = {
-  readonly plugins: Plugins;
-  readonly bindings: Bindings;
-  readonly root?: string;
-  readonly baseline?: string;
-  readonly declarationSources?: readonly DeclarationSource[];
-};
+  References extends readonly RegisteredReference<Plugins>[] =
+    readonly RegisteredReference<Plugins>[],
+  Sources extends readonly RegisteredDeclarationSource<Plugins>[] =
+    readonly RegisteredDeclarationSource<Plugins>[],
+> =
+  | {
+      readonly plugins: Plugins;
+      readonly bindings: Bindings;
+      readonly references?: References;
+      readonly sources?: Sources;
+      readonly root?: string;
+      readonly baseline?: string;
+      readonly declarationSources?: readonly DeclarationSource[];
+    }
+  | {
+      readonly plugins: Plugins;
+      readonly sources: Sources;
+      readonly bindings?: Bindings;
+      readonly references?: References;
+      readonly root?: string;
+      readonly baseline?: string;
+      readonly declarationSources?: readonly DeclarationSource[];
+    };
