@@ -1225,3 +1225,197 @@ void test("reports empty-selection at top level without claiming consistency, is
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("CLI and JS API distinguish V3 baseline corruption diagnostics from normal fact changes and preserve corrupted baseline bytes", async () => {
+  const root = await createConfigWorkspace();
+  const configPath = join(root, "dock.config.mjs");
+  const baselinePath = join(root, "dock.baseline.json");
+  const factPath = join(root, "fact.txt");
+  const statePath = join(root, "members.json");
+
+  try {
+    await writeFile(factPath, "alpha-v1", "utf8");
+    await writeFile(
+      statePath,
+      JSON.stringify({
+        members: [
+          {
+            id: "member one",
+            value: { status: "passed", customMetric: 7, labels: ["smoke"] },
+          },
+        ],
+      }),
+      "utf8",
+    );
+    await writeFile(
+      configPath,
+      [
+        'import { readFileSync } from "node:fs";',
+        'import { join } from "node:path";',
+        'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+        "const plugin = definePlugin({",
+        '  id: "fixture:v3-diag",',
+        "  validate() {},",
+        "  fileInfo(ref) {",
+        '    return ref.target === "members.json" ? "members.json" : "fact.txt";',
+        "  },",
+        "  collect(request, context) {",
+        "    return {",
+        "      results: request.selectedReferences.map((ref) => {",
+        '        if (ref.target === "members.json") {',
+        '          const parsed = JSON.parse(readFileSync(join(context.root, "members.json"), "utf8"));',
+        "          return {",
+        "            referenceId: ref.id,",
+        '            kind: "collection",',
+        '            collection: { completeness: "complete", members: parsed.members },',
+        "          };",
+        "        }",
+        '        const raw = readFileSync(join(context.root, "fact.txt"), "utf8");',
+        "        return {",
+        "          referenceId: ref.id,",
+        '          kind: "value",',
+        "          value: { text: raw, businessTag: ref.id },",
+        "        };",
+        "      }),",
+        "    };",
+        "  },",
+        "});",
+        "export default defineConfig({",
+        "  plugins: [plugin],",
+        "  bindings: [",
+        '    binding("cli binding.v1", [',
+        '      createReference("fixture:v3-diag", "plain ref", "fact.txt"),',
+        '      createReference("fixture:v3-diag", "suite.ref", "members.json"),',
+        "    ]),",
+        "  ],",
+        "});",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const created = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      configPath,
+    ]);
+    assert.equal(created.result.exitCode, 0, created.stderr);
+    const validBaselineRaw = await readFile(baselinePath, "utf8");
+
+    // Normal fact drift: check returns data variant "changed" on stdout, distinct from baseline failure.
+    await writeFile(factPath, "alpha-v2", "utf8");
+    const driftStructured = await runCli([
+      "check",
+      "--config",
+      configPath,
+      "--output",
+      "structured",
+    ]);
+    assert.equal(driftStructured.result.exitCode, 1);
+    assert.equal(driftStructured.stderr, "");
+    const driftEnvelope = JSON.parse(driftStructured.stdout) as {
+      kind: string;
+      variant: string;
+    };
+    assert.equal(driftEnvelope.kind, "data");
+    assert.equal(driftEnvelope.variant, "changed");
+
+    await writeFile(factPath, "alpha-v1", "utf8");
+
+    // 1) Missing required reference fact vs extra reference fact.
+    const missingObj = JSON.parse(validBaselineRaw) as {
+      bindings: Record<string, { references: Record<string, unknown> }>;
+    };
+    delete missingObj.bindings["cli binding.v1"]!.references["suite.ref"];
+    const missingRaw = `${JSON.stringify(missingObj, null, 2)}\n`;
+    await writeFile(baselinePath, missingRaw, "utf8");
+
+    for (const argv of [
+      ["check", "--config", configPath],
+      ["baseline", "update", "--config", configPath],
+    ]) {
+      const outcome = await runCli(argv);
+      assert.equal(outcome.result.exitCode, 1);
+      assert.equal(outcome.stdout, "");
+      assert.match(outcome.stderr, /Maintenance failed \(baseline-invalid\)/);
+      assert.ok(outcome.stderr.includes(baselinePath));
+      assert.match(outcome.stderr, /cli binding\.v1/);
+      assert.match(outcome.stderr, /suite\.ref/);
+      assert.match(outcome.stderr, /missing required reference fact/i);
+      assert.equal(await readFile(baselinePath, "utf8"), missingRaw);
+    }
+
+    const extraObj = JSON.parse(validBaselineRaw) as {
+      bindings: Record<string, { references: Record<string, unknown> }>;
+    };
+    extraObj.bindings["cli binding.v1"]!.references["extra.ref"] = {
+      definition: {
+        id: "extra.ref",
+        target: { pluginId: "fixture:v3-diag", target: "x", fileInfo: null },
+      },
+      value: "x",
+    };
+    const extraRaw = `${JSON.stringify(extraObj, null, 2)}\n`;
+    await writeFile(baselinePath, extraRaw, "utf8");
+
+    for (const argv of [
+      ["check", "--config", configPath, "--output", "structured"],
+      ["baseline", "update", "--config", configPath, "--output", "structured"],
+    ]) {
+      const outcome = await runCli(argv);
+      assert.equal(outcome.result.exitCode, 1);
+      assert.equal(outcome.stdout, "");
+      const envelope = JSON.parse(outcome.stderr) as {
+        kind: string;
+        variant: string;
+        data: { code: string; message: string };
+      };
+      assert.equal(envelope.kind, "failure");
+      assert.equal(envelope.variant, "maintenanceFailed");
+      assert.equal(envelope.data.code, "baseline-invalid");
+      assert.match(envelope.data.message, /unexpected reference fact/i);
+      assert.doesNotMatch(envelope.data.message, /missing required/i);
+      assert.match(envelope.data.message, /cli binding\.v1/);
+      assert.match(envelope.data.message, /extra\.ref/);
+      assert.equal(await readFile(baselinePath, "utf8"), extraRaw);
+    }
+
+    // 2) Duplicate keys (repeated 3x reported once) + unknown fields on Dock and member-collection records.
+    const prettyRaw = `${JSON.stringify(JSON.parse(validBaselineRaw), null, 2)}\n`;
+    const multiCorrupted = prettyRaw
+      .replace(
+        '"id": "plain ref",',
+        '"id": "plain ref",\n              "id": "plain ref",\n              "id": "plain ref",',
+      )
+      .replace(
+        '"fileInfo": "fact.txt"',
+        '"fileInfo": "fact.txt",\n              "wrapperUnknown": true',
+      )
+      .replace(
+        '"id": "member one",',
+        '"id": "member one",\n                "memberUnknown": 42,',
+      );
+    assert.notEqual(multiCorrupted, prettyRaw);
+    await writeFile(baselinePath, multiCorrupted, "utf8");
+
+    const multiText = await runCli(["check", "--config", configPath]);
+    assert.equal(multiText.result.exitCode, 1);
+    assert.equal(multiText.stdout, "");
+    assert.match(multiText.stderr, /Maintenance failed \(baseline-invalid\)/);
+    assert.match(multiText.stderr, /references\["plain ref"\]\.definition\.id/);
+    assert.equal(multiText.stderr.match(/Duplicate key "id"/g)?.length, 1);
+    assert.match(multiText.stderr, /definition\.target\.wrapperUnknown/);
+    assert.match(multiText.stderr, /value\[0\]\.memberUnknown/);
+
+    const updateRejected = await runCli([
+      "baseline",
+      "update",
+      "--config",
+      configPath,
+    ]);
+    assert.equal(updateRejected.result.exitCode, 1);
+    assert.equal(await readFile(baselinePath, "utf8"), multiCorrupted);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
