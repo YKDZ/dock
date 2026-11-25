@@ -3,22 +3,20 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { canonicalJson, type JsonValue } from "@dock/core";
-
 import {
   createReference,
   definePlugin,
+  type PluginBatchResult,
+  type PluginContext,
+  type PluginInformation,
+  type PluginRequest,
+  type PluginResult,
+  type Reference,
   type ReferenceOptions,
-} from "../authoring.ts";
-import type {
-  PluginBatchResult,
-  PluginContext,
-  PluginInformation,
-  PluginRequest,
-  PluginResult,
-  Reference,
-  ReferencePlugin,
-  ReferenceValue,
-} from "../contracts.ts";
+  type ReferencePlugin,
+  type ReferenceValue,
+} from "@dock/host";
+
 import {
   readReferenceInTest,
   recordVitestObservation,

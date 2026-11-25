@@ -47,6 +47,12 @@ export function catalogReference<Id extends string>(
   >(catalogPluginId, id, target, { ...options, selection });
 }
 
+let collectionCalls = 0;
+
+export function readCatalogCollectionCount(): number {
+  return collectionCalls;
+}
+
 export const catalogPlugin = definePlugin({
   id: catalogPluginId,
   validate(reference: CatalogReference): void {
@@ -63,6 +69,7 @@ export const catalogPlugin = definePlugin({
   collect(
     request: PluginRequest<CatalogReference>,
   ): PluginBatchResult<CatalogValue> {
+    collectionCalls += 1;
     return {
       results: request.selectedReferences.map((reference) =>
         reference.target.path === "broken"

@@ -6,22 +6,23 @@ import type {
   TextRange,
 } from "@dock/core";
 import {
+  checkForCli,
+  inspect,
+  lineRangeKey,
+  MaintenanceError,
+  updateBaselineForCli,
+  type CheckReport,
+  type LineRangeRecord,
+  type MaintenanceScope,
+  type ResolvedMaintenance,
+} from "@dock/host";
+import {
   defineCli,
   helpCapability,
   text,
   versionCapability,
 } from "@ykdz/cli-contract";
 import { z } from "zod";
-
-import { lineRangeKey, type LineRangeRecord } from "./line-range.ts";
-import {
-  checkForCli,
-  inspect,
-  MaintenanceError,
-  updateBaselineForCli,
-} from "./maintenance.ts";
-import type { CheckReport, MaintenanceScope } from "./maintenance.ts";
-import type { ResolvedMaintenance } from "./resolution.ts";
 
 const define = defineCli();
 const checkLineRanges = new WeakMap<object, LineRangeRecord>();

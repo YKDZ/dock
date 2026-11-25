@@ -16,7 +16,7 @@ import {
   type PluginRequest,
   type Reference,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@dock/host";
 
 type FixtureReference = Reference<
   "fixture-plugin",
