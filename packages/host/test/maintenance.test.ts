@@ -1447,3 +1447,215 @@ void test("declaration discovery source read failures preserve baseline bytes an
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("host declaration assembly reports duplicate members, unknown refs, ref conflicts, binding ID conflicts with declaredAt, and deduplicates identical issues in one pass", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-assembly-conflicts-"));
+  const baselinePath = join(root, "dock.baseline.json");
+  try {
+    await writeFile(join(root, "alpha.txt"), "alpha\n", "utf8");
+    const tsRef = localTextFileReference("known-ref", "alpha.txt");
+    const conflictingRef = createReference<
+      "fixture:text-file",
+      string,
+      string,
+      string
+    >("fixture:text-file", "own-body", "alpha.txt", {
+      declaredAt: "dock.config.ts:10",
+    });
+
+    const discoveryPlugin = definePlugin({
+      id: "fixture:inline-assembly",
+      validate() {},
+      validateSource() {},
+      async discover(input) {
+        if (input.sources.some((s) => s.target === "corrupt.md")) {
+          return {
+            bindings: [],
+            issues: [
+              {
+                code: "declaration-invalid",
+                message: "corrupt.md:4: Invalid dock:bind payload.",
+              },
+            ],
+          };
+        }
+        return {
+          bindings: [
+            {
+              id: "ts-collision",
+              ownReferences: [
+                createReference(
+                  "fixture:inline-assembly",
+                  "inline-ts-col",
+                  "a.md",
+                ),
+              ],
+              referenceIds: ["inline-ts-col", "known-ref"],
+              declaredAt: "guide-a.md:3",
+            },
+            {
+              id: "dup-inline",
+              ownReferences: [
+                createReference(
+                  "fixture:inline-assembly",
+                  "inline-dup-1",
+                  "a.md",
+                ),
+              ],
+              referenceIds: ["inline-dup-1", "missing-ref-1"],
+              declaredAt: "guide-a.md:10",
+            },
+            {
+              id: "dup-inline",
+              ownReferences: [
+                createReference(
+                  "fixture:inline-assembly",
+                  "inline-dup-2",
+                  "b.md",
+                ),
+              ],
+              referenceIds: ["inline-dup-2", "known-ref"],
+              declaredAt: "guide-b.md:5",
+            },
+            {
+              id: "multi-member-bad",
+              ownReferences: [
+                createReference("fixture:inline-assembly", "own-body", "a.md"),
+              ],
+              referenceIds: [
+                "own-body",
+                "known-ref",
+                "known-ref",
+                "missing-ref-2",
+              ],
+              declaredAt: "guide-a.md:20",
+            },
+          ],
+          issues: [
+            {
+              code: "declaration-invalid",
+              message: "guide-a.md:1: Repeated root cause.",
+            },
+            {
+              code: "declaration-invalid",
+              message: "guide-a.md:1: Repeated root cause.",
+            },
+          ],
+        };
+      },
+      collect(request) {
+        return {
+          results: request.selectedReferences.map((reference) => ({
+            referenceId: reference.id,
+            kind: "value" as const,
+            value: "ok",
+          })),
+        };
+      },
+    });
+
+    const config = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [localTextFilePlugin, discoveryPlugin],
+      bindings: [
+        binding("ts-collision", [tsRef], { declaredAt: "dock.config.ts:20" }),
+      ],
+      references: [conflictingRef],
+      sources: [{ pluginId: "fixture:inline-assembly", target: "guide-a.md" }],
+    });
+
+    for (const op of [
+      () => inspect(config),
+      () => check(config),
+      () => updateBaseline(config),
+    ]) {
+      await assert.rejects(op, (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "declaration-invalid");
+        assert.match(
+          error.message,
+          /Duplicate binding ID "ts-collision".*guide-a\.md:3.*dock\.config\.ts:20/,
+        );
+        assert.match(
+          error.message,
+          /Unknown reference ID "missing-ref-1".*guide-a\.md:10/,
+        );
+        assert.match(
+          error.message,
+          /Duplicate binding ID "dup-inline".*guide-b\.md:5.*guide-a\.md:10/,
+        );
+        assert.match(
+          error.message,
+          /Discovered reference ID "own-body".*guide-a\.md:20.*dock\.config\.ts:10/,
+        );
+        assert.match(
+          error.message,
+          /Duplicate reference ID "known-ref".*multi-member-bad.*guide-a\.md:20/,
+        );
+        assert.match(
+          error.message,
+          /Unknown reference ID "missing-ref-2".*multi-member-bad.*guide-a\.md:20/,
+        );
+        assert.equal(
+          error.message.split("guide-a.md:1: Repeated root cause.").length - 1,
+          1,
+          error.message,
+        );
+        return true;
+      });
+    }
+
+    // Corrupted declaration with an existing baseline preserves bytes and never infers untracked.
+    const baselineRaw = `${JSON.stringify(
+      {
+        version: 3,
+        bindings: {
+          "existing-inline": {
+            definition: {
+              id: "existing-inline",
+              references: ["dock:bind:existing-inline"],
+            },
+            references: {
+              "dock:bind:existing-inline": {
+                definition: {
+                  id: "dock:bind:existing-inline",
+                  target: {
+                    pluginId: "fixture:inline-assembly",
+                    target: "corrupt.md",
+                    fileInfo: "corrupt.md",
+                  },
+                },
+                value: "Original",
+              },
+            },
+          },
+        },
+      },
+      null,
+      2,
+    )}\n`;
+    await writeFile(baselinePath, baselineRaw, "utf8");
+    const corruptConfig = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [discoveryPlugin],
+      sources: [{ pluginId: "fixture:inline-assembly", target: "corrupt.md" }],
+    });
+    for (const op of [
+      () => inspect(corruptConfig),
+      () => check(corruptConfig),
+      () => updateBaseline(corruptConfig),
+    ]) {
+      await assert.rejects(op, (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "declaration-invalid");
+        assert.match(error.message, /corrupt\.md:4/);
+        return true;
+      });
+      assert.equal(await readFile(baselinePath, "utf8"), baselineRaw);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

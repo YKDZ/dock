@@ -223,6 +223,280 @@ try {
     assert.deepEqual(await readFile(baselinePath), baseline);
   }
 
+  // Verify the inline dock:bind authoring loop against the restored README inside the isolated consumer.
+  await writeFile(readmePath, original, "utf8");
+  const probeMarkerPath = join(consumer, ".inline-probe-executed");
+  await writeFile(
+    join(consumer, "scripts", "inline-probe.test.ts"),
+    [
+      'import { writeFileSync } from "node:fs";',
+      'import { test } from "node:test";',
+      `writeFileSync(${JSON.stringify(probeMarkerPath)}, "ran", "utf8");`,
+      'void test("README inline probe", () => {});',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(consumer, "inline.config.ts"),
+    [
+      'import { dirname, join, relative } from "node:path";',
+      'import { fileURLToPath } from "node:url";',
+      'import { binding, defineConfig } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'const root = dirname(fileURLToPath(import.meta.resolve("dock/README.md")));',
+      "const consumerDir = dirname(fileURLToPath(import.meta.url));",
+      'const readmeDoc = markdown.from("README.md");',
+      'const probeFile = relative(root, join(consumerDir, "scripts/inline-probe.test.ts"));',
+      'const probeRun = defineNodeTestRun("README inline probe", { files: [probeFile] });',
+      'const probeRef = nodeTestStatus("readme example", probeRun, { file: probeFile, name: "README inline probe" });',
+      "export default defineConfig({",
+      "  root,",
+      '  baseline: relative(root, join(consumerDir, "inline.baseline.json")),',
+      "  plugins: [markdown, nodeTest],",
+      "  bindings: [",
+      '    binding("readme-usage-policy", [',
+      '      readmeDoc.section("如何使用").reference("readme-usage"),',
+      "      probeRef,",
+      "    ]),",
+      "  ],",
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const inlineUpdateInit = run(bin("dock"), [
+    "baseline",
+    "update",
+    "--config",
+    "inline.config.ts",
+  ]);
+  assert.equal(
+    inlineUpdateInit.status,
+    0,
+    inlineUpdateInit.stdout + inlineUpdateInit.stderr,
+  );
+  await rm(probeMarkerPath, { force: true });
+
+  // Edit ONLY README.md to add a second statement using dock:bind with a blank line and spaced reference ID.
+  const anchorLine =
+    "> 这份 README 也 [接入](apps/consumer-readme/) 了 Dock，其中书写的命令和示例等都可以在与实际行为发生偏移时被检查出来。";
+  assert.ok(original.includes(anchorLine));
+  const inlineDirective =
+    '<!-- dock:bind {"id":"readme-inline-statement","with":["readme example","readme-usage"]} -->';
+  const inlineProse = "新增内联说明：示例测试与使用文档共同保持一致。";
+  const readmeWithInline = original.replace(
+    anchorLine,
+    [anchorLine, "", inlineDirective, "", inlineProse].join("\n"),
+  );
+  await writeFile(readmePath, readmeWithInline, "utf8");
+  const directiveLine =
+    readmeWithInline.split("\n").indexOf(inlineDirective) + 1;
+  const proseLine = readmeWithInline.split("\n").indexOf(inlineProse) + 1;
+
+  const inspectedInline = run(bin("dock"), [
+    "inspect",
+    "--config",
+    "inline.config.ts",
+    "--output",
+    "structured",
+  ]);
+  assert.equal(
+    inspectedInline.status,
+    0,
+    inspectedInline.stdout + inspectedInline.stderr,
+  );
+  await assert.rejects(
+    readFile(probeMarkerPath, "utf8"),
+    /ENOENT/,
+    "dock inspect must resolve inline bindings without executing business tests.",
+  );
+  const inspectedEnvelope = JSON.parse(inspectedInline.stdout) as {
+    data?: {
+      resolution?: {
+        context: {
+          bindings: { id: string; references: string[] }[];
+          references: { id: string }[];
+        };
+        declarationSources: {
+          bindings: Record<string, string[]>;
+        };
+      };
+    };
+  };
+  const resolution = inspectedEnvelope.data?.resolution;
+  assert.ok(resolution);
+  assert.deepEqual(
+    resolution.context.bindings.find(
+      (entry) => entry.id === "readme-inline-statement",
+    ),
+    {
+      id: "readme-inline-statement",
+      references: [
+        "dock:bind:readme-inline-statement",
+        "readme example",
+        "readme-usage",
+      ],
+    },
+  );
+  assert.deepEqual(
+    resolution.declarationSources.bindings["readme-inline-statement"],
+    [`README.md:${directiveLine}`],
+  );
+
+  const inlineBaselineInit = run(bin("dock"), [
+    "baseline",
+    "update",
+    "--config",
+    "inline.config.ts",
+  ]);
+  assert.equal(
+    inlineBaselineInit.status,
+    0,
+    inlineBaselineInit.stdout + inlineBaselineInit.stderr,
+  );
+
+  // Mutate a referenced fact (usage section) and verify dock check reports the change and inline prose line.
+  const usageTarget = "配置好后，先保存基线。";
+  assert.ok(readmeWithInline.includes(usageTarget));
+  const readmeFactChanged = readmeWithInline.replace(
+    usageTarget,
+    "配置完成后，先保存基线。",
+  );
+  await writeFile(readmePath, readmeFactChanged, "utf8");
+
+  const inlineChangedCheck = run(bin("dock"), [
+    "check",
+    "--config",
+    "inline.config.ts",
+  ]);
+  assert.equal(
+    inlineChangedCheck.status,
+    1,
+    inlineChangedCheck.stdout + inlineChangedCheck.stderr,
+  );
+  assert.match(inlineChangedCheck.stdout, /Binding readme-inline-statement/);
+  assert.match(inlineChangedCheck.stdout, /Change: readme-usage fact changed/);
+  assert.ok(
+    inlineChangedCheck.stdout.includes(
+      `dock:bind:readme-inline-statement (README.md:${proseLine})`,
+    ),
+    inlineChangedCheck.stdout,
+  );
+
+  const inlineBaselineUpdated = run(bin("dock"), [
+    "baseline",
+    "update",
+    "--config",
+    "inline.config.ts",
+  ]);
+  assert.equal(
+    inlineBaselineUpdated.status,
+    0,
+    inlineBaselineUpdated.stdout + inlineBaselineUpdated.stderr,
+  );
+  const inlineConsistent = run(bin("dock"), [
+    "check",
+    "--config",
+    "inline.config.ts",
+  ]);
+  assert.equal(
+    inlineConsistent.status,
+    0,
+    inlineConsistent.stdout + inlineConsistent.stderr,
+  );
+  assert.match(
+    inlineConsistent.stdout,
+    /All checked bindings are consistent with baseline\./,
+  );
+
+  // Reorder paragraphs and adjust blank lines around/between dock:bind and its prose block; identity stays stable.
+  const leadParagraph =
+    "Dock 适合需要长期维护文档的项目，尤其是主要由 Agent 维护、文档较多且修改频繁的项目。";
+  assert.ok(readmeFactChanged.includes(leadParagraph));
+  const readmeReordered = readmeFactChanged
+    .replace(`${leadParagraph}\n\n`, "")
+    .replace(
+      [anchorLine, "", inlineDirective, "", inlineProse].join("\n"),
+      [
+        anchorLine,
+        "",
+        inlineDirective,
+        "",
+        "",
+        inlineProse,
+        "",
+        leadParagraph,
+      ].join("\n"),
+    );
+  await writeFile(readmePath, readmeReordered, "utf8");
+  const reorderedConsistent = run(bin("dock"), [
+    "check",
+    "--config",
+    "inline.config.ts",
+  ]);
+  assert.equal(
+    reorderedConsistent.status,
+    0,
+    reorderedConsistent.stdout + reorderedConsistent.stderr,
+  );
+  assert.match(
+    reorderedConsistent.stdout,
+    /All checked bindings are consistent with baseline\./,
+  );
+
+  // Corrupt the baselined dock:bind declaration and verify CLI + JS reject updates, preserve baseline bytes, and do not infer untracked.
+  const inlineBaselinePath = join(consumer, "inline.baseline.json");
+  const savedInlineBaseline = await readFile(inlineBaselinePath);
+  const reorderedDirectiveLine =
+    readmeReordered.split("\n").indexOf(inlineDirective) + 1;
+  const readmeCorrupted = readmeReordered.replace(
+    inlineDirective,
+    '<!-- dock:bind {"id":"readme-inline-statement","with": -->',
+  );
+  await writeFile(readmePath, readmeCorrupted, "utf8");
+
+  for (const args of [
+    ["check", "--config", "inline.config.ts"],
+    ["baseline", "update", "--config", "inline.config.ts"],
+  ]) {
+    const failed = run(bin("dock"), args);
+    assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+    assert.match(failed.stderr, /Maintenance failed \(declaration-invalid\)/);
+    assert.ok(
+      failed.stderr.includes(`README.md:${reorderedDirectiveLine}`),
+      failed.stderr,
+    );
+    assert.doesNotMatch(failed.stderr, /untracked/i);
+    assert.deepEqual(await readFile(inlineBaselinePath), savedInlineBaseline);
+  }
+
+  await writeFile(
+    join(consumer, "verify-corrupt-inline-js.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFile } from "node:fs/promises";',
+      'import { check, inspect, MaintenanceError, updateBaseline } from "@ykdz/dock";',
+      'const before = await readFile("inline.baseline.json");',
+      'for (const op of [() => inspect("inline.config.ts"), () => check("inline.config.ts"), () => updateBaseline("inline.config.ts")]) {',
+      "  await assert.rejects(op, (error) => {",
+      "    assert.ok(error instanceof MaintenanceError);",
+      '    assert.equal(error.code, "declaration-invalid");',
+      `    assert.ok(error.message.includes("README.md:${reorderedDirectiveLine}"), error.message);`,
+      "    return true;",
+      "  });",
+      '  assert.deepEqual(await readFile("inline.baseline.json"), before);',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const jsCorrupt = run(process.execPath, [
+    join(consumer, "verify-corrupt-inline-js.mjs"),
+  ]);
+  assert.equal(jsCorrupt.status, 0, jsCorrupt.stdout + jsCorrupt.stderr);
+
   process.stdout.write(
     "README installed package, bootstrap baseline, and broken-example rejection verification passed.\n",
   );
