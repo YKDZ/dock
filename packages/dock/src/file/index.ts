@@ -5,18 +5,17 @@ import { fileURLToPath } from "node:url";
 import {
   createReference,
   definePlugin,
+  recordLineRange,
+  type JsonValue,
+  type PluginBatchResult,
+  type PluginContext,
+  type PluginReadResult,
+  type PluginRequest,
+  type ReadableReferencePlugin,
+  type Reference,
   type ReferenceOptions,
-} from "../authoring.ts";
-import type {
-  JsonValue,
-  PluginBatchResult,
-  PluginContext,
-  PluginReadResult,
-  PluginRequest,
-  ReadableReferencePlugin,
-  Reference,
-} from "../contracts.ts";
-import { recordLineRange } from "../line-range.ts";
+} from "@dock/host";
+
 import {
   assertTextSelectionStep,
   selectTextRange,

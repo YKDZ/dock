@@ -20,8 +20,6 @@ import {
   createReference,
   defineConfig,
   definePlugin,
-  file,
-  type FileReference,
   inspect,
   MaintenanceError,
   type PluginBatchResult,
@@ -31,7 +29,50 @@ import {
   readReference,
   type Reference,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@dock/host";
+
+type LocalTextFileReference = Reference<
+  "fixture:text-file",
+  string,
+  string,
+  string
+>;
+
+const localTextFilePlugin = definePlugin({
+  id: "fixture:text-file",
+  validate(reference: LocalTextFileReference): void {
+    if (typeof reference.target !== "string" || reference.target.length === 0) {
+      throw new TypeError("Text file target must be a non-empty path.");
+    }
+  },
+  fileInfo(reference: LocalTextFileReference): string {
+    return reference.target;
+  },
+  async collect(
+    request: PluginRequest<LocalTextFileReference>,
+    context: PluginContext,
+  ): Promise<PluginBatchResult<string>> {
+    const results = await Promise.all(
+      request.selectedReferences.map(async (reference) => ({
+        referenceId: reference.id,
+        kind: "value" as const,
+        value: await readFile(join(context.root, reference.target), "utf8"),
+      })),
+    );
+    return { results };
+  },
+});
+
+function localTextFileReference(
+  id: string,
+  path: string,
+): LocalTextFileReference {
+  return createReference<"fixture:text-file", string, string, string>(
+    "fixture:text-file",
+    id,
+    path,
+  );
+}
 
 void test("JSON key order and notes do not cause reference ID conflicts", () => {
   type SharedReference = Reference<
@@ -98,7 +139,7 @@ void test("config path maintenance uses a fresh module graph to read imported de
   const declarationsPath = join(root, "declarations.mjs");
 
   try {
-    const packageAlias = join(root, "node_modules", "@ykdz", "dock");
+    const packageAlias = join(root, "node_modules", "@dock", "host");
     await mkdir(dirname(packageAlias), { recursive: true });
     await symlink(
       packageDirectory,
@@ -111,7 +152,7 @@ void test("config path maintenance uses a fresh module graph to read imported de
     await writeFile(
       configPath,
       [
-        'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+        'import { binding, createReference, defineConfig, definePlugin } from "@dock/host";',
         'import { target } from "./declarations.mjs";',
         'const fixture = definePlugin({ id: "fixture", validate() {}, collect({ selectedReferences }) { return { results: selectedReferences.map((reference) => ({ referenceId: reference.id, kind: "value", value: reference.target })) }; } });',
         'export default defineConfig({ plugins: [fixture], bindings: [binding("guide-policy", [createReference("fixture", "guide", target)])] });',
@@ -168,9 +209,9 @@ void test("legacy version 2 baseline fails check and updateBaseline with rebuild
 
     const config = defineConfig({
       root,
-      plugins: [file],
+      plugins: [localTextFilePlugin],
       bindings: [
-        binding("guide-policy", [file.from("guide.md").reference("guide")]),
+        binding("guide-policy", [localTextFileReference("guide", "guide.md")]),
       ],
     });
 
@@ -381,10 +422,12 @@ void test("inspect, check, and updateBaseline share consistent scope and require
     const describeSelections: string[][] = [];
     const collectSelections: string[][] = [];
     const trackedFilePlugin = definePlugin({
-      id: file.id,
-      validate: file.validate,
-      ...(file.fileInfo === undefined ? {} : { fileInfo: file.fileInfo }),
-      describe(request: PluginRequest<FileReference>) {
+      id: localTextFilePlugin.id,
+      validate: (reference: LocalTextFileReference) =>
+        localTextFilePlugin.validate(reference),
+      fileInfo: (reference: LocalTextFileReference) =>
+        localTextFilePlugin.fileInfo(reference),
+      describe(request: PluginRequest<LocalTextFileReference>) {
         describeSelections.push(
           request.selectedReferences.map((reference) => reference.id),
         );
@@ -397,11 +440,14 @@ void test("inspect, check, and updateBaseline share consistent scope and require
           text: [],
         };
       },
-      collect(request: PluginRequest<FileReference>, context: PluginContext) {
+      collect(
+        request: PluginRequest<LocalTextFileReference>,
+        context: PluginContext,
+      ) {
         collectSelections.push(
           request.selectedReferences.map((reference) => reference.id),
         );
-        return file.collect(request, context);
+        return localTextFilePlugin.collect(request, context);
       },
     });
 
@@ -410,12 +456,12 @@ void test("inspect, check, and updateBaseline share consistent scope and require
       plugins: [trackedFilePlugin],
       bindings: [
         binding("alpha-policy", [
-          file.from("shared.md").reference("shared-doc"),
-          file.from("alpha.md").reference("alpha-doc"),
+          localTextFileReference("shared-doc", "shared.md"),
+          localTextFileReference("alpha-doc", "alpha.md"),
         ]),
         binding("beta-policy", [
-          file.from("shared.md").reference("shared-doc"),
-          file.from("beta.md").reference("beta-doc"),
+          localTextFileReference("shared-doc", "shared.md"),
+          localTextFileReference("beta-doc", "beta.md"),
         ]),
       ],
     });
@@ -803,9 +849,9 @@ void test("real filesystem baseline write and read failures preserve existing co
     const dirConflictConfig = defineConfig({
       root,
       baseline: "baseline-dir",
-      plugins: [file],
+      plugins: [localTextFilePlugin],
       bindings: [
-        binding("dir-policy", [file.from("guide.txt").reference("guide")]),
+        binding("dir-policy", [localTextFileReference("guide", "guide.txt")]),
       ],
     });
     await assert.rejects(check(dirConflictConfig), (error: unknown) => {
@@ -913,10 +959,10 @@ void test("real filesystem baseline write and read failures preserve existing co
       await writeFile(targetPath, "Initial fact\n", "utf8");
       const restrictedConfig = defineConfig({
         root: restrictedDir,
-        plugins: [file],
+        plugins: [localTextFilePlugin],
         bindings: [
           binding("restricted-policy", [
-            file.from("guide.txt").reference("guide"),
+            localTextFileReference("guide", "guide.txt"),
           ]),
         ],
       });
@@ -956,6 +1002,97 @@ void test("real filesystem baseline write and read failures preserve existing co
       }
       assert.deepEqual(await readFile(baselinePath), originalBytes);
     }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("worker config path maintenance supports reference/file scope selection, inspect without collect, and preserves baseline on rejected update", async () => {
+  const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
+  const cacheDirectory = join(packageDirectory, "node_modules", ".cache");
+  await mkdir(cacheDirectory, { recursive: true });
+  const root = await mkdtemp(join(cacheDirectory, "dock-worker-scope-"));
+  const configPath = join(root, "dock.config.mjs");
+  const baselinePath = join(root, "dock.baseline.json");
+  const callsPath = join(root, "collect-calls.txt");
+
+  try {
+    const packageAlias = join(root, "node_modules", "@dock", "host");
+    await mkdir(dirname(packageAlias), { recursive: true });
+    await symlink(
+      packageDirectory,
+      packageAlias,
+      process.platform === "win32" ? "junction" : "dir",
+    );
+    await writeFile(join(root, "alpha.txt"), "alpha v1\n", "utf8");
+    await writeFile(join(root, "beta.txt"), "beta v1\n", "utf8");
+    await writeFile(
+      configPath,
+      [
+        'import { appendFile, readFile } from "node:fs/promises";',
+        'import { join } from "node:path";',
+        'import { binding, createReference, defineConfig, definePlugin } from "@dock/host";',
+        "",
+        "const plugin = definePlugin({",
+        '  id: "fixture:worker-scope",',
+        "  validate() {},",
+        "  fileInfo(reference) {",
+        "    return reference.target;",
+        "  },",
+        "  async collect(request, context) {",
+        `    await appendFile(${JSON.stringify(callsPath)}, request.selectedReferences.map((r) => r.id).join(",") + "\\n");`,
+        "    const results = [];",
+        "    for (const reference of request.selectedReferences) {",
+        "      try {",
+        "        const value = await readFile(join(context.root, reference.target), 'utf8');",
+        "        results.push({ referenceId: reference.id, kind: 'value', value });",
+        "      } catch {",
+        "        results.push({",
+        "          referenceId: reference.id,",
+        "          kind: 'error',",
+        "          error: { code: 'missing-file', message: 'Missing target file' },",
+        "        });",
+        "      }",
+        "    }",
+        "    return { results };",
+        "  },",
+        "});",
+        "",
+        "export default defineConfig({",
+        "  plugins: [plugin],",
+        "  bindings: [",
+        '    binding("alpha-policy", [createReference("fixture:worker-scope", "alpha-ref", "alpha.txt")]),',
+        '    binding("beta-policy", [createReference("fixture:worker-scope", "beta-ref", "beta.txt")]),',
+        "  ],",
+        "});",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const inspectedByRef = await inspect(configPath, {
+      reference: ["alpha-ref"],
+    });
+    assert.deepEqual(inspectedByRef.context.scope, ["alpha-policy"]);
+    assert.deepEqual(inspectedByRef.plugins[0]?.selectedReferences, [
+      "alpha-ref",
+    ]);
+    await assert.rejects(readFile(callsPath, "utf8"), { code: "ENOENT" });
+
+    const initialUpdate = await updateBaseline(configPath);
+    assert.equal(initialUpdate.status, "updated");
+    const savedBaseline = await readFile(baselinePath);
+
+    await writeFile(join(root, "alpha.txt"), "alpha v2\n", "utf8");
+    const checkedByFile = await check(configPath, { file: ["alpha.txt"] });
+    assert.deepEqual(checkedByFile.scope, ["alpha-policy"]);
+    assert.equal(checkedByFile.bindings[0]?.consistency, "inconsistent");
+
+    await rm(join(root, "alpha.txt"));
+    const rejected = await updateBaseline(configPath, {
+      reference: ["alpha-ref"],
+    });
+    assert.equal(rejected.status, "rejected");
+    assert.deepEqual(await readFile(baselinePath), savedBaseline);
   } finally {
     await rm(root, { recursive: true, force: true });
   }

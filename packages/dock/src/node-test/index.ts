@@ -2,27 +2,25 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { canonicalJson } from "@dock/core";
-
 import {
   createReference,
   definePlugin,
+  readReference,
+  type Config,
+  type JsonValue,
+  type PluginBatchResult,
+  type PluginContext,
+  type PluginInformation,
+  type PluginReadResult,
+  type PluginRequest,
+  type PluginResult,
+  type ReadableReferenceOf,
+  type Reference,
   type ReferenceOptions,
-} from "../authoring.ts";
-import type {
-  Config,
-  JsonValue,
-  PluginBatchResult,
-  PluginContext,
-  PluginInformation,
-  PluginReadResult,
-  PluginRequest,
-  PluginResult,
-  ReadableReferenceOf,
-  Reference,
-  ReferencePlugin,
-  ReferenceValue,
-} from "../contracts.ts";
-import { readReference } from "../read.ts";
+  type ReferencePlugin,
+  type ReferenceValue,
+} from "@dock/host";
+
 import { executeNodeTestRun } from "./native-runner.ts";
 import {
   assertNodeTestActive,

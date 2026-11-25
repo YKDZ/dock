@@ -11,13 +11,14 @@ export type {
   JsonValue,
 } from "@dock/core";
 export type {
+  Awaitable,
   Binding,
   Config,
   ConfigInput,
   DeclarationSource,
-  Awaitable,
-  PluginContext,
   PluginBatchResult,
+  PluginContext,
+  PluginIdentityMatches,
   PluginInformation,
   PluginMemberResult,
   PluginReadResult,
@@ -29,6 +30,7 @@ export type {
   Reference,
   ReferencePlugin,
   ReferenceValue,
+  RegisteredReference,
 } from "./contracts.ts";
 export {
   binding,
@@ -36,37 +38,39 @@ export {
   defineConfig,
   definePlugin,
 } from "./authoring.ts";
-export type { ReferenceOptions } from "./authoring.ts";
+export type {
+  NormalizedConfig,
+  NormalizedReference,
+  ReferenceOptions,
+} from "./authoring.ts";
 export {
   check,
+  checkForCli,
   inspect,
   MaintenanceError,
   updateBaseline,
+  updateBaselineForCli,
 } from "./maintenance.ts";
 export type { ResolvedMaintenance, ResolvedPlugin } from "./resolution.ts";
 export type {
   BaselineUpdateOutcome,
   CheckReport,
-  MaintenanceScope,
+  CliCheckResult,
+  CliUpdateBaselineResult,
   MaintenanceConfig,
+  MaintenanceScope,
+  Operation,
 } from "./maintenance.ts";
 export { readReference } from "./read.ts";
 export {
-  file,
-  filePluginId,
-  selectTextRange,
-  TextSelectionError,
-} from "./file/index.ts";
-export type {
-  FileTextSelection,
-  FileExistsSelection,
-  FileSelection,
-  FileReference,
-  FileReferenceBuilder,
-  FileReferenceLocation,
-  FileTextReferenceBuilder,
-  FileExistsReferenceBuilder,
-  FileReferenceOptions,
-  FilePlugin,
-  TextSelectionStep,
-} from "./file/index.ts";
+  computeLineRange,
+  getRecordedLineRange,
+  lineRangeKey,
+  recordLineRange,
+} from "./line-range.ts";
+export type { LineRange, LineRangeRecord } from "./line-range.ts";
+export {
+  ownJsonValue,
+  ownPluginInformation,
+  ownReference,
+} from "./owned-data.ts";

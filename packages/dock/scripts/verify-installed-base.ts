@@ -116,6 +116,7 @@ const forbiddenBasePackages = [
   "vitest",
   "@vitest/runner",
   "@dock/core",
+  "@dock/host",
   "@ykdz/dock-core",
   "@ykdz/dock-reference-file",
   "@ykdz/dock-reference-markdown",
@@ -724,7 +725,7 @@ async function verifyCliContractSmoke(bin: string, dir: string): Promise<void> {
   assert.match(updatedText.stdout, /Baseline updated\./);
   assert.doesNotMatch(updatedText.stdout, /Current fact:/);
 
-  const savedBaseline = await readFile(join(dir, "dock.baseline.json"));
+  let savedBaseline = await readFile(join(dir, "dock.baseline.json"));
 
   const consistentText = await run(
     bin,
@@ -754,6 +755,28 @@ async function verifyCliContractSmoke(bin: string, dir: string): Promise<void> {
     consistentReport.bindings[0]?.current?.references["fact-ref"]?.range,
     { path: "fact.txt", start: 0, end: "initial fact".length },
   );
+
+  await writeFile(factPath, "updated fact", "utf8");
+  const diffStructured = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
+    dir,
+  );
+  assert.equal(diffStructured.code, 1, diffStructured.stderr);
+  const diffEnvelope = parseEnvelope(diffStructured.stdout);
+  assert.equal(diffEnvelope.variant, "changed");
+  const diffReport = requireReport(diffEnvelope);
+  assert.equal(diffReport.bindings[0]?.bindingId, "cli-policy");
+  assert.equal(diffReport.bindings[0]?.changes?.[0]?.kind, "fact");
+  assert.equal(diffReport.bindings[0]?.changes?.[0]?.referenceId, "fact-ref");
+
+  const reupdatedText = await run(
+    bin,
+    ["baseline", "update", "--config", "dock.config.mjs"],
+    dir,
+  );
+  assert.equal(reupdatedText.code, 0, reupdatedText.stderr);
+  savedBaseline = await readFile(join(dir, "dock.baseline.json"));
 
   await rm(factPath);
   const errorCheck = await run(

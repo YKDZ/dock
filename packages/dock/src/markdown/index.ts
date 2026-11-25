@@ -2,33 +2,31 @@ import { readFile } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  createReference,
+  definePlugin,
+  recordLineRange,
+  type JsonValue,
+  type PluginBatchResult,
+  type PluginContext,
+  type PluginReadResult,
+  type PluginReferenceResult,
+  type PluginRequest,
+  type ReadableReferencePlugin,
+  type Reference,
+  type ReferenceOptions,
+  type TextRange,
+} from "@dock/host";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { parseFragment } from "parse5";
 
 import {
-  createReference,
-  definePlugin,
-  type ReferenceOptions,
-} from "../authoring.ts";
-import type {
-  JsonValue,
-  PluginBatchResult,
-  PluginContext,
-  PluginReadResult,
-  PluginReferenceResult,
-  PluginRequest,
-  ReadableReferencePlugin,
-  Reference,
-  TextRange,
-} from "../contracts.ts";
-import {
   assertTextSelectionStep,
   selectTextRange,
   type TextSelectionStep,
 } from "../file/text-selection.ts";
-import { recordLineRange } from "../line-range.ts";
 
 export const markdownPluginId = "@ykdz/dock-reference-markdown" as const;
 

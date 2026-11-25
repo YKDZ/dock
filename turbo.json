@@ -3,7 +3,13 @@
     "tags": {
       "library": {
         "dependencies": {
-          "allow": ["library", "dock-tooling", "dock-core", "dock-host"]
+          "allow": [
+            "library",
+            "dock-tooling",
+            "dock-core",
+            "dock-host",
+            "dock-public"
+          ]
         }
       },
       "dock-core": {
@@ -14,6 +20,11 @@
       "dock-host": {
         "dependencies": {
           "allow": ["dock-core", "dock-tooling"]
+        }
+      },
+      "dock-public": {
+        "dependencies": {
+          "allow": ["dock-core", "dock-host", "dock-tooling"]
         }
       },
       "dock-tooling": {

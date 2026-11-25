@@ -1,6 +1,17 @@
-import { binding, check, defineConfig, updateBaseline } from "@ykdz/dock";
+import {
+  binding,
+  check,
+  defineConfig,
+  inspect,
+  updateBaseline,
+} from "@ykdz/dock";
 
-import { catalogPlugin, catalogReference } from "./external-plugin.mts";
+import {
+  catalogPlugin,
+  catalogPluginId,
+  catalogReference,
+  readCatalogCollectionCount,
+} from "./external-plugin.mts";
 
 const original = defineConfig({
   plugins: [catalogPlugin],
@@ -15,12 +26,28 @@ const original = defineConfig({
   ],
   baseline: "external-plugin.baseline.json",
 });
+const inspected = await inspect(original);
+assert(
+  readCatalogCollectionCount() === 0,
+  "inspect must list declarations without triggering collect.",
+);
+assert(
+  inspected.plugins[0]?.id === catalogPluginId &&
+    JSON.stringify(inspected.plugins[0]?.references) ===
+      JSON.stringify(["external-catalog"]),
+  "inspect must list declared external plugin references.",
+);
 const first = await updateBaseline(original);
+assert(
+  readCatalogCollectionCount() === 1,
+  "updateBaseline must collect selected references once.",
+);
 assert(
   first.status === "updated",
   "External plugin initial baseline should succeed.",
 );
 const stable = await check(original);
+assert(readCatalogCollectionCount() === 2, "check must collect current facts.");
 assert(
   stable.bindings[0]?.consistency === "consistent",
   "External plugin stable value should match the baseline.",
