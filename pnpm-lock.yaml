@@ -299,18 +299,55 @@ importers:
       '@dock/core':
         specifier: workspace:*
         version: link:../core
+      '@dock/file':
+        specifier: workspace:*
+        version: link:../file
       '@dock/host':
         specifier: workspace:*
         version: link:../host
       '@dock/node-test':
         specifier: workspace:*
         version: link:../node-test
+      '@dock/text-selection':
+        specifier: workspace:*
+        version: link:../text-selection
       '@dock/tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
       '@dock/vitest':
         specifier: workspace:*
         version: link:../vitest
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.79.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.94.0
+      tsrs:
+        specifier: 'catalog:'
+        version: 7.1.0-beta.tsrs4
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  packages/file:
+    dependencies:
+      '@dock/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dock/host':
+        specifier: workspace:*
+        version: link:../host
+      '@dock/text-selection':
+        specifier: workspace:*
+        version: link:../text-selection
+    devDependencies:
+      '@dock/tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
@@ -360,6 +397,31 @@ importers:
       '@dock/host':
         specifier: workspace:*
         version: link:../host
+    devDependencies:
+      '@dock/tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.79.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.94.0
+      tsrs:
+        specifier: 'catalog:'
+        version: 7.1.0-beta.tsrs4
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  packages/text-selection:
+    dependencies:
+      '@dock/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       '@dock/tooling-config':
         specifier: workspace:*

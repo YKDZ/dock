@@ -1,5 +1,6 @@
 import type { TextRange } from "@dock/core";
 
+/** Declarative plain-text narrowing step shared by file, Markdown, and TypeScript plugins. */
 export type TextSelectionStep =
   | { readonly kind: "quote"; readonly text: string }
   | {
@@ -9,6 +10,7 @@ export type TextSelectionStep =
     }
   | { readonly kind: "region"; readonly name: string };
 
+/** Error thrown when plain-text range narrowing or input range validation fails. */
 export class TextSelectionError extends Error {
   readonly code: string;
 
@@ -162,6 +164,7 @@ function selectMatch(
       );
     }
     selected = range(input, capture[0], capture[1]);
+    // Advance by 1 code unit to detect overlapping matches on the next iteration.
     expression.lastIndex = found.index + 1;
   }
 

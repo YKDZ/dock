@@ -76,8 +76,10 @@
   },
   "devDependencies": {
     "@dock/core": "workspace:*",
+    "@dock/file": "workspace:*",
     "@dock/host": "workspace:*",
     "@dock/node-test": "workspace:*",
+    "@dock/text-selection": "workspace:*",
     "@dock/tooling-config": "workspace:*",
     "@dock/vitest": "workspace:*",
     "@types/node": "catalog:",

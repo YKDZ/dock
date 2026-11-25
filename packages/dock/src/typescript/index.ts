@@ -17,13 +17,12 @@ import {
   type ReferenceOptions,
   type TextRange,
 } from "@dock/host";
-import * as ts from "typescript";
-
 import {
   assertTextSelectionStep,
   selectTextRange,
   type TextSelectionStep,
-} from "../file/text-selection.ts";
+} from "@dock/text-selection";
+import * as ts from "typescript";
 
 export const typescriptPluginId = "@ykdz/dock-reference-typescript" as const;
 
@@ -741,4 +740,4 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export type { TextSelectionStep } from "../file/text-selection.ts";
+export type { TextSelectionStep } from "@dock/text-selection";

@@ -7,7 +7,9 @@
             "library",
             "dock-tooling",
             "dock-core",
+            "dock-text-selection",
             "dock-host",
+            "dock-file",
             "dock-vitest",
             "dock-node-test",
             "dock-public"
@@ -19,9 +21,24 @@
           "allow": ["dock-tooling"]
         }
       },
+      "dock-text-selection": {
+        "dependencies": {
+          "allow": ["dock-core", "dock-tooling"]
+        }
+      },
       "dock-host": {
         "dependencies": {
           "allow": ["dock-core", "dock-tooling"]
+        }
+      },
+      "dock-file": {
+        "dependencies": {
+          "allow": [
+            "dock-core",
+            "dock-host",
+            "dock-text-selection",
+            "dock-tooling"
+          ]
         }
       },
       "dock-vitest": {
@@ -38,7 +55,9 @@
         "dependencies": {
           "allow": [
             "dock-core",
+            "dock-text-selection",
             "dock-host",
+            "dock-file",
             "dock-node-test",
             "dock-vitest",
             "dock-tooling"

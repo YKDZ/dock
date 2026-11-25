@@ -46,22 +46,4 @@ export {
   updateBaseline,
   readReference,
 } from "@dock/host";
-export {
-  file,
-  filePluginId,
-  selectTextRange,
-  TextSelectionError,
-} from "./file/index.ts";
-export type {
-  FileTextSelection,
-  FileExistsSelection,
-  FileSelection,
-  FileReference,
-  FileReferenceBuilder,
-  FileReferenceLocation,
-  FileTextReferenceBuilder,
-  FileExistsReferenceBuilder,
-  FileReferenceOptions,
-  FilePlugin,
-  TextSelectionStep,
-} from "./file/index.ts";
+export * from "@dock/file";

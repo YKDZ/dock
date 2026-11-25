@@ -117,6 +117,8 @@ const forbiddenBasePackages = [
   "@vitest/runner",
   "@dock/core",
   "@dock/host",
+  "@dock/text-selection",
+  "@dock/file",
   "@dock/vitest",
   "@dock/node-test",
   "@ykdz/dock-core",
@@ -1268,6 +1270,143 @@ async function verifyInstalledFileSmoke(
     consistent.stdout,
     "Scope: guide-policy\nAll checked bindings are consistent with baseline.\n",
   );
+
+  // Verify quote, match capture, region, processor ID, CLI source line numbers, and V3 baseline compatibility from @ykdz/dock root.
+  const appEnvPath = join(dir, "app.env");
+  await writeFile(
+    appEnvPath,
+    [
+      "😀header",
+      "#region runtime",
+      "port=4173",
+      "host=localhost",
+      "#endregion runtime",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "v3-lines.config.mjs"),
+    [
+      'import { binding, defineConfig, file, filePluginId } from "@ykdz/dock";',
+      'if (file.id !== "@ykdz/dock-reference-file" || filePluginId !== "@ykdz/dock-reference-file") {',
+      "  throw new Error(`Unexpected file plugin ID: ${file.id}`);",
+      "}",
+      "export default defineConfig({",
+      '  baseline: "v3-lines.baseline.json",',
+      "  plugins: [file],",
+      "  bindings: [",
+      '    binding("env-policy", [',
+      '      file.from("app.env").quote("host=localhost").reference("quoted-host"),',
+      '      file.from("app.env").match("port=(\\\\d+)", 1).reference("matched-port"),',
+      '      file.from("app.env").region("runtime").reference("runtime-region"),',
+      "    ]),",
+      "  ],",
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "v3-lines.baseline.json"),
+    JSON.stringify({
+      version: 3,
+      bindings: {
+        "env-policy": {
+          definition: {
+            id: "env-policy",
+            references: ["quoted-host", "matched-port", "runtime-region"],
+          },
+          references: {
+            "quoted-host": {
+              definition: {
+                id: "quoted-host",
+                target: {
+                  pluginId: "@ykdz/dock-reference-file",
+                  target: "app.env",
+                  fileInfo: "app.env",
+                },
+                selection: {
+                  kind: "text",
+                  steps: [{ kind: "quote", text: "host=localhost" }],
+                },
+              },
+              value: "host=localhost",
+            },
+            "matched-port": {
+              definition: {
+                id: "matched-port",
+                target: {
+                  pluginId: "@ykdz/dock-reference-file",
+                  target: "app.env",
+                  fileInfo: "app.env",
+                },
+                selection: {
+                  kind: "text",
+                  steps: [{ kind: "match", pattern: "port=(\\d+)", group: 1 }],
+                },
+              },
+              value: "4173",
+            },
+            "runtime-region": {
+              definition: {
+                id: "runtime-region",
+                target: {
+                  pluginId: "@ykdz/dock-reference-file",
+                  target: "app.env",
+                  fileInfo: "app.env",
+                },
+                selection: {
+                  kind: "text",
+                  steps: [{ kind: "region", name: "runtime" }],
+                },
+              },
+              value: "port=4173\nhost=localhost\n",
+            },
+          },
+        },
+      },
+    }),
+    "utf8",
+  );
+  const v3Consistent = await run(
+    bin,
+    ["check", "--config", "v3-lines.config.mjs"],
+    dir,
+  );
+  assert.equal(v3Consistent.code, 0, v3Consistent.stdout + v3Consistent.stderr);
+  assert.equal(
+    v3Consistent.stdout,
+    "Scope: env-policy\nAll checked bindings are consistent with baseline.\n",
+  );
+
+  await writeFile(
+    appEnvPath,
+    [
+      "😀header",
+      "#region runtime",
+      "port=8080",
+      "host=localhost",
+      "#endregion runtime",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const lineRangeCheck = await run(
+    bin,
+    ["check", "--config", "v3-lines.config.mjs"],
+    dir,
+  );
+  assert.equal(lineRangeCheck.code, 1, lineRangeCheck.stderr);
+  assert.match(lineRangeCheck.stdout, /quoted-host \(app\.env:4\)/);
+  assert.match(
+    lineRangeCheck.stdout,
+    /Change: matched-port fact: before "4173"; after "8080" \(app\.env:3\)/,
+  );
+  assert.match(
+    lineRangeCheck.stdout,
+    /Change: runtime-region fact changed \(app\.env:3-4\)/,
+  );
 }
 
 async function verifyInstalledMarkdownSmoke(
@@ -1314,6 +1453,34 @@ async function verifyInstalledMarkdownSmoke(
       `Installed Markdown runtime (${runtimeScript}) failed:\n${runtime.stdout}\n${runtime.stderr}`,
     );
   }
+
+  // Verify quote, match capture, and named region reading directly via @ykdz/dock/markdown.
+  await writeFile(
+    join(dir, "text-selection-verify.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { defineConfig, readReference } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      "const config = defineConfig({ plugins: [markdown], bindings: [] });",
+      'const quoted = await readReference(config, markdown.from("guide.md").section(["指南", "安装"]).quote("安装片段：版本一。").reference("md-quote"));',
+      'assert.equal(quoted.value, "安装片段：版本一。");',
+      'const regioned = await readReference(config, markdown.from("guide.md").section(["指南", "安装"]).region("runtime").reference("md-region"));',
+      'assert.equal(regioned.value, "port=4173\\n");',
+      'const matched = await readReference(config, markdown.from("guide.md").section(["指南", "安装"]).region("runtime").match("port=(\\\\d+)", 1).reference("md-match"));',
+      'assert.equal(matched.value, "4173");',
+    ].join("\n"),
+    "utf8",
+  );
+  const mdTextSelection = await run(
+    process.execPath,
+    [join(dir, "text-selection-verify.mjs")],
+    dir,
+  );
+  assert.equal(
+    mdTextSelection.code,
+    0,
+    `Installed Markdown text-selection check failed:\n${mdTextSelection.stdout}\n${mdTextSelection.stderr}`,
+  );
 
   const updated = await run(
     bin,
@@ -1416,6 +1583,49 @@ async function verifyInstalledTypeScriptSmoke(
       `Installed TypeScript runtime (${runtimeScript}) failed:\n${runtime.stdout}\n${runtime.stderr}`,
     );
   }
+
+  // Verify quote, match capture, and named region reading directly via @ykdz/dock/typescript.
+  await writeFile(
+    join(dir, "selection-source.ts"),
+    [
+      "export function configure(): string {",
+      "  /*",
+      "  #region runtime",
+      "  const port = 4173;",
+      "  #endregion runtime",
+      "  */",
+      '  return "ok";',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "text-selection-verify.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { defineConfig, readReference } from "@ykdz/dock";',
+      'import { typescript } from "@ykdz/dock/typescript";',
+      "const config = defineConfig({ plugins: [typescript], bindings: [] });",
+      'const quoted = await readReference(config, typescript.from("selection-source.ts").symbol("configure", "function").quote(\'return "ok";\').reference("ts-quote"));',
+      "assert.equal(quoted.value, 'return \"ok\";');",
+      'const matched = await readReference(config, typescript.from("selection-source.ts").symbol("configure", "function").match("const port = (\\\\d+);", 1).reference("ts-match"));',
+      'assert.equal(matched.value, "4173");',
+      'const regioned = await readReference(config, typescript.from("selection-source.ts").symbol("configure", "function").region("runtime").reference("ts-region"));',
+      'assert.equal(regioned.value.trim(), "const port = 4173;");',
+    ].join("\n"),
+    "utf8",
+  );
+  const tsTextSelection = await run(
+    process.execPath,
+    [join(dir, "text-selection-verify.mjs")],
+    dir,
+  );
+  assert.equal(
+    tsTextSelection.code,
+    0,
+    `Installed TypeScript text-selection check failed:\n${tsTextSelection.stdout}\n${tsTextSelection.stderr}`,
+  );
 
   const updated = await run(
     bin,
