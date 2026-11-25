@@ -207,14 +207,19 @@ const implementation = definePlugin({
       } catch (error) {
         const readCause =
           error instanceof MarkdownReferenceError ? error.cause : error;
+        const isMissingFile = hasCode(readCause, "ENOENT");
+        const isExplicitSource = explicitSourcePaths.has(absolutePath);
         const isMissingReferenceOnlyFile =
-          !explicitSourcePaths.has(absolutePath) &&
+          !isExplicitSource &&
           !missingBaselinePaths.has(absolutePath) &&
-          hasCode(readCause, "ENOENT");
+          isMissingFile;
         if (!isMissingReferenceOnlyFile) {
           issues.push({
             code: "declaration-source-read-failed",
             message: `Cannot read Markdown declaration source ${displayPath}: ${errorMessage(error)}`,
+            ...(!isExplicitSource && isMissingFile
+              ? { missingFile: absolutePath }
+              : {}),
           });
         }
         continue;

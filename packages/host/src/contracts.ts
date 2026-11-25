@@ -39,6 +39,8 @@ export type PluginDiscoveredBinding = {
 export type PluginDiscoveryIssue = {
   readonly code: string;
   readonly message: string;
+  /** Optional normalized file path; retained only if a historical baseline binding referencing that file remains absent after discovery. */
+  readonly missingFile?: string;
 };
 
 export type PluginDiscoveryResult = {
@@ -269,7 +271,19 @@ type PluginSource<Plugin> =
   >
     ? Plugin extends { readonly id: infer PluginId extends string }
       ? PluginIdentityMatches<PluginId, Source> extends true
-        ? Source
+        ? string extends PluginId
+          ? Source
+          : string extends Source["pluginId"]
+            ? Plugin extends
+                | { readonly discover: (...arguments_: never[]) => unknown }
+                | {
+                    readonly validateSource: (
+                      ...arguments_: never[]
+                    ) => unknown;
+                  }
+              ? Source & { readonly pluginId: PluginId }
+              : never
+            : Source
         : never
       : Source
     : never;

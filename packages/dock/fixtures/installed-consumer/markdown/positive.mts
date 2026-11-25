@@ -62,10 +62,19 @@ const fileValue: Promise<PluginReadResult<string>> = readReference(
 const selectedValue: ReferenceValue<typeof chapter> = "const answer = 42";
 
 const markdownSource: MarkdownDeclarationSource = markdown.source("guide.md");
+const urlMarkdownSource: MarkdownDeclarationSource = markdown.source(
+  new URL("./guide.md", import.meta.url),
+);
 const sourceOnlyConfig = defineConfig({
   plugins: [markdown],
-  sources: [markdownSource],
+  sources: [markdownSource, urlMarkdownSource],
   references: [chapter],
+});
+const combinedConfig = defineConfig({
+  plugins: [markdown, file],
+  sources: [markdownSource],
+  references: [standalone],
+  bindings: [binding("guide-policy", [chapter, table, directFile])],
 });
 
 void markdownValue;
@@ -75,3 +84,4 @@ void tableRead;
 void fileValue;
 void selectedValue;
 void sourceOnlyConfig;
+void combinedConfig;

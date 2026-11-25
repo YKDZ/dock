@@ -254,9 +254,13 @@ async function discoverPluginDeclarations(
   config: PreparedConfig,
   baseline: Baseline | undefined,
 ): Promise<PreparedConfig> {
+  const initialBindingIds = new Set(
+    config.bindings.map((binding) => binding.id),
+  );
   const missingBaselineFilesByPlugin = collectMissingBaselineFilesByPlugin(
-    config,
+    initialBindingIds,
     baseline,
+    dirname(config.baselinePath),
   );
   const context = Object.freeze({ root: config.root });
   const discoveryOutcomes = await Promise.all(
@@ -303,7 +307,10 @@ async function discoverPluginDeclarations(
     }),
   );
 
-  const issues: PluginDiscoveryIssue[] = [];
+  const issues: {
+    readonly pluginId: string;
+    readonly issue: PluginDiscoveryIssue;
+  }[] = [];
   const discoveredBindings: {
     readonly plugin: ReferencePlugin;
     readonly binding: {
@@ -317,15 +324,21 @@ async function discoverPluginDeclarations(
 
   for (const outcome of discoveryOutcomes) {
     if (outcome === undefined) continue;
-    issues.push(...outcome.result.issues);
+    for (const issue of outcome.result.issues) {
+      issues.push({ pluginId: outcome.plugin.id, issue });
+    }
     for (const binding of outcome.result.bindings) {
       discoveredBindings.push({ plugin: outcome.plugin, binding });
     }
   }
 
   if (discoveredBindings.length === 0) {
-    if (issues.length > 0) {
-      throw discoveryIssuesError(issues);
+    const activeIssues = filterResolvedDiscoveryIssues(
+      issues,
+      missingBaselineFilesByPlugin,
+    );
+    if (activeIssues.length > 0) {
+      throw discoveryIssuesError(activeIssues);
     }
     return config;
   }
@@ -361,8 +374,11 @@ async function discoverPluginDeclarations(
           ? existingSources.join(", ")
           : "TypeScript config bindings";
       issues.push({
-        code: "declaration-invalid",
-        message: `Duplicate binding ID ${JSON.stringify(binding.id)} declared at ${declaredAtText ?? plugin.id} conflicts with existing declaration (${priorLabel}).`,
+        pluginId: plugin.id,
+        issue: {
+          code: "declaration-invalid",
+          message: `Duplicate binding ID ${JSON.stringify(binding.id)} declared at ${declaredAtText ?? plugin.id} conflicts with existing declaration (${priorLabel}).`,
+        },
       });
       continue;
     }
@@ -378,8 +394,11 @@ async function discoverPluginDeclarations(
         plugin.validate(owned);
       } catch (error) {
         issues.push({
-          code: "declaration-invalid",
-          message: `Plugin ${plugin.id} rejected discovered reference ${owned.id}: ${errorMessage(error)}`,
+          pluginId: plugin.id,
+          issue: {
+            code: "declaration-invalid",
+            message: `Plugin ${plugin.id} rejected discovered reference ${owned.id}: ${errorMessage(error)}`,
+          },
         });
         bindingValid = false;
         continue;
@@ -405,8 +424,11 @@ async function discoverPluginDeclarations(
           ", ",
         );
         issues.push({
-          code: "declaration-invalid",
-          message: `Discovered reference ID ${JSON.stringify(owned.id)} at ${declaredAtText ?? plugin.id} conflicts with existing reference definition${priorSources.length > 0 ? ` (${priorSources})` : ""}.`,
+          pluginId: plugin.id,
+          issue: {
+            code: "declaration-invalid",
+            message: `Discovered reference ID ${JSON.stringify(owned.id)} at ${declaredAtText ?? plugin.id} conflicts with existing reference definition${priorSources.length > 0 ? ` (${priorSources})` : ""}.`,
+          },
         });
         bindingValid = false;
       }
@@ -419,8 +441,11 @@ async function discoverPluginDeclarations(
         if (!reportedDuplicateMembers.has(referenceId)) {
           reportedDuplicateMembers.add(referenceId);
           issues.push({
-            code: "declaration-invalid",
-            message: `Duplicate reference ID ${JSON.stringify(referenceId)} in binding ${JSON.stringify(binding.id)}${declaredAtText === undefined ? "" : ` at ${declaredAtText}`}.`,
+            pluginId: plugin.id,
+            issue: {
+              code: "declaration-invalid",
+              message: `Duplicate reference ID ${JSON.stringify(referenceId)} in binding ${JSON.stringify(binding.id)}${declaredAtText === undefined ? "" : ` at ${declaredAtText}`}.`,
+            },
           });
         }
         bindingValid = false;
@@ -429,8 +454,11 @@ async function discoverPluginDeclarations(
       seenMembers.add(referenceId);
       if (!referencesById.has(referenceId)) {
         issues.push({
-          code: "declaration-invalid",
-          message: `Unknown reference ID ${JSON.stringify(referenceId)} in binding ${JSON.stringify(binding.id)}${declaredAtText === undefined ? "" : ` at ${declaredAtText}`}.`,
+          pluginId: plugin.id,
+          issue: {
+            code: "declaration-invalid",
+            message: `Unknown reference ID ${JSON.stringify(referenceId)} in binding ${JSON.stringify(binding.id)}${declaredAtText === undefined ? "" : ` at ${declaredAtText}`}.`,
+          },
         });
         bindingValid = false;
       }
@@ -447,8 +475,17 @@ async function discoverPluginDeclarations(
     }
   }
 
-  if (issues.length > 0) {
-    throw discoveryIssuesError(issues);
+  const remainingMissingFilesByPlugin = collectMissingBaselineFilesByPlugin(
+    new Set(bindingsById.keys()),
+    baseline,
+    dirname(config.baselinePath),
+  );
+  const activeIssues = filterResolvedDiscoveryIssues(
+    issues,
+    remainingMissingFilesByPlugin,
+  );
+  if (activeIssues.length > 0) {
+    throw discoveryIssuesError(activeIssues);
   }
 
   return {
@@ -464,15 +501,12 @@ async function discoverPluginDeclarations(
 }
 
 function collectMissingBaselineFilesByPlugin(
-  config: PreparedConfig,
+  currentBindingIds: ReadonlySet<string>,
   baseline: Baseline | undefined,
+  baselineDirectory: string,
 ): Map<string, Set<string>> {
   const byPlugin = new Map<string, Set<string>>();
   if (baseline === undefined) return byPlugin;
-  const currentBindingIds = new Set(
-    config.bindings.map((binding) => binding.id),
-  );
-  const baselineDirectory = dirname(config.baselinePath);
   for (const [bindingId, entry] of Object.entries(baseline.bindings)) {
     if (currentBindingIds.has(bindingId)) continue;
     for (const referenceId of entry.definition.references) {
@@ -494,6 +528,24 @@ function collectMissingBaselineFilesByPlugin(
     }
   }
   return byPlugin;
+}
+
+function filterResolvedDiscoveryIssues(
+  issues: readonly {
+    readonly pluginId: string;
+    readonly issue: PluginDiscoveryIssue;
+  }[],
+  missingBaselineFilesByPlugin: ReadonlyMap<string, ReadonlySet<string>>,
+): PluginDiscoveryIssue[] {
+  return issues
+    .filter(({ pluginId, issue }) => {
+      if (issue.missingFile === undefined) return true;
+      return (
+        missingBaselineFilesByPlugin.get(pluginId)?.has(issue.missingFile) ??
+        false
+      );
+    })
+    .map(({ issue }) => issue);
 }
 
 function discoveryIssuesError(
