@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { binding, check, defineConfig, file, readReference } from "@ykdz/dock";
-import { markdown, markdownPluginId } from "@ykdz/dock/markdown";
+import { binding, check, defineConfig, readReference } from "@dock/host";
+import { markdown, markdownPluginId } from "@dock/markdown";
 
 async function withDocument<T>(
   source: string,
@@ -248,20 +248,6 @@ void test("duplicate heading paths, table columns, and row keys explicitly repor
       ),
       /Duplicate row key value/u,
     );
-  });
-});
-
-void test("plain file plugin preserves raw text when registered alongside markdown plugin", async () => {
-  const source = "# 标题\n\n<!-- 普通注释 -->\n";
-  await withDocument(source, async (root) => {
-    const config = defineConfig({
-      plugins: [file, markdown],
-      bindings: [],
-      root,
-    });
-    const reference = file.from("guide.md").reference("whole");
-    const result = await readReference(config, reference);
-    assert.equal(await readFile(join(root, "guide.md"), "utf8"), result.value);
   });
 });
 

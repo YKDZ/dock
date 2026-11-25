@@ -25,6 +25,8 @@ const INTERNAL_ENTRIES: readonly InternalEntry[] = [
   { specifier: "@dock/host/maintenance-worker", packageSlug: "host" },
   { specifier: "@dock/text-selection", packageSlug: "text-selection" },
   { specifier: "@dock/file", packageSlug: "file" },
+  { specifier: "@dock/markdown", packageSlug: "markdown" },
+  { specifier: "@dock/typescript", packageSlug: "typescript" },
   { specifier: "@dock/node-test", packageSlug: "node-test" },
   { specifier: "@dock/node-test/node-reporter", packageSlug: "node-test" },
   { specifier: "@dock/vitest", packageSlug: "vitest" },

@@ -133,6 +133,8 @@ const forbiddenLegacyPackages = [
   "@dock/host",
   "@dock/text-selection",
   "@dock/file",
+  "@dock/markdown",
+  "@dock/typescript",
   "@dock/vitest",
   "@dock/node-test",
   "@ykdz/dock-core",

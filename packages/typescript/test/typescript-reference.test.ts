@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
-import { binding, check, defineConfig, readReference } from "@ykdz/dock";
-import { typescript, typescriptPluginId } from "@ykdz/dock/typescript";
+import { binding, check, defineConfig, readReference } from "@dock/host";
+import { typescript, typescriptPluginId } from "@dock/typescript";
 
 void test("typescript plugin preserves legacy plugin ID", () => {
   assert.equal(typescriptPluginId, "@ykdz/dock-reference-typescript");
@@ -17,7 +17,7 @@ void test("symbol selection narrowed by plain text steps returns identical UTF-1
   const root = await mkdtemp(join(tmpdir(), "dock-typescript-reference-"));
   try {
     const source = await readFile(
-      new URL("../../fixtures/typescript/symbol-source.ts", import.meta.url),
+      new URL("../fixtures/symbol-source.ts", import.meta.url),
       "utf8",
     );
     await writeFile(join(root, "symbol-source.ts"), source, "utf8");
@@ -308,6 +308,11 @@ void test("batch collection isolates symbol errors and skips unselected files", 
     });
     assert.ok(missingResult && "errors" in missingResult);
     assert.equal(missingResult.errors[0]?.code, "missing-symbol");
+    assert.deepEqual(missingResult.errors[0]?.range, {
+      path: "symbols.ts",
+      start: 0,
+      end: source.length,
+    });
     assert.deepEqual(report.scope, ["missing-policy", "readable-policy"]);
     assert.deepEqual(report.pluginErrors, []);
   } finally {
