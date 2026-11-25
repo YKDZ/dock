@@ -257,6 +257,9 @@ async function discoverPluginDeclarations(
   const initialBindingIds = new Set(
     config.bindings.map((binding) => binding.id),
   );
+  const boundReferenceIds: ReadonlySet<string> = new Set(
+    config.bindings.flatMap((binding) => binding.references),
+  );
   const missingBaselineFilesByPlugin = collectMissingBaselineFilesByPlugin(
     initialBindingIds,
     baseline,
@@ -292,6 +295,7 @@ async function discoverPluginDeclarations(
               references: pluginReferences,
               sources: pluginSources,
               missingBaselineFiles,
+              boundReferenceIds,
             },
             context,
           ),
@@ -343,6 +347,10 @@ async function discoverPluginDeclarations(
     return config;
   }
 
+  // Snapshot explicit config references so inline bindings cannot resolve another inline binding's auto-generated ownReferences.
+  const explicitReferenceIds = new Set(
+    config.references.map((reference) => reference.id),
+  );
   const referencesById = new Map<string, NormalizedReference>(
     config.references.map((reference) => [reference.id, reference]),
   );
@@ -369,15 +377,17 @@ async function discoverPluginDeclarations(
         : sourceText(binding.declaredAt);
     const existingSources = seenBindingSources.get(binding.id);
     if (existingSources !== undefined) {
-      const priorLabel =
+      const conflictTarget =
         existingSources.length > 0
-          ? existingSources.join(", ")
-          : "TypeScript config bindings";
+          ? `existing declaration (${existingSources.join(", ")})`
+          : initialBindingIds.has(binding.id)
+            ? "existing declaration in config"
+            : "earlier discovered declaration";
       issues.push({
         pluginId: plugin.id,
         issue: {
           code: "declaration-invalid",
-          message: `Duplicate binding ID ${JSON.stringify(binding.id)} declared at ${declaredAtText ?? plugin.id} conflicts with existing declaration (${priorLabel}).`,
+          message: `Duplicate binding ID ${JSON.stringify(binding.id)} declared at ${declaredAtText ?? plugin.id} conflicts with ${conflictTarget}.`,
         },
       });
       continue;
@@ -387,6 +397,9 @@ async function discoverPluginDeclarations(
       declaredAtText === undefined ? [] : [declaredAtText],
     );
 
+    const ownRefIds = new Set(
+      binding.ownReferences.map((rawReference) => rawReference.id),
+    );
     let bindingValid = true;
     for (const rawReference of binding.ownReferences) {
       const owned = ownReference(rawReference);
@@ -452,7 +465,10 @@ async function discoverPluginDeclarations(
         continue;
       }
       seenMembers.add(referenceId);
-      if (!referencesById.has(referenceId)) {
+      if (
+        !ownRefIds.has(referenceId) &&
+        !explicitReferenceIds.has(referenceId)
+      ) {
         issues.push({
           pluginId: plugin.id,
           issue: {

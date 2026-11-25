@@ -8,10 +8,14 @@ import { pathToFileURL } from "node:url";
 import {
   binding,
   check,
+  createReference,
   defineConfig,
+  definePlugin,
   inspect,
   MaintenanceError,
+  type PluginRequest,
   readReference,
+  type Reference,
   updateBaseline,
 } from "@dock/host";
 import { markdown, markdownPluginId } from "@dock/markdown";
@@ -2056,6 +2060,184 @@ void test("unreadable source, corrupted inline declaration, untracking, partial 
     assert.deepEqual(Object.keys(finalBaseline.bindings), ["keep-binding"]);
     const finalCheck = await check(sourceRemovedConfig);
     assert.equal(finalCheck.bindings[0]?.consistency, "consistent");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("mixed broken dock:bind and broken markers in the same document are all reported in source-line order", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-mixed-directives-"));
+  try {
+    await writeFile(
+      join(root, "guide.md"),
+      [
+        "# Guide",
+        "",
+        "<!-- dock:start unclosed -->",
+        "Some content.",
+        "",
+        '<!-- dock:bind {"id":"bad","with":[]} -->',
+        "Body.",
+        "",
+        "<!-- dock:strat typo -->",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    const config = defineConfig({
+      root,
+      plugins: [markdown],
+      sources: [markdown.source("guide.md")],
+    });
+    const boundConfig = defineConfig({
+      root,
+      plugins: [markdown],
+      sources: [markdown.source("guide.md")],
+      bindings: [
+        binding("guide-section", [
+          markdown.from("guide.md").section("Guide").reference("guide-sec"),
+        ]),
+      ],
+    });
+    for (const activeConfig of [config, boundConfig]) {
+      for (const op of [
+        () => inspect(activeConfig),
+        () => check(activeConfig),
+      ]) {
+        await assert.rejects(op, (error: unknown) => {
+          assert.ok(error instanceof MaintenanceError);
+          assert.equal(error.code, "declaration-invalid");
+          const idxUnclosed = error.message.indexOf("guide.md:3");
+          const idxBind = error.message.indexOf("guide.md:6");
+          const idxTypo = error.message.indexOf("guide.md:9");
+          assert.ok(idxUnclosed >= 0, error.message);
+          assert.ok(idxBind > idxUnclosed, error.message);
+          assert.ok(idxTypo > idxBind, error.message);
+          assert.match(error.message, /unclosed/);
+          assert.match(error.message, /dock:strat/);
+          return true;
+        });
+      }
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("unbound config.references targeting a markdown file still validates markers when no binding reads the file", async () => {
+  const root = await mkdtemp(
+    join(tmpdir(), "dock-markdown-unbound-ref-markers-"),
+  );
+  try {
+    await writeFile(join(root, "a.txt"), "ok\n", "utf8");
+    await writeFile(
+      join(root, "guide.md"),
+      [
+        "<!-- dock:start m -->ok<!-- dock:end m -->",
+        "",
+        "<!-- dock:start unclosed -->",
+        "",
+        "<!-- dock:strat typo -->",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    type OtherReference = Reference<"fixture:other", string, string, string>;
+    const otherPlugin = definePlugin({
+      id: "fixture:other",
+      validate(_ref: OtherReference) {},
+      fileInfo(ref: OtherReference) {
+        return ref.target;
+      },
+      collect(req: PluginRequest<OtherReference>) {
+        return {
+          results: req.selectedReferences.map((ref) => ({
+            referenceId: ref.id,
+            kind: "value" as const,
+            value: "ok",
+          })),
+        };
+      },
+    });
+    const otherRef = createReference<"fixture:other", string, string, string>(
+      "fixture:other",
+      "a",
+      "a.txt",
+    );
+
+    for (const withSource of [true, false]) {
+      const config = defineConfig({
+        root,
+        plugins: [markdown, otherPlugin],
+        ...(withSource ? { sources: [markdown.source("guide.md")] } : {}),
+        references: [markdown.from("guide.md").marker("m").reference("m")],
+        bindings: [binding("b", [otherRef])],
+      });
+
+      for (const op of [() => inspect(config), () => check(config)]) {
+        await assert.rejects(
+          op,
+          (error: unknown) => {
+            assert.ok(error instanceof MaintenanceError);
+            assert.equal(error.code, "invalid-marker");
+            assert.match(error.message, /guide\.md:3.*unclosed/);
+            assert.match(error.message, /guide\.md:5.*dock:strat/);
+            return true;
+          },
+          `withSource=${String(withSource)}`,
+        );
+      }
+    }
+
+    // When m IS bound, collect handles marker validation on report.bindings instead of discover throwing.
+    const boundConfig = defineConfig({
+      root,
+      plugins: [markdown],
+      sources: [markdown.source("guide.md")],
+      bindings: [
+        binding("m-binding", [
+          markdown.from("guide.md").marker("m").reference("m"),
+        ]),
+      ],
+    });
+    const report = await check(boundConfig);
+    const checked = report.bindings[0];
+    assert.ok(checked && "errors" in checked);
+    assert.equal(checked.errors[0]?.code, "invalid-marker");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("dock:bind with cannot reference another inline binding's auto-generated dock:bind:<id> in any order", async () => {
+  const root = await mkdtemp(
+    join(tmpdir(), "dock-markdown-bind-internal-ref-"),
+  );
+  try {
+    await writeFile(join(root, "r1.txt"), "one\n", "utf8");
+    const r1 = markdown.from("r1.txt").reference("r1");
+
+    const b1 = '<!-- dock:bind {"id":"b1","with":["r1"]} -->\nBody 1.';
+    const b2 =
+      '<!-- dock:bind {"id":"b2","with":["dock:bind:b1"]} -->\nBody 2.';
+
+    for (const content of [`${b1}\n\n${b2}\n`, `${b2}\n\n${b1}\n`]) {
+      await writeFile(join(root, "guide.md"), content, "utf8");
+      const config = defineConfig({
+        root,
+        plugins: [markdown],
+        sources: [markdown.source("guide.md")],
+        references: [r1],
+      });
+      await assert.rejects(
+        () => check(config),
+        (error: unknown) =>
+          error instanceof MaintenanceError &&
+          error.code === "declaration-invalid" &&
+          /Unknown reference ID "dock:bind:b1"/.test(error.message),
+      );
+    }
   } finally {
     await rm(root, { recursive: true, force: true });
   }

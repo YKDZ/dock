@@ -1659,3 +1659,123 @@ void test("host declaration assembly reports duplicate members, unknown refs, re
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("binding ID conflicts without declaredAt report language-neutral provenance instead of TypeScript config bindings", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-conflict-provenance-"));
+  try {
+    await writeFile(join(root, "a.txt"), "a\n", "utf8");
+    const refA = localTextFileReference("ref-a", "a.txt");
+
+    // 1) Config binding without declaredAt conflicts with discovered binding.
+    const conflictWithConfigPlugin = definePlugin({
+      id: "fixture:conflict-config",
+      validate() {},
+      validateSource() {},
+      discover() {
+        return {
+          bindings: [
+            {
+              id: "cli-failure",
+              ownReferences: [
+                createReference(
+                  "fixture:conflict-config",
+                  "own-1",
+                  "README.md",
+                ),
+              ],
+              referenceIds: ["own-1", "ref-a"],
+              declaredAt: "README.md:3",
+            },
+          ],
+          issues: [],
+        };
+      },
+      collect(request) {
+        return {
+          results: request.selectedReferences.map((r) => ({
+            referenceId: r.id,
+            kind: "value" as const,
+            value: "ok",
+          })),
+        };
+      },
+    });
+    const configConflict = defineConfig({
+      root,
+      plugins: [localTextFilePlugin, conflictWithConfigPlugin],
+      bindings: [binding("cli-failure", [refA])],
+      sources: [{ pluginId: "fixture:conflict-config", target: "README.md" }],
+    });
+    await assert.rejects(
+      () => check(configConflict),
+      (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "declaration-invalid");
+        assert.doesNotMatch(error.message, /TypeScript config bindings/);
+        assert.match(
+          error.message,
+          /Duplicate binding ID "cli-failure" declared at README\.md:3 conflicts with existing declaration in config\./,
+        );
+        return true;
+      },
+    );
+
+    // 2) Two discovered bindings without declaredAt share the same ID.
+    const dupDiscoveredPlugin = definePlugin({
+      id: "fixture:conflict-discovered",
+      validate() {},
+      validateSource() {},
+      discover() {
+        return {
+          bindings: [
+            {
+              id: "dup-id",
+              ownReferences: [
+                createReference("fixture:conflict-discovered", "own-a", "a.md"),
+              ],
+              referenceIds: ["own-a", "ref-a"],
+            },
+            {
+              id: "dup-id",
+              ownReferences: [
+                createReference("fixture:conflict-discovered", "own-b", "b.md"),
+              ],
+              referenceIds: ["own-b", "ref-a"],
+            },
+          ],
+          issues: [],
+        };
+      },
+      collect(request) {
+        return {
+          results: request.selectedReferences.map((r) => ({
+            referenceId: r.id,
+            kind: "value" as const,
+            value: "ok",
+          })),
+        };
+      },
+    });
+    const discoveredConflict = defineConfig({
+      root,
+      plugins: [localTextFilePlugin, dupDiscoveredPlugin],
+      references: [refA],
+      sources: [{ pluginId: "fixture:conflict-discovered", target: "a.md" }],
+    });
+    await assert.rejects(
+      () => check(discoveredConflict),
+      (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "declaration-invalid");
+        assert.doesNotMatch(error.message, /TypeScript config bindings/);
+        assert.match(
+          error.message,
+          /Duplicate binding ID "dup-id" declared at fixture:conflict-discovered conflicts with earlier discovered declaration\./,
+        );
+        return true;
+      },
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
