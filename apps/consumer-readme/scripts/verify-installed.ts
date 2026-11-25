@@ -70,7 +70,6 @@ try {
   const nodeTypes = require("@types/node/package.json") as { version: string };
   const installed = run("npm", [
     "install",
-    "--no-save",
     "--no-package-lock",
     "--ignore-scripts",
     "--no-audit",
@@ -81,6 +80,58 @@ try {
     `@types/node@${nodeTypes.version}`,
   ]);
   assert.equal(installed.status, 0, installed.stdout + installed.stderr);
+
+  const listing = run("npm", ["ls", "--all", "--json", "--prefix", consumer]);
+  assert.notEqual(
+    listing.stdout.trim(),
+    "",
+    `npm ls produced no JSON output: ${listing.stderr}`,
+  );
+  const dependencyTree = JSON.parse(listing.stdout) as {
+    readonly problems?: readonly string[];
+  };
+  for (const problem of dependencyTree.problems ?? []) {
+    assert.match(
+      problem,
+      /^missing: .* required by .*@npm:dock@$/u,
+      `Unexpected npm ls problem in consumer: ${problem}`,
+    );
+  }
+  const installedPackages = collectInstalledPackageNames(dependencyTree);
+  assert.ok(
+    installedPackages.has("@ykdz/dock"),
+    "Consumer must install @ykdz/dock from the tarball.",
+  );
+  for (const forbidden of [
+    "@dock/core",
+    "@dock/host",
+    "@dock/text-selection",
+    "@dock/file",
+    "@dock/markdown",
+    "@dock/typescript",
+    "@dock/node-test",
+    "@dock/vitest",
+    "@dock/tooling-config",
+    "@ykdz/dock-core",
+    "@ykdz/dock-reference-file",
+    "@ykdz/dock-reference-markdown",
+    "@ykdz/dock-reference-typescript",
+    "@ykdz/dock-reference-node-test",
+    "@ykdz/dock-reference-vitest",
+  ]) {
+    assert.equal(
+      installedPackages.has(forbidden),
+      false,
+      `External consumer node_modules must not contain ${forbidden}`,
+    );
+  }
+  for (const name of installedPackages) {
+    assert.equal(
+      name.startsWith("@dock/"),
+      false,
+      `External consumer node_modules must not contain workspace internal package ${name}`,
+    );
+  }
 
   for (const path of [
     "dock.config.ts",
@@ -295,6 +346,22 @@ try {
     readmeWithInline.split("\n").indexOf(inlineDirective) + 1;
   const proseLine = readmeWithInline.split("\n").indexOf(inlineProse) + 1;
 
+  const inspectedInlineText = run(bin("dock"), [
+    "inspect",
+    "--config",
+    "inline.config.ts",
+  ]);
+  assert.equal(
+    inspectedInlineText.status,
+    0,
+    inspectedInlineText.stdout + inspectedInlineText.stderr,
+  );
+  assert.equal(inspectedInlineText.stderr, "");
+  assert.match(
+    inspectedInlineText.stdout,
+    /Scope: readme-inline-statement, readme-usage-policy/,
+  );
+
   const inspectedInline = run(bin("dock"), [
     "inspect",
     "--config",
@@ -344,6 +411,21 @@ try {
     resolution.declarationSources.bindings["readme-inline-statement"],
     [`README.md:${directiveLine}`],
   );
+  await runConsumerJs("verify-inline-inspect.mjs", [
+    'import assert from "node:assert/strict";',
+    'import { readFile } from "node:fs/promises";',
+    'import { inspect } from "@ykdz/dock";',
+    'const jsInspected = await inspect("inline.config.ts");',
+    "assert.deepEqual(",
+    '  jsInspected.context.bindings.find((entry) => entry.id === "readme-inline-statement"),',
+    '  { id: "readme-inline-statement", references: ["dock:bind:readme-inline-statement", "readme example", "readme-usage"] },',
+    ");",
+    "assert.deepEqual(",
+    '  jsInspected.declarationSources.bindings["readme-inline-statement"],',
+    `  ["README.md:${directiveLine}"],`,
+    ");",
+    `await assert.rejects(readFile(${JSON.stringify(probeMarkerPath)}, "utf8"), /ENOENT/);`,
+  ]);
 
   const inlineBaselineInit = run(bin("dock"), [
     "baseline",
@@ -357,7 +439,7 @@ try {
     inlineBaselineInit.stdout + inlineBaselineInit.stderr,
   );
 
-  // Mutate a referenced fact (usage section) and verify dock check reports the change and inline prose line.
+  // Mutate a referenced fact (usage section) and verify all 4 surfaces report the drift and inline prose line.
   const usageTarget = "配置好后，先保存基线。";
   assert.ok(readmeWithInline.includes(usageTarget));
   const readmeFactChanged = readmeWithInline.replace(
@@ -384,6 +466,35 @@ try {
     ),
     inlineChangedCheck.stdout,
   );
+  const inlineChangedStructured = run(bin("dock"), [
+    "check",
+    "--config",
+    "inline.config.ts",
+    "--output",
+    "structured",
+  ]);
+  assert.equal(
+    inlineChangedStructured.status,
+    1,
+    inlineChangedStructured.stdout + inlineChangedStructured.stderr,
+  );
+  const inlineChangedReport = readReport(
+    inlineChangedStructured.stdout,
+    "changed",
+  );
+  assert.ok(
+    inlineChangedReport.bindings.some(
+      (entry) => entry.bindingId === "readme-inline-statement",
+    ),
+  );
+  await runConsumerJs("verify-inline-changed.mjs", [
+    'import assert from "node:assert/strict";',
+    'import { check } from "@ykdz/dock";',
+    'const report = await check("inline.config.ts");',
+    'const inlineBinding = report.bindings.find((entry) => entry.bindingId === "readme-inline-statement");',
+    'assert.equal(inlineBinding?.consistency, "inconsistent");',
+    'assert.ok(inlineBinding?.changes?.some((change) => change.kind === "fact" && change.referenceId === "readme-usage"));',
+  ]);
 
   const inlineBaselineUpdated = run(bin("dock"), [
     "baseline",
@@ -470,38 +581,442 @@ try {
     );
     assert.doesNotMatch(failed.stderr, /untracked/i);
     assert.deepEqual(await readFile(inlineBaselinePath), savedInlineBaseline);
+
+    const failedStructured = run(bin("dock"), [
+      ...args,
+      "--output",
+      "structured",
+    ]);
+    assert.equal(
+      failedStructured.status,
+      1,
+      failedStructured.stdout + failedStructured.stderr,
+    );
+    const failureEnvelope = JSON.parse(failedStructured.stderr) as {
+      kind?: unknown;
+      variant?: unknown;
+      data?: { code?: unknown; message?: string };
+    };
+    assert.equal(failureEnvelope.kind, "failure");
+    assert.equal(failureEnvelope.variant, "maintenanceFailed");
+    assert.equal(failureEnvelope.data?.code, "declaration-invalid");
+    assert.ok(
+      failureEnvelope.data?.message?.includes(
+        `README.md:${reorderedDirectiveLine}`,
+      ),
+      failedStructured.stderr,
+    );
+    assert.deepEqual(await readFile(inlineBaselinePath), savedInlineBaseline);
   }
 
+  await runConsumerJs("verify-corrupt-inline-js.mjs", [
+    'import assert from "node:assert/strict";',
+    'import { readFile } from "node:fs/promises";',
+    'import { check, inspect, MaintenanceError, updateBaseline } from "@ykdz/dock";',
+    'const before = await readFile("inline.baseline.json");',
+    'for (const op of [() => inspect("inline.config.ts"), () => check("inline.config.ts"), () => updateBaseline("inline.config.ts")]) {',
+    "  await assert.rejects(op, (error) => {",
+    "    assert.ok(error instanceof MaintenanceError);",
+    '    assert.equal(error.code, "declaration-invalid");',
+    `    assert.ok(error.message.includes("README.md:${reorderedDirectiveLine}"), error.message);`,
+    "    return true;",
+    "  });",
+    '  assert.deepEqual(await readFile("inline.baseline.json"), before);',
+    "}",
+  ]);
+
+  // Onboard a new guide (guide.md containing only dock:bind declarations, zero TS MarkdownReferences) in the same consumer
+  // via explicit markdown.source("guide.md") and standalone references, cross-checking all 4 surfaces across inspect, drift, update, and consistency.
+  const guideProbeMarker = join(consumer, ".guide-probe-executed");
+  await writeFile(join(consumer, "guide-fact.txt"), "exit=1\n", "utf8");
   await writeFile(
-    join(consumer, "verify-corrupt-inline-js.mjs"),
+    join(consumer, "scripts", "guide.test.ts"),
     [
       'import assert from "node:assert/strict";',
-      'import { readFile } from "node:fs/promises";',
-      'import { check, inspect, MaintenanceError, updateBaseline } from "@ykdz/dock";',
-      'const before = await readFile("inline.baseline.json");',
-      'for (const op of [() => inspect("inline.config.ts"), () => check("inline.config.ts"), () => updateBaseline("inline.config.ts")]) {',
-      "  await assert.rejects(op, (error) => {",
-      "    assert.ok(error instanceof MaintenanceError);",
-      '    assert.equal(error.code, "declaration-invalid");',
-      `    assert.ok(error.message.includes("README.md:${reorderedDirectiveLine}"), error.message);`,
-      "    return true;",
-      "  });",
-      '  assert.deepEqual(await readFile("inline.baseline.json"), before);',
-      "}",
+      'import { readFileSync, writeFileSync } from "node:fs";',
+      'import { test } from "node:test";',
+      `writeFileSync(${JSON.stringify(guideProbeMarker)}, "ran", "utf8");`,
+      'void test("guide example passes", () => {',
+      '  assert.equal(readFileSync("guide-fact.txt", "utf8").trim(), "exit=1");',
+      "});",
       "",
     ].join("\n"),
     "utf8",
   );
-  const jsCorrupt = run(process.execPath, [
-    join(consumer, "verify-corrupt-inline-js.mjs"),
+  await writeFile(
+    join(consumer, "guide.md"),
+    [
+      "# New Consumer Guide",
+      "",
+      '<!-- dock:bind {"id":"guide-exit-policy","with":["guide fact","guide-test"]} -->',
+      "",
+      "When verification fails, the CLI exits with status 1.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(consumer, "guide.config.ts"),
+    [
+      'import { dirname } from "node:path";',
+      'import { fileURLToPath } from "node:url";',
+      'import { defineConfig, file } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      "",
+      "const root = dirname(fileURLToPath(import.meta.url));",
+      'const guideRun = defineNodeTestRun("guide run", { files: ["scripts/guide.test.ts"] });',
+      "",
+      "export default defineConfig({",
+      "  root,",
+      '  baseline: "guide.baseline.json",',
+      "  plugins: [markdown, file, nodeTest],",
+      '  sources: [markdown.source("guide.md")],',
+      "  references: [",
+      '    file.from("guide-fact.txt").reference("guide fact"),',
+      '    nodeTestStatus("guide-test", guideRun, { file: "scripts/guide.test.ts", name: "guide example passes" }),',
+      "  ],",
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(consumer, "guide-tsconfig.json"),
+    JSON.stringify({
+      extends: "./tsconfig.json",
+      include: ["guide.config.ts", "scripts/guide.test.ts"],
+    }),
+  );
+  const guideTyped = run(bin("tsc"), [
+    "-p",
+    "guide-tsconfig.json",
+    "--pretty",
+    "false",
   ]);
-  assert.equal(jsCorrupt.status, 0, jsCorrupt.stdout + jsCorrupt.stderr);
+  assert.equal(guideTyped.status, 0, guideTyped.stdout + guideTyped.stderr);
+
+  // 1) inspect across all 4 surfaces without executing business tests
+  const guideInspectText = run(bin("dock"), [
+    "inspect",
+    "--config",
+    "guide.config.ts",
+  ]);
+  assert.equal(
+    guideInspectText.status,
+    0,
+    guideInspectText.stdout + guideInspectText.stderr,
+  );
+  assert.equal(guideInspectText.stderr, "");
+  assert.match(guideInspectText.stdout, /Scope: guide-exit-policy/);
+  assert.match(
+    guideInspectText.stdout,
+    /Binding declaration guide-exit-policy: \{"id":"guide-exit-policy","references":\["dock:bind:guide-exit-policy","guide fact","guide-test"\]\}/,
+  );
+  assert.match(
+    guideInspectText.stdout,
+    /Binding guide-exit-policy declaration source: guide\.md:3/,
+  );
+  await assert.rejects(readFile(guideProbeMarker, "utf8"), /ENOENT/);
+
+  const guideInspectStructured = run(bin("dock"), [
+    "inspect",
+    "--config",
+    "guide.config.ts",
+    "--output",
+    "structured",
+  ]);
+  assert.equal(
+    guideInspectStructured.status,
+    0,
+    guideInspectStructured.stdout + guideInspectStructured.stderr,
+  );
+  const guideInspectEnvelope = JSON.parse(guideInspectStructured.stdout) as {
+    schemaVersion?: unknown;
+    outputMode?: unknown;
+    kind?: unknown;
+    variant?: unknown;
+    data?: {
+      resolution?: {
+        context: {
+          bindings: { id: string; references: string[] }[];
+        };
+        declarationSources: {
+          bindings: Record<string, string[]>;
+        };
+      };
+    };
+  };
+  assert.equal(guideInspectEnvelope.schemaVersion, "3");
+  assert.equal(guideInspectEnvelope.outputMode, "structured");
+  assert.equal(guideInspectEnvelope.kind, "data");
+  assert.equal(guideInspectEnvelope.variant, "inspected");
+  assert.deepEqual(guideInspectEnvelope.data?.resolution?.context.bindings, [
+    {
+      id: "guide-exit-policy",
+      references: ["dock:bind:guide-exit-policy", "guide fact", "guide-test"],
+    },
+  ]);
+  assert.deepEqual(
+    guideInspectEnvelope.data?.resolution?.declarationSources.bindings[
+      "guide-exit-policy"
+    ],
+    ["guide.md:3"],
+  );
+  await assert.rejects(readFile(guideProbeMarker, "utf8"), /ENOENT/);
+
+  await runConsumerJs("verify-guide-inspect.mjs", [
+    'import assert from "node:assert/strict";',
+    'import { readFile } from "node:fs/promises";',
+    'import { inspect } from "@ykdz/dock";',
+    'const jsInspected = await inspect("guide.config.ts");',
+    "assert.deepEqual(jsInspected.context.bindings, [",
+    '  { id: "guide-exit-policy", references: ["dock:bind:guide-exit-policy", "guide fact", "guide-test"] },',
+    "]);",
+    "assert.deepEqual(",
+    '  jsInspected.declarationSources.bindings["guide-exit-policy"],',
+    '  ["guide.md:3"],',
+    ");",
+    `await assert.rejects(readFile(${JSON.stringify(guideProbeMarker)}, "utf8"), /ENOENT/);`,
+  ]);
+
+  // Establish initial baseline for guide.md, then introduce fact drift on guide.md prose (so nodeTest keeps passing).
+  const guideInitUpdate = run(bin("dock"), [
+    "baseline",
+    "update",
+    "--config",
+    "guide.config.ts",
+  ]);
+  assert.equal(
+    guideInitUpdate.status,
+    0,
+    guideInitUpdate.stdout + guideInitUpdate.stderr,
+  );
+  assert.equal(guideInitUpdate.stderr, "");
+  assert.match(guideInitUpdate.stdout, /Baseline updated\./);
+
+  await writeFile(
+    join(consumer, "guide.md"),
+    [
+      "# New Consumer Guide",
+      "",
+      '<!-- dock:bind {"id":"guide-exit-policy","with":["guide fact","guide-test"]} -->',
+      "",
+      "When verification fails, the CLI exits with non-zero status 1.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  // 2) Fact drift check across all 4 surfaces
+  const guideDriftText = run(bin("dock"), [
+    "check",
+    "--config",
+    "guide.config.ts",
+  ]);
+  assert.equal(
+    guideDriftText.status,
+    1,
+    guideDriftText.stdout + guideDriftText.stderr,
+  );
+  assert.equal(guideDriftText.stderr, "");
+  assert.match(guideDriftText.stdout, /Binding guide-exit-policy/);
+  assert.match(
+    guideDriftText.stdout,
+    /Change: dock:bind:guide-exit-policy fact: before .* after .* \(guide\.md:5\)/,
+  );
+
+  const guideDriftStructured = run(bin("dock"), [
+    "check",
+    "--config",
+    "guide.config.ts",
+    "--output",
+    "structured",
+  ]);
+  assert.equal(
+    guideDriftStructured.status,
+    1,
+    guideDriftStructured.stdout + guideDriftStructured.stderr,
+  );
+  const guideDriftReport = readReport(guideDriftStructured.stdout, "changed");
+  assert.equal(guideDriftReport.bindings[0]?.bindingId, "guide-exit-policy");
+
+  await runConsumerJs("verify-guide-drift.mjs", [
+    'import assert from "node:assert/strict";',
+    'import { check } from "@ykdz/dock";',
+    'const jsReport = await check("guide.config.ts");',
+    'assert.equal(jsReport.bindings[0]?.bindingId, "guide-exit-policy");',
+    'assert.equal(jsReport.bindings[0]?.consistency, "inconsistent");',
+    "assert.ok(",
+    '  jsReport.bindings[0]?.changes?.some((change) => change.kind === "fact" && change.referenceId === "dock:bind:guide-exit-policy"),',
+    ");",
+  ]);
+
+  // 3) Explicit baseline update across all 4 surfaces (re-introduce second drift to verify both CLI text/structured and JS updateBaseline)
+  const guideUpdateText = run(bin("dock"), [
+    "baseline",
+    "update",
+    "--config",
+    "guide.config.ts",
+  ]);
+  assert.equal(
+    guideUpdateText.status,
+    0,
+    guideUpdateText.stdout + guideUpdateText.stderr,
+  );
+  assert.equal(guideUpdateText.stderr, "");
+  assert.match(guideUpdateText.stdout, /Scope: guide-exit-policy/);
+  assert.match(guideUpdateText.stdout, /Baseline updated\./);
+
+  await writeFile(
+    join(consumer, "guide.md"),
+    [
+      "# New Consumer Guide",
+      "",
+      '<!-- dock:bind {"id":"guide-exit-policy","with":["guide fact","guide-test"]} -->',
+      "",
+      "When verification fails, Dock exits with status 1.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const guideUpdateStructured = run(bin("dock"), [
+    "baseline",
+    "update",
+    "--config",
+    "guide.config.ts",
+    "--output",
+    "structured",
+  ]);
+  assert.equal(
+    guideUpdateStructured.status,
+    0,
+    guideUpdateStructured.stdout + guideUpdateStructured.stderr,
+  );
+  const guideUpdateReport = readReport(guideUpdateStructured.stdout, "updated");
+  assert.equal(guideUpdateReport.bindings[0]?.bindingId, "guide-exit-policy");
+
+  await writeFile(
+    join(consumer, "guide.md"),
+    [
+      "# New Consumer Guide",
+      "",
+      '<!-- dock:bind {"id":"guide-exit-policy","with":["guide fact","guide-test"]} -->',
+      "",
+      "When verification fails, Dock always exits with status 1.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await runConsumerJs("verify-guide-update.mjs", [
+    'import assert from "node:assert/strict";',
+    'import { updateBaseline } from "@ykdz/dock";',
+    'const jsUpdated = await updateBaseline("guide.config.ts");',
+    'assert.equal(jsUpdated.status, "updated");',
+    'assert.equal(jsUpdated.report.bindings[0]?.bindingId, "guide-exit-policy");',
+  ]);
+
+  // 4) Restored consistency check across all 4 surfaces
+  const guideConsistentText = run(bin("dock"), [
+    "check",
+    "--config",
+    "guide.config.ts",
+  ]);
+  assert.equal(
+    guideConsistentText.status,
+    0,
+    guideConsistentText.stdout + guideConsistentText.stderr,
+  );
+  assert.equal(guideConsistentText.stderr, "");
+  assert.equal(
+    guideConsistentText.stdout,
+    "Scope: guide-exit-policy\nAll checked bindings are consistent with baseline.\n",
+  );
+
+  const guideConsistentStructured = run(bin("dock"), [
+    "check",
+    "--config",
+    "guide.config.ts",
+    "--output",
+    "structured",
+  ]);
+  assert.equal(
+    guideConsistentStructured.status,
+    0,
+    guideConsistentStructured.stdout + guideConsistentStructured.stderr,
+  );
+  const guideConsistentReport = readReport(
+    guideConsistentStructured.stdout,
+    "consistent",
+  );
+  assert.equal(
+    guideConsistentReport.bindings[0]?.bindingId,
+    "guide-exit-policy",
+  );
+
+  await runConsumerJs("verify-guide-consistent.mjs", [
+    'import assert from "node:assert/strict";',
+    'import { check } from "@ykdz/dock";',
+    'const jsConsistent = await check("guide.config.ts");',
+    'assert.equal(jsConsistent.bindings[0]?.bindingId, "guide-exit-policy");',
+    'assert.equal(jsConsistent.bindings[0]?.consistency, "consistent");',
+  ]);
 
   process.stdout.write(
     "README installed package, bootstrap baseline, and broken-example rejection verification passed.\n",
   );
 } finally {
   await rm(repository, { recursive: true, force: true });
+}
+
+function collectInstalledPackageNames(
+  value: unknown,
+  names: Set<string> = new Set<string>(),
+): Set<string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return names;
+  }
+  const packageValue = value as { readonly dependencies?: unknown };
+  if (
+    typeof packageValue.dependencies !== "object" ||
+    packageValue.dependencies === null ||
+    Array.isArray(packageValue.dependencies)
+  ) {
+    return names;
+  }
+  for (const [name, dependency] of Object.entries(packageValue.dependencies)) {
+    if (
+      typeof dependency === "object" &&
+      dependency !== null &&
+      !Array.isArray(dependency)
+    ) {
+      const entry = dependency as {
+        readonly version?: unknown;
+        readonly missing?: unknown;
+        readonly peerMissing?: unknown;
+      };
+      if (
+        typeof entry.version === "string" &&
+        entry.version.length > 0 &&
+        entry.missing !== true &&
+        entry.peerMissing !== true
+      ) {
+        names.add(name);
+      }
+    }
+    collectInstalledPackageNames(dependency, names);
+  }
+  return names;
+}
+
+async function runConsumerJs(
+  filename: string,
+  lines: readonly string[],
+): Promise<void> {
+  const scriptPath = join(consumer, filename);
+  await writeFile(scriptPath, `${lines.join("\n")}\n`, "utf8");
+  const result = run(process.execPath, [scriptPath]);
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 }
 
 function readReport(
