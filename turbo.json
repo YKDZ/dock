@@ -9,6 +9,7 @@
             "dock-core",
             "dock-host",
             "dock-vitest",
+            "dock-node-test",
             "dock-public"
           ]
         }
@@ -28,9 +29,20 @@
           "allow": ["dock-core", "dock-host", "dock-tooling"]
         }
       },
+      "dock-node-test": {
+        "dependencies": {
+          "allow": ["dock-core", "dock-host", "dock-tooling"]
+        }
+      },
       "dock-public": {
         "dependencies": {
-          "allow": ["dock-core", "dock-host", "dock-vitest", "dock-tooling"]
+          "allow": [
+            "dock-core",
+            "dock-host",
+            "dock-node-test",
+            "dock-vitest",
+            "dock-tooling"
+          ]
         }
       },
       "dock-tooling": {

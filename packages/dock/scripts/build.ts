@@ -23,6 +23,8 @@ const INTERNAL_ENTRIES: readonly InternalEntry[] = [
   { specifier: "@dock/core", packageSlug: "core" },
   { specifier: "@dock/host", packageSlug: "host" },
   { specifier: "@dock/host/maintenance-worker", packageSlug: "host" },
+  { specifier: "@dock/node-test", packageSlug: "node-test" },
+  { specifier: "@dock/node-test/node-reporter", packageSlug: "node-test" },
   { specifier: "@dock/vitest", packageSlug: "vitest" },
   { specifier: "@dock/vitest/setup", packageSlug: "vitest" },
   { specifier: "@dock/vitest/reporter", packageSlug: "vitest" },

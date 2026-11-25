@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { collectNodeRun } from "../../src/node-test/event-mapper.ts";
+import { collectNodeRun } from "../src/event-mapper.ts";
 
 void test("returns incomplete run record when native summary conflicts with process exit code", () => {
   const file = "/consumer/test/status.test.mts";
