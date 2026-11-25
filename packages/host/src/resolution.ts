@@ -2,11 +2,18 @@ import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 import {
-  assertBaseline,
+  BaselineValidationError,
+  cstToJsonValue,
+  isWellFormedJsonString,
+  JsonSyntaxError,
+  parseBaselineJson,
   resolveCheckScope,
   type Baseline,
+  type BaselineValidationIssue,
   type BindingDefinition,
   type CheckContext,
+  type JsonCstNode,
+  type JsonPropertyNode,
   type JsonValue,
   type ReferenceDefinition,
 } from "@dock/core";
@@ -411,6 +418,178 @@ function resolveMaintenanceScope(
   }
 }
 
+const HOST_TARGET_ALLOWED_KEYS = new Set(["pluginId", "target", "fileInfo"]);
+const HOST_TARGET_REQUIRED_KEYS = ["pluginId", "target"] as const;
+
+function validateHostBaselineTarget(
+  node: JsonCstNode,
+  basePath: string,
+  reportIssue: (issue: BaselineValidationIssue) => void,
+): JsonValue | undefined {
+  if (node.kind !== "object") {
+    reportIssue({
+      path: basePath,
+      code: "invalid-type",
+      message: `Target wrapper at ${basePath} must be an object with pluginId, target, and fileInfo.`,
+      line: node.span.start.line,
+    });
+    return undefined;
+  }
+
+  const props = new Map<string, JsonPropertyNode>();
+  const duplicatedKeys = new Set<string>();
+  const invalidKeys = new Set<string>();
+
+  for (const prop of node.properties) {
+    const fieldPath = `${basePath}.${prop.key}`;
+    if (!isWellFormedJsonString(prop.key)) {
+      if (!invalidKeys.has(prop.key)) {
+        invalidKeys.add(prop.key);
+        reportIssue({
+          path: fieldPath,
+          code: "invalid-json-value",
+          message: `Property key at ${fieldPath} contains an unpaired surrogate.`,
+          line: prop.keySpan.start.line,
+        });
+      }
+      continue;
+    }
+    const first = props.get(prop.key);
+    if (first !== undefined) {
+      if (!duplicatedKeys.has(prop.key)) {
+        duplicatedKeys.add(prop.key);
+        reportIssue({
+          path: fieldPath,
+          code: "duplicate-key",
+          message: `Duplicate key ${JSON.stringify(prop.key)} at ${fieldPath} (lines ${first.keySpan.start.line} and ${prop.keySpan.start.line}).`,
+          line: prop.keySpan.start.line,
+        });
+      }
+      continue;
+    }
+    props.set(prop.key, prop);
+    if (!HOST_TARGET_ALLOWED_KEYS.has(prop.key)) {
+      reportIssue({
+        path: fieldPath,
+        code: "unknown-field",
+        message: `Unknown field ${JSON.stringify(prop.key)} at ${fieldPath}.`,
+        line: prop.keySpan.start.line,
+      });
+    }
+  }
+
+  for (const reqKey of HOST_TARGET_REQUIRED_KEYS) {
+    if (!props.has(reqKey) && !invalidKeys.has(reqKey)) {
+      reportIssue({
+        path: `${basePath}.${reqKey}`,
+        code: "missing-field",
+        message: `Missing required field ${JSON.stringify(reqKey)} at ${basePath}.`,
+        line: node.span.start.line,
+      });
+    }
+  }
+
+  let pluginId: string | undefined;
+  const pluginIdProp = props.get("pluginId");
+  if (pluginIdProp !== undefined && !duplicatedKeys.has("pluginId")) {
+    const pluginIdPath = `${basePath}.pluginId`;
+    if (
+      pluginIdProp.value.kind !== "string" ||
+      pluginIdProp.value.value.length === 0
+    ) {
+      reportIssue({
+        path: pluginIdPath,
+        code:
+          pluginIdProp.value.kind === "string" ? "invalid-id" : "invalid-type",
+        message: `Target pluginId at ${pluginIdPath} must be a non-empty string.`,
+        line: pluginIdProp.value.span.start.line,
+      });
+    } else if (!isWellFormedJsonString(pluginIdProp.value.value)) {
+      reportIssue({
+        path: pluginIdPath,
+        code: "invalid-json-value",
+        message: `Target pluginId at ${pluginIdPath} contains an unpaired surrogate.`,
+        line: pluginIdProp.value.span.start.line,
+      });
+    } else {
+      pluginId = pluginIdProp.value.value;
+    }
+  }
+
+  let target: JsonValue | undefined;
+  const targetProp = props.get("target");
+  if (targetProp !== undefined && !duplicatedKeys.has("target")) {
+    try {
+      target = cstToJsonValue(targetProp.value);
+    } catch (error) {
+      reportIssue({
+        path: `${basePath}.target`,
+        code: "invalid-json-value",
+        message: `${errorMessage(error)} at ${basePath}.target.`,
+        line: targetProp.value.span.start.line,
+      });
+    }
+  }
+
+  let fileInfo: string | null | undefined;
+  let fileInfoValid = true;
+  const fileInfoProp = props.get("fileInfo");
+  if (fileInfoProp !== undefined) {
+    if (duplicatedKeys.has("fileInfo")) {
+      fileInfoValid = false;
+    } else {
+      const fileInfoPath = `${basePath}.fileInfo`;
+      if (fileInfoProp.value.kind === "null") {
+        fileInfo = null;
+      } else if (
+        fileInfoProp.value.kind !== "string" ||
+        fileInfoProp.value.value.length === 0
+      ) {
+        fileInfoValid = false;
+        reportIssue({
+          path: fileInfoPath,
+          code:
+            fileInfoProp.value.kind === "string"
+              ? "invalid-id"
+              : "invalid-type",
+          message: `Target fileInfo at ${fileInfoPath} must be a non-empty string or null.`,
+          line: fileInfoProp.value.span.start.line,
+        });
+      } else if (!isWellFormedJsonString(fileInfoProp.value.value)) {
+        fileInfoValid = false;
+        reportIssue({
+          path: fileInfoPath,
+          code: "invalid-json-value",
+          message: `Target fileInfo at ${fileInfoPath} contains an unpaired surrogate.`,
+          line: fileInfoProp.value.span.start.line,
+        });
+      } else {
+        fileInfo = fileInfoProp.value.value;
+      }
+    }
+  }
+
+  if (pluginId === undefined || target === undefined || !fileInfoValid) {
+    return undefined;
+  }
+  return {
+    pluginId,
+    target,
+    ...(fileInfo === undefined ? {} : { fileInfo }),
+  };
+}
+
+function formatBaselineIssue(issue: BaselineValidationIssue): string {
+  if (
+    issue.line !== undefined &&
+    issue.code !== "duplicate-key" &&
+    issue.code !== "invalid-version"
+  ) {
+    return `${issue.message} (line ${issue.line})`;
+  }
+  return issue.message;
+}
+
 async function readBaseline(path: string): Promise<Baseline | undefined> {
   let content: string;
   try {
@@ -424,26 +603,31 @@ async function readBaseline(path: string): Promise<Baseline | undefined> {
     );
   }
 
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(content) as unknown;
+    return parseBaselineJson(content, {
+      validateTargetDefinition: validateHostBaselineTarget,
+    });
   } catch (error) {
-    throw new MaintenanceError(
-      "baseline-invalid",
-      `Baseline ${path} is not valid JSON: ${errorMessage(error)}`,
-      { cause: error },
-    );
-  }
-  try {
-    assertBaseline(parsed as Baseline);
-  } catch (error) {
+    if (error instanceof JsonSyntaxError) {
+      throw new MaintenanceError(
+        "baseline-invalid",
+        `Baseline ${path} is not valid JSON (line ${error.line}, column ${error.column}): ${error.message}`,
+        { cause: error },
+      );
+    }
+    if (error instanceof BaselineValidationError) {
+      const message =
+        error.issues.length === 1
+          ? `Invalid baseline format at ${path}: ${formatBaselineIssue(error.issues[0]!)}`
+          : `Invalid baseline format at ${path}:\n${error.issues.map((issue) => `  - ${formatBaselineIssue(issue)}`).join("\n")}`;
+      throw new MaintenanceError("baseline-invalid", message, { cause: error });
+    }
     throw new MaintenanceError(
       "baseline-invalid",
       `Invalid baseline format at ${path}: ${errorMessage(error)}`,
       { cause: error },
     );
   }
-  return parsed as Baseline;
 }
 
 function sourceText(source: DeclarationSource): string {

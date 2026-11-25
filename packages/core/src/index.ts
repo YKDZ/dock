@@ -2,6 +2,8 @@ export type {
   BaselineReferenceFact,
   BaselineUpdateIssue,
   BaselineUpdateOutcome,
+  BaselineValidationIssue,
+  BaselineValidationIssueCode,
   Baseline,
   BindingCheckResult,
   BindingBaseline,
@@ -15,6 +17,7 @@ export type {
   CurrentReferenceFact,
   DeclarationCompleteness,
   MemberDiscoveryCompleteness,
+  ParseBaselineJsonOptions,
   TextRange,
   CheckError,
   JsonValue,
@@ -22,8 +25,25 @@ export type {
   ReferenceResult,
   ReferenceMemberResult,
 } from "./contracts.ts";
-export { assertBaseline } from "./contracts.ts";
+export {
+  assertBaseline,
+  BaselineValidationError,
+  parseBaselineJson,
+} from "./contracts.ts";
 export { check, resolveCheckScope } from "./check.ts";
+export type {
+  JsonCstNode,
+  JsonCstValue,
+  JsonPosition,
+  JsonPropertyNode,
+  JsonSpan,
+} from "./json-cst.ts";
+export {
+  cstToJsonValue,
+  isWellFormedJsonString,
+  JsonSyntaxError,
+  parseJsonDocument,
+} from "./json-cst.ts";
 export {
   assertJsonValue,
   canonicalJson,

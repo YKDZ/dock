@@ -156,6 +156,7 @@ export async function verifyInstalledBase(dockTarball: string): Promise<void> {
       ["cli-contract-and-static-plugins", verifyCliAndStaticPlugins],
       ["node-test-real-processes", verifyNodeTestRealProcesses],
       ["legacy-v2-hard-migration", verifyLegacyBaselineHardMigration],
+      ["v3-baseline-diagnostics", verifyV3BaselineDiagnostics],
     ];
 
     for (const [index, [name, verify]] of scenarios.entries()) {
@@ -275,9 +276,14 @@ async function verifyMissingVitestPeerBehavior(
     `import {`,
     `  assertBaseline,`,
     `  assertJsonValue,`,
+    `  BaselineValidationError,`,
     `  canonicalJson,`,
     `  check as checkCore,`,
+    `  cstToJsonValue,`,
     `  isJsonValue,`,
+    `  JsonSyntaxError,`,
+    `  parseBaselineJson,`,
+    `  parseJsonDocument,`,
     `  updateBaseline as updateCoreBaseline,`,
     `  type Baseline,`,
     `  type CheckError,`,
@@ -307,6 +313,8 @@ async function verifyMissingVitestPeerBehavior(
     `void valueCheck; void typedConfig; void typedCoreReport; void typedCoreError;`,
     `void check; void inspect; void readReference; void updateBaseline;`,
     `void canonicalJson; void isJsonValue; void updateCoreBaseline;`,
+    `void parseJsonDocument; void cstToJsonValue; void parseBaselineJson;`,
+    `void JsonSyntaxError; void BaselineValidationError;`,
     `void markdownPluginId; void typescriptPluginId; void nodeTestPluginId;`,
     `export type { CheckReport };`,
   ];
@@ -2299,6 +2307,244 @@ async function verifyLegacyBaselineHardMigration(
   );
   assert.equal(recheckStructured.code, 0, recheckStructured.stderr);
   assert.equal(parseEnvelope(recheckStructured.stdout).variant, "consistent");
+}
+
+async function verifyV3BaselineDiagnostics(consumer: string): Promise<void> {
+  await writeFile(join(consumer, "plain.txt"), "fact-v1\n", "utf8");
+  await writeFile(
+    join(consumer, "collection.json"),
+    JSON.stringify({
+      members: [
+        {
+          id: "member alpha",
+          value: { status: "passed", customBusinessField: "keep-me", rank: 1 },
+        },
+      ],
+    }),
+    "utf8",
+  );
+  await writeFile(
+    join(consumer, "dock.config.mjs"),
+    [
+      'import { readFileSync } from "node:fs";',
+      'import { join } from "node:path";',
+      'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+      "",
+      "const plugin = definePlugin({",
+      '  id: "consumer:v3-diagnostics",',
+      "  validate() {},",
+      "  fileInfo(reference) {",
+      '    return reference.target === "collection.json" ? "collection.json" : "plain.txt";',
+      "  },",
+      "  collect(request, context) {",
+      "    return {",
+      "      results: request.selectedReferences.map((reference) => {",
+      '        if (reference.target === "collection.json") {',
+      '          const data = JSON.parse(readFileSync(join(context.root, "collection.json"), "utf8"));',
+      "          return {",
+      "            referenceId: reference.id,",
+      '            kind: "collection",',
+      '            collection: { completeness: "complete", members: data.members },',
+      "          };",
+      "        }",
+      '        const content = readFileSync(join(context.root, "plain.txt"), "utf8").trim();',
+      "        return {",
+      "          referenceId: reference.id,",
+      '          kind: "value",',
+      "          value: { text: content, customPlainField: { team: 'docs', ok: true } },",
+      "        };",
+      "      }),",
+      "    };",
+      "  },",
+      "});",
+      "",
+      "export default defineConfig({",
+      "  plugins: [plugin],",
+      "  bindings: [",
+      '    binding("docs policy.v1", [',
+      '      createReference("consumer:v3-diagnostics", "plain fact", "plain.txt"),',
+      '      createReference("consumer:v3-diagnostics", "suite.facts", "collection.json"),',
+      "    ]),",
+      "  ],",
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const bin = dockBin(consumer);
+  const baselinePath = join(consumer, "dock.baseline.json");
+
+  const initialUpdate = await run(
+    bin,
+    ["baseline", "update", "--config", "dock.config.mjs"],
+    consumer,
+  );
+  assert.equal(
+    initialUpdate.code,
+    0,
+    initialUpdate.stdout + initialUpdate.stderr,
+  );
+  const validBaselineRaw = await readFile(baselinePath, "utf8");
+
+  // Positive case: custom business fields on plain value and member.value stay consistent, then report normal fact drift.
+  const consistentCheck = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
+    consumer,
+  );
+  assert.equal(consistentCheck.code, 0, consistentCheck.stderr);
+  assert.equal(parseEnvelope(consistentCheck.stdout).variant, "consistent");
+
+  await writeFile(join(consumer, "plain.txt"), "fact-v2\n", "utf8");
+  const driftedCheck = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
+    consumer,
+  );
+  assert.equal(driftedCheck.code, 1);
+  assert.equal(driftedCheck.stderr, "");
+  const driftedEnvelope = parseEnvelope(driftedCheck.stdout);
+  assert.equal(driftedEnvelope.kind, "data");
+  assert.equal(driftedEnvelope.variant, "changed");
+
+  await writeFile(join(consumer, "plain.txt"), "fact-v1\n", "utf8");
+
+  // Verify JS API check vs baseline-invalid error via child Node process importing installed @ykdz/dock.
+  await writeFile(
+    join(consumer, "verify-js.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFile } from "node:fs/promises";',
+      'import { check, MaintenanceError, updateBaseline } from "@ykdz/dock";',
+      "const mode = process.argv[2];",
+      'if (mode === "consistent") {',
+      '  const report = await check("./dock.config.mjs");',
+      '  assert.equal(report.bindings[0]?.consistency, "consistent");',
+      "} else {",
+      '  const before = await readFile("./dock.baseline.json", "utf8");',
+      '  await assert.rejects(() => check("./dock.config.mjs"), (err) => err instanceof MaintenanceError && err.code === "baseline-invalid");',
+      '  await assert.rejects(() => updateBaseline("./dock.config.mjs"), (err) => err instanceof MaintenanceError && err.code === "baseline-invalid");',
+      '  assert.equal(await readFile("./dock.baseline.json", "utf8"), before);',
+      "}",
+    ].join("\n"),
+    "utf8",
+  );
+  const jsConsistent = await run(
+    process.execPath,
+    [join(consumer, "verify-js.mjs"), "consistent"],
+    consumer,
+  );
+  assert.equal(jsConsistent.code, 0, jsConsistent.stdout + jsConsistent.stderr);
+
+  // 1) Missing required reference fact vs extra reference fact.
+  const missingObj = JSON.parse(validBaselineRaw) as {
+    bindings: Record<string, { references: Record<string, unknown> }>;
+  };
+  delete missingObj.bindings["docs policy.v1"]!.references["suite.facts"];
+  const missingRaw = `${JSON.stringify(missingObj, null, 2)}\n`;
+  await writeFile(baselinePath, missingRaw, "utf8");
+
+  for (const args of [
+    ["check", "--config", "dock.config.mjs"],
+    ["baseline", "update", "--config", "dock.config.mjs"],
+  ]) {
+    const failed = await run(bin, args, consumer);
+    assert.equal(failed.code, 1);
+    assert.equal(failed.stdout, "");
+    assert.match(failed.stderr, /Maintenance failed \(baseline-invalid\)/);
+    assert.match(failed.stderr, /dock\.baseline\.json/);
+    assert.match(failed.stderr, /docs policy\.v1/);
+    assert.match(failed.stderr, /suite\.facts/);
+    assert.match(failed.stderr, /missing required reference fact/i);
+    assert.equal(await readFile(baselinePath, "utf8"), missingRaw);
+  }
+
+  const extraObj = JSON.parse(validBaselineRaw) as {
+    bindings: Record<string, { references: Record<string, unknown> }>;
+  };
+  extraObj.bindings["docs policy.v1"]!.references["extra.fact"] = {
+    definition: {
+      id: "extra.fact",
+      target: {
+        pluginId: "consumer:v3-diagnostics",
+        target: "x",
+        fileInfo: null,
+      },
+    },
+    value: "extra",
+  };
+  const extraRaw = `${JSON.stringify(extraObj, null, 2)}\n`;
+  await writeFile(baselinePath, extraRaw, "utf8");
+
+  for (const args of [
+    ["check", "--config", "dock.config.mjs", "--output", "structured"],
+    [
+      "baseline",
+      "update",
+      "--config",
+      "dock.config.mjs",
+      "--output",
+      "structured",
+    ],
+  ]) {
+    const failed = await run(bin, args, consumer);
+    assert.equal(failed.code, 1);
+    assert.equal(failed.stdout, "");
+    const envelope = parseEnvelope(failed.stderr);
+    assert.equal(envelope.kind, "failure");
+    assert.equal(envelope.variant, "maintenanceFailed");
+    assert.equal(envelope.data?.code, "baseline-invalid");
+    assert.match(envelope.data?.message ?? "", /unexpected reference fact/i);
+    assert.doesNotMatch(envelope.data?.message ?? "", /missing required/i);
+    assert.match(envelope.data?.message ?? "", /docs policy\.v1/);
+    assert.match(envelope.data?.message ?? "", /extra\.fact/);
+    assert.equal(await readFile(baselinePath, "utf8"), extraRaw);
+  }
+
+  // 2) Duplicate keys + unknown fields on Dock-owned records and member-collection records + JS API rejection.
+  const prettyRaw = `${JSON.stringify(JSON.parse(validBaselineRaw), null, 2)}\n`;
+  const multiCorrupted = prettyRaw
+    .replace('"version": 3', '"unknownRoot": true,\n  "version": 3')
+    .replace('"value": {', '"vaule": "typo",\n          "value": {')
+    .replace(
+      '"id": "plain fact",',
+      '"id": "plain fact",\n              "id": "plain fact",',
+    )
+    .replace(
+      '"id": "member alpha",',
+      '"id": "member alpha",\n                "memberExtra": "bad",',
+    );
+  assert.notEqual(multiCorrupted, prettyRaw);
+  await writeFile(baselinePath, multiCorrupted, "utf8");
+
+  const multiText = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs"],
+    consumer,
+  );
+  assert.equal(multiText.code, 1);
+  assert.equal(multiText.stdout, "");
+  assert.match(multiText.stderr, /Maintenance failed \(baseline-invalid\)/);
+  assert.match(multiText.stderr, /\$\.unknownRoot/);
+  assert.match(multiText.stderr, /references\["plain fact"\]\.vaule/);
+  assert.match(multiText.stderr, /references\["plain fact"\]\.definition\.id/);
+  assert.match(multiText.stderr, /value\[0\]\.memberExtra/);
+
+  const multiUpdate = await run(
+    bin,
+    ["baseline", "update", "--config", "dock.config.mjs"],
+    consumer,
+  );
+  assert.equal(multiUpdate.code, 1);
+  assert.equal(await readFile(baselinePath, "utf8"), multiCorrupted);
+
+  const jsCorrupted = await run(
+    process.execPath,
+    [join(consumer, "verify-js.mjs"), "corrupted"],
+    consumer,
+  );
+  assert.equal(jsCorrupted.code, 0, jsCorrupted.stdout + jsCorrupted.stderr);
 }
 
 function requireReport(envelope: CliEnvelope): MaintenanceReport {

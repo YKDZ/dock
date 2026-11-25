@@ -1097,3 +1097,193 @@ void test("worker config path maintenance supports reference/file scope selectio
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("host inspect, check, and updateBaseline reject corrupted V3 baselines with field paths, duplicate keys, missing vs extra refs, and preserve file bytes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-v3-baseline-diag-"));
+  const baselinePath = join(root, "dock.baseline.json");
+
+  try {
+    await writeFile(join(root, "alpha.txt"), "alpha\n", "utf8");
+    await writeFile(join(root, "beta.txt"), "beta\n", "utf8");
+
+    type CustomFileRef = Reference<
+      "fixture:custom-facts",
+      string,
+      string,
+      { rawText: string; customMeta: { owner: string; priority: number } }
+    >;
+    const customFilePlugin = definePlugin({
+      id: "fixture:custom-facts",
+      validate(reference: CustomFileRef) {
+        if (
+          typeof reference.target !== "string" ||
+          reference.target.length === 0
+        ) {
+          throw new TypeError("Target must be a non-empty string.");
+        }
+      },
+      fileInfo(reference: CustomFileRef) {
+        return reference.target;
+      },
+      async collect(request: PluginRequest<CustomFileRef>) {
+        return {
+          results: request.selectedReferences.map((reference) => ({
+            referenceId: reference.id,
+            kind: "value" as const,
+            value: {
+              rawText: reference.target,
+              customMeta: { owner: "docs", priority: 1 },
+            },
+          })),
+        };
+      },
+    });
+    const customCollectionPlugin = definePlugin({
+      id: "fixture:custom-collection",
+      validate() {},
+      async collect(request) {
+        return {
+          results: request.selectedReferences.map((reference) => ({
+            referenceId: reference.id,
+            kind: "collection" as const,
+            collection: {
+              completeness: "complete" as const,
+              members: [
+                {
+                  id: "member one",
+                  value: {
+                    status: "passed",
+                    businessTag: "smoke",
+                    metrics: { retries: 0 },
+                  },
+                },
+              ],
+            },
+          })),
+        };
+      },
+    });
+
+    const config = defineConfig({
+      root,
+      plugins: [customFilePlugin, customCollectionPlugin],
+      bindings: [
+        binding("main policy", [
+          createReference("fixture:custom-facts", "alpha ref", "alpha.txt"),
+          createReference("fixture:custom-facts", "beta ref", "beta.txt"),
+          createReference("fixture:custom-collection", "collection-ref", {
+            suite: "unit",
+            customTargetProp: true,
+          }),
+        ]),
+      ],
+    });
+
+    const created = await updateBaseline(config);
+    assert.equal(created.status, "updated");
+    const validRaw = await readFile(baselinePath, "utf8");
+
+    // Valid baseline with custom business fields in plain value, member.value, and target.target passes check cleanly.
+    const validCheck = await check(config);
+    assert.equal(validCheck.bindings[0]?.consistency, "consistent");
+
+    // 1) Missing required reference fact vs unexpected extra reference fact.
+    const missingObj = JSON.parse(validRaw) as {
+      bindings: Record<string, { references: Record<string, unknown> }>;
+    };
+    delete missingObj.bindings["main policy"]!.references["beta ref"];
+    const missingRaw = `${JSON.stringify(missingObj, null, 2)}\n`;
+    await writeFile(baselinePath, missingRaw, "utf8");
+
+    for (const op of [
+      () => inspect(config),
+      () => check(config),
+      () => updateBaseline(config),
+    ]) {
+      await assert.rejects(op, (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "baseline-invalid");
+        assert.ok(error.message.includes(baselinePath));
+        assert.match(error.message, /main policy/);
+        assert.match(error.message, /beta ref/);
+        assert.match(error.message, /missing required reference fact/i);
+        return true;
+      });
+      assert.equal(await readFile(baselinePath, "utf8"), missingRaw);
+    }
+
+    const extraObj = JSON.parse(validRaw) as {
+      bindings: Record<string, { references: Record<string, unknown> }>;
+    };
+    extraObj.bindings["main policy"]!.references["stray ref"] = {
+      definition: {
+        id: "stray ref",
+        target: {
+          pluginId: "fixture:custom-facts",
+          target: "x",
+          fileInfo: null,
+        },
+      },
+      value: "stray",
+    };
+    const extraRaw = `${JSON.stringify(extraObj, null, 2)}\n`;
+    await writeFile(baselinePath, extraRaw, "utf8");
+
+    for (const op of [
+      () => inspect(config),
+      () => check(config),
+      () => updateBaseline(config),
+    ]) {
+      await assert.rejects(op, (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "baseline-invalid");
+        assert.ok(error.message.includes(baselinePath));
+        assert.match(error.message, /main policy/);
+        assert.match(error.message, /stray ref/);
+        assert.match(error.message, /unexpected reference fact/i);
+        assert.doesNotMatch(error.message, /missing required/i);
+        return true;
+      });
+      assert.equal(await readFile(baselinePath, "utf8"), extraRaw);
+    }
+
+    // 2) Raw duplicate keys + unknown fields across Dock-owned records, host target wrapper, and member-collection items.
+    const prettyValidRaw = `${JSON.stringify(JSON.parse(validRaw), null, 2)}\n`;
+    const corruptedMultiRaw = prettyValidRaw
+      .replace('"version": 3', '"extraRoot": true,\n  "version": 3')
+      .replace(
+        '"fileInfo": "alpha.txt"',
+        '"fileInfo": "alpha.txt",\n              "wrapperExtra": 1',
+      )
+      .replace(
+        '"id": "beta ref",',
+        '"id": "beta ref",\n              "id": "beta ref",',
+      )
+      .replace(
+        '"id": "member one",',
+        '"id": "member one",\n                "memberExtra": true,',
+      );
+    assert.notEqual(corruptedMultiRaw, prettyValidRaw);
+    await writeFile(baselinePath, corruptedMultiRaw, "utf8");
+
+    for (const op of [
+      () => inspect(config),
+      () => check(config),
+      () => updateBaseline(config),
+    ]) {
+      await assert.rejects(op, (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "baseline-invalid");
+        assert.ok(error.message.includes(baselinePath));
+        assert.match(error.message, /\$\.extraRoot/);
+        assert.match(error.message, /definition\.target\.wrapperExtra/);
+        assert.match(error.message, /references\["beta ref"\]\.definition\.id/);
+        assert.match(error.message, /value\[0\]\.memberExtra/);
+        return true;
+      });
+      assert.equal(await readFile(baselinePath, "utf8"), corruptedMultiRaw);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
