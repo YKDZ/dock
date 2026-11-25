@@ -29,6 +29,7 @@ type NodeDiagnosticData = {
 
 type NodeRunDiagnostic = {
   identity: string;
+  configuration: { framework: string };
   commandAttempts: number;
   testExecutions: number;
   failedCommands: number;
@@ -102,23 +103,6 @@ try {
     installedPackages.has("@boringparts/dock"),
     "Consumer must install @boringparts/dock from the tarball.",
   );
-  for (const forbidden of [
-    "@dock/core",
-    "@dock/host",
-    "@dock/text-selection",
-    "@dock/file",
-    "@dock/markdown",
-    "@dock/typescript",
-    "@dock/node-test",
-    "@dock/vitest",
-    "@dock/tooling-config",
-  ]) {
-    assert.equal(
-      installedPackages.has(forbidden),
-      false,
-      `External consumer node_modules must not contain ${forbidden}`,
-    );
-  }
   for (const name of installedPackages) {
     assert.equal(
       name.startsWith("@dock/"),
@@ -200,6 +184,7 @@ try {
   const nodeRun = diagnostic.runs[0];
   assert.ok(nodeRun, "README structured output must include a Node run entry.");
   assert.equal(nodeRun.identity, "README example");
+  assert.equal(nodeRun.configuration.framework, "dock:node-test");
   assert.equal(nodeRun.commandAttempts, 1);
   assert.equal(nodeRun.testExecutions, 1);
   assert.equal(nodeRun.failedCommands, 0);

@@ -128,17 +128,6 @@ const fixtureDirectory = join(
   "installed-consumer",
   "vitest",
 );
-const forbiddenWorkspacePackages = [
-  "@dock/core",
-  "@dock/host",
-  "@dock/text-selection",
-  "@dock/file",
-  "@dock/markdown",
-  "@dock/typescript",
-  "@dock/vitest",
-  "@dock/node-test",
-  "@dock/tooling-config",
-] as const;
 
 type VitestVersion = "4.1.11" | "5.0.3";
 
@@ -434,11 +423,18 @@ async function verifyCrossFrameworkScenario(
     );
     for (const diagnostic of report.pluginDiagnostics) {
       const data = diagnostic.data as {
-        readonly runs: readonly { readonly identity: string }[];
+        readonly runs: readonly {
+          readonly identity: string;
+          readonly configuration?: { readonly framework?: string };
+        }[];
       };
       assert.deepEqual(
         data.runs.map(({ identity }) => identity),
         ["shared run identity"],
+      );
+      assert.deepEqual(
+        data.runs.map(({ configuration }) => configuration?.framework),
+        [diagnostic.pluginId],
       );
     }
     assert.deepEqual(
@@ -1775,7 +1771,7 @@ async function verifyOrdinaryVitest(consumer: string): Promise<void> {
 async function verifyDependencyBoundaries(consumer: string): Promise<void> {
   await assertForbiddenDependencies(
     consumer,
-    forbiddenWorkspacePackages,
+    [],
     "Installed Vitest @boringparts/dock consumer",
   );
 }

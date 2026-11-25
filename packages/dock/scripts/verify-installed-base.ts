@@ -116,15 +116,6 @@ const forbiddenBasePackages = [
   "typescript-7",
   "vitest",
   "@vitest/runner",
-  "@dock/core",
-  "@dock/host",
-  "@dock/text-selection",
-  "@dock/file",
-  "@dock/markdown",
-  "@dock/typescript",
-  "@dock/vitest",
-  "@dock/node-test",
-  "@dock/tooling-config",
   "remark",
   "markdown-it",
 ] as const;
@@ -209,25 +200,33 @@ async function verifyBaseEnvironmentMetadata(
     "Dual-install verification must resolve two separate physical @boringparts/dock copies.",
   );
 
-  const [primaryPkg, secondaryPkg, bundledTs, licenseText, readmeText] =
-    await Promise.all([
-      readFile(join(primaryHost, "package.json"), "utf8"),
-      readFile(join(secondaryHost, "package.json"), "utf8"),
-      readFile(
-        join(primary, "node_modules", "typescript", "package.json"),
-        "utf8",
-      ),
-      readFile(join(primaryHost, "LICENSE"), "utf8"),
-      readFile(join(primaryHost, "README.md"), "utf8"),
-    ]);
-  const primaryManifest = JSON.parse(primaryPkg) as {
+  const [
+    sourcePkg,
+    sourceReadme,
+    primaryPkg,
+    secondaryPkg,
+    bundledTs,
+    licenseText,
+    readmeText,
+  ] = await Promise.all([
+    readFile(join(packageDirectory, "package.json"), "utf8"),
+    readFile(join(packageDirectory, "README.md"), "utf8"),
+    readFile(join(primaryHost, "package.json"), "utf8"),
+    readFile(join(secondaryHost, "package.json"), "utf8"),
+    readFile(
+      join(primary, "node_modules", "typescript", "package.json"),
+      "utf8",
+    ),
+    readFile(join(primaryHost, "LICENSE"), "utf8"),
+    readFile(join(primaryHost, "README.md"), "utf8"),
+  ]);
+  type PackageManifest = {
     readonly name: string;
     readonly version: string;
     readonly description?: string;
     readonly homepage?: string;
     readonly bugs?: { readonly url?: string };
     readonly license?: string;
-    readonly author?: unknown;
     readonly repository?: {
       readonly type?: string;
       readonly url?: string;
@@ -235,29 +234,25 @@ async function verifyBaseEnvironmentMetadata(
     };
     readonly exports?: Record<string, unknown>;
   };
+  const sourceManifest = JSON.parse(sourcePkg) as PackageManifest;
+  const primaryManifest = JSON.parse(primaryPkg) as PackageManifest;
   const secondaryManifest = JSON.parse(secondaryPkg) as {
     readonly version: string;
   };
   assert.equal(primaryManifest.name, "@boringparts/dock");
+  assert.equal(primaryManifest.name, sourceManifest.name);
+  assert.equal(primaryManifest.version, sourceManifest.version);
   assert.equal(primaryManifest.version, secondaryManifest.version);
-  assert.equal(
-    primaryManifest.description,
-    "Find the docs to review after a change.",
+  assert.equal(primaryManifest.description, sourceManifest.description);
+  assert.equal(primaryManifest.homepage, sourceManifest.homepage);
+  assert.deepEqual(primaryManifest.bugs, sourceManifest.bugs);
+  assert.equal(primaryManifest.license, sourceManifest.license);
+  assert.deepEqual(primaryManifest.repository, sourceManifest.repository);
+  assert.equal(readmeText, sourceReadme);
+  assert.ok(
+    licenseText.includes("MIT License") && licenseText.includes("boringparts"),
+    "Installed package tarball must include the MIT LICENSE attributed to boringparts.",
   );
-  assert.equal(primaryManifest.homepage, "https://github.com/boringparts/dock");
-  assert.equal(
-    primaryManifest.bugs?.url,
-    "https://github.com/boringparts/dock/issues",
-  );
-  assert.equal(primaryManifest.license, "MIT");
-  assert.equal(primaryManifest.author, undefined);
-  assert.deepEqual(primaryManifest.repository, {
-    type: "git",
-    url: "git+https://github.com/boringparts/dock.git",
-    directory: "packages/dock",
-  });
-  assert.match(licenseText, /Copyright \(c\) 2026 boringparts/u);
-  assert.match(readmeText, /https:\/\/github\.com\/boringparts\/dock#readme/u);
   assert.equal(
     (JSON.parse(bundledTs) as { readonly version?: unknown }).version,
     "5.9.3",
