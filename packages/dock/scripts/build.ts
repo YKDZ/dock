@@ -23,6 +23,8 @@ const INTERNAL_ENTRIES: readonly InternalEntry[] = [
   { specifier: "@dock/core", packageSlug: "core" },
   { specifier: "@dock/host", packageSlug: "host" },
   { specifier: "@dock/host/maintenance-worker", packageSlug: "host" },
+  { specifier: "@dock/text-selection", packageSlug: "text-selection" },
+  { specifier: "@dock/file", packageSlug: "file" },
 ];
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));

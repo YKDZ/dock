@@ -6,17 +6,22 @@ import { test } from "node:test";
 import { pathToFileURL } from "node:url";
 
 import {
-  binding,
-  check,
-  defineConfig,
   file,
   filePluginId,
-  MaintenanceError,
-  readReference,
   selectTextRange,
   TextSelectionError,
+} from "@dock/file";
+import {
+  binding,
+  check,
+  checkForCli,
+  defineConfig,
+  getRecordedLineRange,
+  lineRangeKey,
+  MaintenanceError,
+  readReference,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@dock/host";
 
 void test("full plain file text can establish, check, and update a baseline via public maintenance APIs", async () => {
   const root = await mkdtemp(join(tmpdir(), "dock-file-maintenance-"));
@@ -1020,6 +1025,149 @@ void test("file.at and file.from(URL) keep module-relative targets stable across
       (error: unknown) =>
         error instanceof MaintenanceError &&
         error.code === "scope-history-unexplainable",
+    );
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("file plugin preserves processor ID, recorded source line ranges, and V3 baseline compatibility", async () => {
+  assert.equal(file.id, "@ykdz/dock-reference-file");
+  assert.equal(filePluginId, "@ykdz/dock-reference-file");
+
+  const root = await mkdtemp(join(tmpdir(), "dock-file-v3-lines-"));
+  const targetPath = join(root, "app.env");
+  const baselinePath = join(root, "dock.baseline.json");
+  const initialSource = [
+    "😀header",
+    "#region runtime",
+    "port=4173",
+    "host=localhost",
+    "#endregion runtime",
+    "",
+  ].join("\n");
+
+  try {
+    await writeFile(targetPath, initialSource, "utf8");
+    const quoted = file
+      .from("app.env")
+      .quote("host=localhost")
+      .reference("quoted-host");
+    const matched = file
+      .from("app.env")
+      .match("port=(\\d+)", 1)
+      .reference("matched-port");
+    const regional = file
+      .from("app.env")
+      .region("runtime")
+      .reference("runtime-region");
+    const config = defineConfig({
+      root,
+      plugins: [file],
+      bindings: [binding("runtime-policy", [quoted, matched, regional])],
+    });
+
+    const rawRead = await file.read(regional, { root });
+    assert.deepEqual(
+      rawRead.range ? getRecordedLineRange(rawRead.range) : undefined,
+      { startLine: 3, endLine: 4 },
+    );
+    const readResult = await readReference(config, regional);
+    assert.equal(readResult.value, "port=4173\nhost=localhost\n");
+    assert.deepEqual(readResult.range, rawRead.range);
+
+    // Seed an existing V3 baseline using the historical @ykdz/dock-reference-file definition shape.
+    await writeFile(
+      baselinePath,
+      JSON.stringify({
+        version: 3,
+        bindings: {
+          "runtime-policy": {
+            definition: {
+              id: "runtime-policy",
+              references: ["quoted-host", "matched-port", "runtime-region"],
+            },
+            references: {
+              "quoted-host": {
+                definition: {
+                  id: "quoted-host",
+                  target: {
+                    pluginId: "@ykdz/dock-reference-file",
+                    target: "app.env",
+                    fileInfo: "app.env",
+                  },
+                  selection: {
+                    kind: "text",
+                    steps: [{ kind: "quote", text: "host=localhost" }],
+                  },
+                },
+                value: "host=localhost",
+              },
+              "matched-port": {
+                definition: {
+                  id: "matched-port",
+                  target: {
+                    pluginId: "@ykdz/dock-reference-file",
+                    target: "app.env",
+                    fileInfo: "app.env",
+                  },
+                  selection: {
+                    kind: "text",
+                    steps: [
+                      { kind: "match", pattern: "port=(\\d+)", group: 1 },
+                    ],
+                  },
+                },
+                value: "4173",
+              },
+              "runtime-region": {
+                definition: {
+                  id: "runtime-region",
+                  target: {
+                    pluginId: "@ykdz/dock-reference-file",
+                    target: "app.env",
+                    fileInfo: "app.env",
+                  },
+                  selection: {
+                    kind: "text",
+                    steps: [{ kind: "region", name: "runtime" }],
+                  },
+                },
+                value: "port=4173\nhost=localhost\n",
+              },
+            },
+          },
+        },
+      }),
+      "utf8",
+    );
+
+    const { report: consistent, lineRanges } = await checkForCli(config);
+    assert.equal(consistent.bindings[0]?.consistency, "consistent");
+    const currentRefs = consistent.bindings[0]?.current?.references;
+    assert.deepEqual(
+      currentRefs?.["quoted-host"]?.range
+        ? lineRanges[
+            lineRangeKey(currentRefs["quoted-host"].range, "quoted-host")
+          ]
+        : undefined,
+      { startLine: 4, endLine: 4 },
+    );
+    assert.deepEqual(
+      currentRefs?.["matched-port"]?.range
+        ? lineRanges[
+            lineRangeKey(currentRefs["matched-port"].range, "matched-port")
+          ]
+        : undefined,
+      { startLine: 3, endLine: 3 },
+    );
+    assert.deepEqual(
+      currentRefs?.["runtime-region"]?.range
+        ? lineRanges[
+            lineRangeKey(currentRefs["runtime-region"].range, "runtime-region")
+          ]
+        : undefined,
+      { startLine: 3, endLine: 4 },
     );
   } finally {
     await rm(root, { recursive: true, force: true });

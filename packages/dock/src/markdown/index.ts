@@ -17,16 +17,15 @@ import {
   type ReferenceOptions,
   type TextRange,
 } from "@dock/host";
-import { fromMarkdown } from "mdast-util-from-markdown";
-import { gfmFromMarkdown } from "mdast-util-gfm";
-import { gfm } from "micromark-extension-gfm";
-import { parseFragment } from "parse5";
-
 import {
   assertTextSelectionStep,
   selectTextRange,
   type TextSelectionStep,
-} from "../file/text-selection.ts";
+} from "@dock/text-selection";
+import { fromMarkdown } from "mdast-util-from-markdown";
+import { gfmFromMarkdown } from "mdast-util-gfm";
+import { gfm } from "micromark-extension-gfm";
+import { parseFragment } from "parse5";
 
 export const markdownPluginId = "@ykdz/dock-reference-markdown" as const;
 

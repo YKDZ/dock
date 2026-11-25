@@ -15,13 +15,12 @@ import {
   type Reference,
   type ReferenceOptions,
 } from "@dock/host";
-
 import {
   assertTextSelectionStep,
   selectTextRange,
   TextSelectionError,
-} from "./text-selection.ts";
-import type { TextSelectionStep } from "./text-selection.ts";
+  type TextSelectionStep,
+} from "@dock/text-selection";
 
 export const filePluginId = "@ykdz/dock-reference-file" as const;
 
@@ -159,6 +158,7 @@ const implementation = definePlugin({
   },
 });
 
+/** Built-in plain-file reference plugin exported as `file` from `@ykdz/dock`. */
 export const file: FilePlugin = {
   ...implementation,
   from(target: string | URL): FileReferenceBuilder {
@@ -571,5 +571,5 @@ function isTextSelectionError(error: unknown): error is TextSelectionError {
   return error instanceof TextSelectionError;
 }
 
-export { selectTextRange, TextSelectionError } from "./text-selection.ts";
-export type { TextSelectionStep } from "./text-selection.ts";
+export { selectTextRange, TextSelectionError } from "@dock/text-selection";
+export type { TextSelectionStep } from "@dock/text-selection";

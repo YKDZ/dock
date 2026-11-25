@@ -76,7 +76,9 @@
   },
   "devDependencies": {
     "@dock/core": "workspace:*",
+    "@dock/file": "workspace:*",
     "@dock/host": "workspace:*",
+    "@dock/text-selection": "workspace:*",
     "@dock/tooling-config": "workspace:*",
     "@types/node": "catalog:",
     "oxfmt": "catalog:",
