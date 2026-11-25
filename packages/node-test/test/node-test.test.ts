@@ -1,19 +1,24 @@
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   binding,
   check,
+  createReference,
   defineConfig,
-  file,
+  definePlugin,
   inspect,
   MaintenanceError,
+  type PluginBatchResult,
+  type PluginContext,
+  type PluginReadResult,
+  type PluginRequest,
+  type Reference,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@dock/host";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
@@ -21,7 +26,59 @@ import {
   nodeTestObservation,
   nodeTestPluginId,
   nodeTestStatus,
-} from "@ykdz/dock/node-test";
+} from "@dock/node-test";
+
+type DocReference = Reference<"test:doc", string, string, string>;
+
+const docPlugin = definePlugin({
+  id: "test:doc",
+  validate(reference: DocReference): void {
+    if (typeof reference.target !== "string" || reference.target.length === 0) {
+      throw new TypeError("Document target must be a non-empty path.");
+    }
+  },
+  fileInfo(reference: DocReference): string {
+    return reference.target;
+  },
+  async read(
+    reference: DocReference,
+    context: PluginContext,
+  ): Promise<PluginReadResult<string>> {
+    const value = await readFile(join(context.root, reference.target), "utf8");
+    return {
+      value,
+      range: { path: reference.target, start: 0, end: value.length },
+    };
+  },
+  async collect(
+    request: PluginRequest<DocReference>,
+    context: PluginContext,
+  ): Promise<PluginBatchResult<string>> {
+    const results = await Promise.all(
+      request.selectedReferences.map(async (reference) => {
+        const value = await readFile(
+          join(context.root, reference.target),
+          "utf8",
+        );
+        return {
+          referenceId: reference.id,
+          kind: "value" as const,
+          value,
+          range: { path: reference.target, start: 0, end: value.length },
+        };
+      }),
+    );
+    return { results };
+  },
+});
+
+function docReference(id = "doc", path = "doc.txt"): DocReference {
+  return createReference<"test:doc", string, string, string>(
+    "test:doc",
+    id,
+    path,
+  );
+}
 
 void test("preserves legacy nodeTestPluginId and collects native node:test status and observation", async () => {
   assert.equal(nodeTestPluginId, "@ykdz/dock-reference-node-test");
@@ -107,12 +164,8 @@ void test("validates node test run, observation, and selection inputs with Engli
   );
 });
 
-const packageDirectory = dirname(
-  dirname(dirname(fileURLToPath(import.meta.url))),
-);
-const nodeTestSourceUrl = pathToFileURL(
-  join(packageDirectory, "src", "node-test", "index.ts"),
-).href;
+const nodeTestSourceUrl = import.meta.resolve("@dock/node-test");
+const hostSourceUrl = import.meta.resolve("@dock/host");
 
 void test("node-test baseline comparison ignores shared run arrangement, catches re-targeting, and preserves baseline bytes on errors", async () => {
   const root = await mkdtemp(join(tmpdir(), "dock-node-test-comparable-"));
@@ -178,10 +231,10 @@ void test("node-test baseline comparison ignores shared run arrangement, catches
     });
     const initialConfig = defineConfig({
       root,
-      plugins: [file, nodeTest],
+      plugins: [docPlugin, nodeTest],
       bindings: [
         binding("alpha-status-binding", [
-          file.from("doc.txt").reference("doc"),
+          docReference(),
           nodeTestStatus("alpha-status", initialRun, {
             file: "suite/primary.test.mjs",
             name: "alpha passes",
@@ -238,10 +291,10 @@ void test("node-test baseline comparison ignores shared run arrangement, catches
     });
     const rearrangedConfig = defineConfig({
       root,
-      plugins: [file, nodeTest],
+      plugins: [docPlugin, nodeTest],
       bindings: [
         binding("alpha-status-binding", [
-          file.from("doc.txt").reference("doc"),
+          docReference(),
           nodeTestStatus("alpha-status", rearrangedRun, {
             file: "primary.test.mjs",
             name: "alpha passes",
@@ -303,10 +356,10 @@ void test("node-test baseline comparison ignores shared run arrangement, catches
     const retargetedFileCheck = await check(
       defineConfig({
         root,
-        plugins: [file, nodeTest],
+        plugins: [docPlugin, nodeTest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            docReference(),
             nodeTestStatus("alpha-status", retargetedFileRun, {
               file: "primary.test.mjs",
               name: "alpha passes",
@@ -330,10 +383,10 @@ void test("node-test baseline comparison ignores shared run arrangement, catches
     const renamedTestCheck = await check(
       defineConfig({
         root,
-        plugins: [file, nodeTest],
+        plugins: [docPlugin, nodeTest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            docReference(),
             nodeTestStatus("alpha-status", rearrangedRun, {
               file: "primary.test.mjs",
               name: "beta passes",
@@ -368,10 +421,10 @@ void test("node-test baseline comparison ignores shared run arrangement, catches
     const filteredUpdate = await updateBaseline(
       defineConfig({
         root,
-        plugins: [file, nodeTest],
+        plugins: [docPlugin, nodeTest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            docReference(),
             nodeTestStatus("alpha-status", filteredRun, {
               file: "primary.test.mjs",
               name: "alpha passes",
@@ -403,10 +456,10 @@ void test("node-test baseline comparison ignores shared run arrangement, catches
     const skippedUpdate = await updateBaseline(
       defineConfig({
         root,
-        plugins: [file, nodeTest],
+        plugins: [docPlugin, nodeTest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            docReference(),
             nodeTestStatus("alpha-status", unfilteredRun, {
               file: "primary.test.mjs",
               name: "skipped case",
@@ -474,10 +527,10 @@ void test("node-test baseline comparison ignores shared run arrangement, catches
     const teardownFailedUpdate = await updateBaseline(
       defineConfig({
         root,
-        plugins: [file, nodeTest],
+        plugins: [docPlugin, nodeTest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            docReference(),
             nodeTestStatus("alpha-status", initialRun, {
               file: "suite/primary.test.mjs",
               name: "alpha passes",
@@ -493,6 +546,105 @@ void test("node-test baseline comparison ignores shared run arrangement, catches
       "run-lifecycle-failed",
     );
     assert.equal(await readFile(baselinePath, "utf8"), savedBaselineBytes);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("readReferenceInTest requires an active node:test callback and records reads with range during native execution", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-node-test-read-"));
+  try {
+    await writeFile(join(root, "doc.txt"), "contract v1\n", "utf8");
+    const doc = docReference();
+
+    const testFile = join(root, "read.test.mjs");
+    await writeFile(
+      testFile,
+      [
+        'import assert from "node:assert/strict";',
+        'import { readFile } from "node:fs/promises";',
+        'import { join } from "node:path";',
+        'import { test } from "node:test";',
+        `import { createReference, defineConfig, definePlugin } from ${JSON.stringify(hostSourceUrl)};`,
+        `import { defineNodeTestObservation, readReferenceInTest } from ${JSON.stringify(nodeTestSourceUrl)};`,
+        "",
+        "const localDocPlugin = definePlugin({",
+        '  id: "test:doc",',
+        "  validate() {},",
+        "  async read(reference, context) {",
+        '    const value = await readFile(join(context.root, reference.target), "utf8");',
+        "    return { value, range: { path: reference.target, start: 0, end: value.length } };",
+        "  },",
+        "  collect() { return { results: [] }; },",
+        "});",
+        'const localDoc = createReference("test:doc", "doc", "doc.txt");',
+        `const localConfig = defineConfig({ root: ${JSON.stringify(root)}, plugins: [localDocPlugin], bindings: [] });`,
+        'const observed = defineNodeTestObservation("doc-length", 0);',
+        "",
+        "await assert.rejects(",
+        "  readReferenceInTest(localConfig, localDoc),",
+        "  /must be called inside an active Node native test callback/,",
+        ");",
+        "",
+        'test("reads document in active test", async () => {',
+        "  const result = await readReferenceInTest(localConfig, localDoc);",
+        '  assert.equal(result.value, "contract v1\\n");',
+        "  observed.record(result.value.length);",
+        "});",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const observed = defineNodeTestObservation("doc-length", 0);
+    const run = defineNodeTestRun("read-in-test-run", {
+      files: ["read.test.mjs"],
+      observations: [observed],
+    });
+    const config = defineConfig({
+      root,
+      plugins: [docPlugin, nodeTest],
+      bindings: [
+        binding("doc-read-binding", [
+          doc,
+          nodeTestObservation(
+            "doc-length-ref",
+            run,
+            { file: "read.test.mjs", name: "reads document in active test" },
+            observed,
+          ),
+        ]),
+      ],
+    });
+
+    const report = await check(config);
+    assert.equal(report.bindings[0]?.consistency, "inconsistent");
+    assert.equal(report.bindings[0]?.errors, undefined);
+    assert.equal(
+      report.bindings[0]?.current?.references["doc-length-ref"]?.value,
+      "contract v1\n".length,
+    );
+    const nodeDiagnostics = report.pluginDiagnostics.find(
+      (entry) => entry.pluginId === nodeTestPluginId,
+    )?.data as unknown as {
+      readonly runs: readonly {
+        readonly reads: readonly {
+          readonly referenceId: string;
+          readonly value: unknown;
+          readonly range?: {
+            readonly path: string;
+            readonly start: number;
+            readonly end: number;
+          };
+        }[];
+      }[];
+    };
+    assert.deepEqual(nodeDiagnostics.runs[0]?.reads[0]?.referenceId, "doc");
+    assert.equal(nodeDiagnostics.runs[0]?.reads[0]?.value, "contract v1\n");
+    assert.deepEqual(nodeDiagnostics.runs[0]?.reads[0]?.range, {
+      path: "doc.txt",
+      start: 0,
+      end: "contract v1\n".length,
+    });
   } finally {
     await rm(root, { recursive: true, force: true });
   }

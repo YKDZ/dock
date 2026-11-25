@@ -5,7 +5,7 @@ import {
   captureVitestCandidate,
   mapVitestRun,
   testIdentity,
-} from "../../src/vitest/event-mapper.ts";
+} from "../src/event-mapper.ts";
 
 void test("catalog reconstructs nested paths from native parent/name and preserves execution identity", () => {
   const outer = {
