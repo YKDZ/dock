@@ -1834,6 +1834,233 @@ async function verifyInstalledMarkdownSmoke(
     /Maintenance failed \(declaration-source-read-failed\)/,
   );
   assert.deepEqual(await readFile(baselinePath), savedBaseline);
+
+  // Verify installed inline dock:bind workflow on an onboarded Markdown file (with spaces in reference ID, inspect, baseline update, reordering, and corruption protection).
+  const inlineGuidePath = join(dir, "inline-guide.md");
+  const inlineGuideV1 = [
+    "# CLI Guide",
+    "",
+    "## Exit Codes",
+    "",
+    "Exit code is 1 when inconsistent.",
+    "",
+  ].join("\n");
+  await writeFile(inlineGuidePath, inlineGuideV1, "utf8");
+  await writeFile(join(dir, "exit-code.txt"), "1\n", "utf8");
+  await writeFile(
+    join(dir, "inline-bind.config.mjs"),
+    [
+      'import { binding, defineConfig, file } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      "export default defineConfig({",
+      '  baseline: "inline-bind.baseline.json",',
+      "  plugins: [file, markdown],",
+      "  bindings: [",
+      '    binding("exit-docs", [',
+      '      markdown.from("inline-guide.md").section("Exit Codes").reference("guide-exit-codes"),',
+      '      file.from("exit-code.txt").reference("cli exit code"),',
+      "    ]),",
+      "  ],",
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const initInlineBaseline = await run(
+    bin,
+    ["baseline", "update", "--config", "inline-bind.config.mjs"],
+    dir,
+  );
+  assert.equal(
+    initInlineBaseline.code,
+    0,
+    initInlineBaseline.stdout + initInlineBaseline.stderr,
+  );
+
+  const inlineGuideV2 = [
+    "# CLI Guide",
+    "",
+    "## Summary",
+    "",
+    '<!-- dock:bind {"id":"cli-inline","with":["cli exit code","guide-exit-codes"]} -->',
+    "",
+    "Failures exit with status 1 as documented in Exit Codes.",
+    "",
+    "## Exit Codes",
+    "",
+    "Exit code is 1 when inconsistent.",
+    "",
+  ].join("\n");
+  await writeFile(inlineGuidePath, inlineGuideV2, "utf8");
+
+  const inlineInspect = await run(
+    bin,
+    ["inspect", "--config", "inline-bind.config.mjs", "--output", "structured"],
+    dir,
+  );
+  assert.equal(
+    inlineInspect.code,
+    0,
+    inlineInspect.stdout + inlineInspect.stderr,
+  );
+  const inspectedInlineData = JSON.parse(inlineInspect.stdout) as {
+    data?: {
+      resolution?: {
+        context: { bindings: { id: string; references: string[] }[] };
+        declarationSources: { bindings: Record<string, string[]> };
+      };
+    };
+  };
+  assert.deepEqual(
+    inspectedInlineData.data?.resolution?.context.bindings.find(
+      (entry) => entry.id === "cli-inline",
+    ),
+    {
+      id: "cli-inline",
+      references: ["dock:bind:cli-inline", "cli exit code", "guide-exit-codes"],
+    },
+  );
+  assert.deepEqual(
+    inspectedInlineData.data?.resolution?.declarationSources.bindings[
+      "cli-inline"
+    ],
+    ["inline-guide.md:5"],
+  );
+
+  const inlineBaselineUpdate = await run(
+    bin,
+    ["baseline", "update", "--config", "inline-bind.config.mjs"],
+    dir,
+  );
+  assert.equal(
+    inlineBaselineUpdate.code,
+    0,
+    inlineBaselineUpdate.stdout + inlineBaselineUpdate.stderr,
+  );
+
+  await writeFile(join(dir, "exit-code.txt"), "2\n", "utf8");
+  const inlineFactChanged = await run(
+    bin,
+    ["check", "--config", "inline-bind.config.mjs"],
+    dir,
+  );
+  assert.equal(
+    inlineFactChanged.code,
+    1,
+    inlineFactChanged.stdout + inlineFactChanged.stderr,
+  );
+  assert.match(inlineFactChanged.stdout, /Binding cli-inline/);
+  assert.match(inlineFactChanged.stdout, /Change: cli exit code fact changed/);
+  assert.ok(
+    inlineFactChanged.stdout.includes(
+      "dock:bind:cli-inline (inline-guide.md:7)",
+    ),
+    inlineFactChanged.stdout,
+  );
+
+  const inlineBaselineRefresh = await run(
+    bin,
+    ["baseline", "update", "--config", "inline-bind.config.mjs"],
+    dir,
+  );
+  assert.equal(
+    inlineBaselineRefresh.code,
+    0,
+    inlineBaselineRefresh.stdout + inlineBaselineRefresh.stderr,
+  );
+  const inlineConsistent = await run(
+    bin,
+    ["check", "--config", "inline-bind.config.mjs"],
+    dir,
+  );
+  assert.equal(
+    inlineConsistent.code,
+    0,
+    inlineConsistent.stdout + inlineConsistent.stderr,
+  );
+
+  // Reorder paragraphs and adjust blank lines; baseline remains consistent.
+  const inlineGuideReordered = [
+    "# CLI Guide",
+    "",
+    "## Summary",
+    "",
+    "Lead intro.",
+    "",
+    '<!-- dock:bind {"id":"cli-inline","with":["cli exit code","guide-exit-codes"]} -->',
+    "",
+    "",
+    "Failures exit with status 1 as documented in Exit Codes.",
+    "",
+    "## Exit Codes",
+    "",
+    "Exit code is 1 when inconsistent.",
+    "",
+  ].join("\n");
+  await writeFile(inlineGuidePath, inlineGuideReordered, "utf8");
+  const inlineReorderedCheck = await run(
+    bin,
+    ["check", "--config", "inline-bind.config.mjs"],
+    dir,
+  );
+  assert.equal(
+    inlineReorderedCheck.code,
+    0,
+    inlineReorderedCheck.stdout + inlineReorderedCheck.stderr,
+  );
+
+  // Corrupt baselined dock:bind -> CLI and JS reject update, preserve baseline bytes, and never report untracked.
+  const inlineBaselinePath = join(dir, "inline-bind.baseline.json");
+  const savedInlineBaseline = await readFile(inlineBaselinePath);
+  await writeFile(
+    inlineGuidePath,
+    inlineGuideReordered.replace(
+      '<!-- dock:bind {"id":"cli-inline","with":["cli exit code","guide-exit-codes"]} -->',
+      '<!-- dock:bind {"id":"cli-inline","with":["cli exit code"],"extra":1} -->',
+    ),
+    "utf8",
+  );
+  for (const args of [
+    ["check", "--config", "inline-bind.config.mjs"],
+    ["baseline", "update", "--config", "inline-bind.config.mjs"],
+  ]) {
+    const failed = await run(bin, args, dir);
+    assert.equal(failed.code, 1, failed.stdout + failed.stderr);
+    assert.match(failed.stderr, /Maintenance failed \(declaration-invalid\)/);
+    assert.match(failed.stderr, /inline-guide\.md:7/);
+    assert.match(failed.stderr, /Unknown field "extra"/);
+    assert.deepEqual(await readFile(inlineBaselinePath), savedInlineBaseline);
+  }
+  await writeFile(
+    join(dir, "inline-corrupt-js.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFile } from "node:fs/promises";',
+      'import { check, MaintenanceError, updateBaseline } from "@ykdz/dock";',
+      'const before = await readFile("inline-bind.baseline.json");',
+      'for (const op of [() => check("inline-bind.config.mjs"), () => updateBaseline("inline-bind.config.mjs")]) {',
+      "  await assert.rejects(op, (error) => {",
+      "    assert.ok(error instanceof MaintenanceError);",
+      '    assert.equal(error.code, "declaration-invalid");',
+      "    assert.match(error.message, /inline-guide\\.md:7/);",
+      "    return true;",
+      "  });",
+      '  assert.deepEqual(await readFile("inline-bind.baseline.json"), before);',
+      "}",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const inlineCorruptJs = await run(
+    process.execPath,
+    [join(dir, "inline-corrupt-js.mjs")],
+    dir,
+  );
+  assert.equal(
+    inlineCorruptJs.code,
+    0,
+    inlineCorruptJs.stdout + inlineCorruptJs.stderr,
+  );
 }
 
 async function verifyInstalledTypeScriptSmoke(

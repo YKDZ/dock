@@ -1263,3 +1263,430 @@ void test("explicit markdown.source fails with declaration-source-read-failed wh
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("dock:bind selects following Markdown blocks, preserves spaces in with IDs, strips directives in markdownFact, and ignores code examples", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-bind-valid-"));
+  try {
+    const readmeSource = [
+      "# Guide",
+      "",
+      "## Overview",
+      "",
+      "Intro paragraph.",
+      "",
+      '<!-- dock:bind {"id":"cli-failure","with":["cli exit code","cli.output"]} -->',
+      "",
+      "When a check fails, Dock exits with code 1.",
+      "",
+      '<!-- dock:bind {"id":"cli-code-block","with":["cli exit code"]} -->',
+      "```sh",
+      "dock check --config dock.config.ts",
+      "```",
+      "",
+      '<!-- dock:bind {"id":"cli-list-block","with":["cli.output"]} -->',
+      "",
+      "- Step one",
+      "- Step two",
+      "",
+      '<!-- dock:bind {"id":"cli-table-block","with":["cli.output"]} -->',
+      "| Key | Value |",
+      "| --- | --- |",
+      "| mode | strict |",
+      "",
+      '<!-- dock:bind {"id":"cli-quote-block","with":["cli exit code"]} -->',
+      "> Quoted rule.",
+      "",
+      "```md",
+      '<!-- dock:bind {"id":"ignored-in-fence","with":["missing-ref"]} -->',
+      "<!-- dock:bind {bad-json-in-fence -->",
+      "```",
+      "",
+      'Inline `<!-- dock:bind {"id":"ignored-inline","with":["missing-ref"]} -->` example.',
+      '<div data-example=\'<!-- dock:bind {"id":"ignored-attr"} -->\'></div>',
+      '<script>const x = "<!-- dock:bind {broken} -->";</script>',
+      "",
+    ].join("\n");
+    await writeFile(join(root, "README.md"), readmeSource, "utf8");
+    await writeFile(join(root, "exit-code.txt"), "1\n", "utf8");
+    await writeFile(join(root, "output.txt"), "Binding failed\n", "utf8");
+
+    const overviewRef = markdown
+      .from("README.md")
+      .section("Overview")
+      .reference("overview");
+    const exitCodeRef = markdown
+      .from("exit-code.txt")
+      .reference("cli exit code");
+    const outputRef = markdown.from("output.txt").reference("cli.output");
+
+    const config = defineConfig({
+      root,
+      plugins: [markdown],
+      bindings: [binding("overview-policy", [overviewRef])],
+      references: [exitCodeRef, outputRef],
+    });
+
+    const inspected = await inspect(config);
+    assert.deepEqual(
+      inspected.context.bindings.map((entry) => entry.id),
+      [
+        "overview-policy",
+        "cli-failure",
+        "cli-code-block",
+        "cli-list-block",
+        "cli-table-block",
+        "cli-quote-block",
+      ],
+    );
+    const failureBinding = inspected.context.bindings.find(
+      (entry) => entry.id === "cli-failure",
+    );
+    assert.deepEqual(failureBinding, {
+      id: "cli-failure",
+      references: ["dock:bind:cli-failure", "cli exit code", "cli.output"],
+    });
+    assert.deepEqual(inspected.declarationSources.bindings["cli-failure"], [
+      "README.md:7",
+    ]);
+
+    const bodyDef = inspected.context.references.find(
+      (ref) => ref.id === "dock:bind:cli-failure",
+    );
+    assert.deepEqual(bodyDef, {
+      id: "dock:bind:cli-failure",
+      target: {
+        pluginId: markdownPluginId,
+        target: "README.md",
+        fileInfo: "README.md",
+      },
+      selection: {
+        kind: "markdown",
+        steps: [{ kind: "bind", id: "cli-failure" }],
+      },
+    });
+
+    const report = await check(config);
+    const failureResult = report.bindings.find(
+      (entry) => entry.bindingId === "cli-failure",
+    );
+    assert.ok(failureResult && "current" in failureResult);
+    assert.equal(
+      failureResult.current.references["dock:bind:cli-failure"]?.value,
+      "When a check fails, Dock exits with code 1.",
+    );
+    assert.equal(
+      failureResult.current.references["cli exit code"]?.value,
+      "1\n",
+    );
+    assert.equal(
+      failureResult.current.references["cli.output"]?.value,
+      "Binding failed\n",
+    );
+
+    const codeResult = report.bindings.find(
+      (entry) => entry.bindingId === "cli-code-block",
+    );
+    assert.ok(codeResult && "current" in codeResult);
+    assert.equal(
+      codeResult.current.references["dock:bind:cli-code-block"]?.value,
+      "```sh\ndock check --config dock.config.ts\n```",
+    );
+
+    const listResult = report.bindings.find(
+      (entry) => entry.bindingId === "cli-list-block",
+    );
+    assert.ok(listResult && "current" in listResult);
+    assert.equal(
+      listResult.current.references["dock:bind:cli-list-block"]?.value,
+      "- Step one\n- Step two",
+    );
+
+    const tableResult = report.bindings.find(
+      (entry) => entry.bindingId === "cli-table-block",
+    );
+    assert.ok(tableResult && "current" in tableResult);
+    assert.equal(
+      tableResult.current.references["dock:bind:cli-table-block"]?.value,
+      "| Key | Value |\n| --- | --- |\n| mode | strict |",
+    );
+
+    const quoteResult = report.bindings.find(
+      (entry) => entry.bindingId === "cli-quote-block",
+    );
+    assert.ok(quoteResult && "current" in quoteResult);
+    assert.equal(
+      quoteResult.current.references["dock:bind:cli-quote-block"]?.value,
+      "> Quoted rule.",
+    );
+
+    const overviewResult = report.bindings.find(
+      (entry) => entry.bindingId === "overview-policy",
+    );
+    assert.ok(overviewResult && "current" in overviewResult);
+    const overviewValue = overviewResult.current.references.overview?.value;
+    assert.equal(typeof overviewValue, "string");
+    if (typeof overviewValue !== "string") return;
+    assert.ok(!overviewValue.includes('dock:bind {"id":"cli-failure"'));
+    assert.ok(overviewValue.includes('dock:bind {"id":"ignored-in-fence"'));
+    assert.ok(overviewValue.includes('dock:bind {"id":"ignored-inline"'));
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("dock:bind lossless JSON and placement validation reports file, line, and offending field across multiple independent errors", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-bind-invalid-"));
+  try {
+    await writeFile(join(root, "ref.txt"), "ok\n", "utf8");
+    const ref = markdown.from("ref.txt").reference("r1");
+
+    const cases: readonly {
+      readonly name: string;
+      readonly content: string;
+      readonly patterns: readonly RegExp[];
+    }[] = [
+      {
+        name: "missing payload",
+        content: "# Guide\n\n<!-- dock:bind -->\n\nBody.\n",
+        patterns: [/guide\.md:3/, /missing JSON object parameter/],
+      },
+      {
+        name: "invalid JSON syntax",
+        content: '# Guide\n\n<!-- dock:bind {"id":"a", -->\n\nBody.\n',
+        patterns: [/guide\.md:3/, /Invalid JSON in "dock:bind"/],
+      },
+      {
+        name: "non-object JSON",
+        content: '# Guide\n\n<!-- dock:bind ["a"] -->\n\nBody.\n',
+        patterns: [/guide\.md:3/, /expected a JSON object/],
+      },
+      {
+        name: "missing id and with",
+        content: "# Guide\n\n<!-- dock:bind {} -->\n\nBody.\n",
+        patterns: [
+          /guide\.md:3.*Missing required field "id"/,
+          /guide\.md:3.*Missing required field "with"/,
+        ],
+      },
+      {
+        name: "unknown extra field",
+        content:
+          '# Guide\n\n<!-- dock:bind {"id":"a","with":["r1"],"extra":true} -->\n\nBody.\n',
+        patterns: [/guide\.md:3/, /Unknown field "extra"/],
+      },
+      {
+        name: "raw duplicate id and duplicate with keys",
+        content: [
+          "# Guide",
+          "",
+          '<!-- dock:bind {"id":"a","id":"b","with":["r1"]} -->',
+          "",
+          "Body 1.",
+          "",
+          '<!-- dock:bind {"id":"c","with":["r1"],"with":["r2"]} -->',
+          "",
+          "Body 2.",
+          "",
+        ].join("\n"),
+        patterns: [
+          /guide\.md:3.*Duplicate field "id"/,
+          /guide\.md:7.*Duplicate field "with"/,
+        ],
+      },
+      {
+        name: "wrong types and empty values",
+        content: [
+          "# Guide",
+          "",
+          '<!-- dock:bind {"id":123,"with":"r1"} -->',
+          "",
+          "Body 1.",
+          "",
+          '<!-- dock:bind {"id":"","with":[]} -->',
+          "",
+          "Body 2.",
+          "",
+          '<!-- dock:bind {"id":"b","with":["r1",""]} -->',
+          "",
+          "Body 3.",
+          "",
+        ].join("\n"),
+        patterns: [
+          /guide\.md:3.*Invalid field "id"/,
+          /guide\.md:3.*Invalid field "with"/,
+          /guide\.md:7.*Invalid field "id"/,
+          /guide\.md:7.*Invalid field "with".*empty/,
+          /guide\.md:11.*Invalid field "with\[1\]"/,
+        ],
+      },
+      {
+        name: "inline phrasing comment",
+        content:
+          '# Guide\n\nInline text <!-- dock:bind {"id":"a","with":["r1"]} -->\n',
+        patterns: [/guide\.md:3/, /standalone block-level HTML comment/],
+      },
+      {
+        name: "followed by heading, thematicBreak, dock:bind, dock:end, and EOF",
+        content: [
+          "# Guide",
+          "",
+          '<!-- dock:bind {"id":"before-heading","with":["r1"]} -->',
+          "## Next",
+          "",
+          '<!-- dock:bind {"id":"before-hr","with":["r1"]} -->',
+          "---",
+          "",
+          '<!-- dock:bind {"id":"before-bind","with":["r1"]} -->',
+          '<!-- dock:bind {"id":"valid-bind","with":["r1"]} -->',
+          "Body.",
+          "",
+          "<!-- dock:start sec -->",
+          '<!-- dock:bind {"id":"before-end","with":["r1"]} -->',
+          "<!-- dock:end sec -->",
+          "",
+          '<!-- dock:bind {"id":"at-eof","with":["r1"]} -->',
+        ].join("\n"),
+        patterns: [
+          /guide\.md:3.*before-heading.*heading/,
+          /guide\.md:6.*before-hr.*thematicBreak/,
+          /guide\.md:9.*before-bind.*dock:bind/,
+          /guide\.md:14.*before-end.*dock:end/,
+          /guide\.md:17.*at-eof.*end of document/,
+        ],
+      },
+    ];
+
+    for (const testCase of cases) {
+      await writeFile(join(root, "guide.md"), testCase.content, "utf8");
+      const config = defineConfig({
+        root,
+        plugins: [markdown],
+        sources: [markdown.source("guide.md")],
+        references: [ref],
+      });
+      for (const op of [() => inspect(config), () => check(config)]) {
+        await assert.rejects(op, (error: unknown) => {
+          assert.ok(error instanceof MaintenanceError, testCase.name);
+          assert.equal(error.code, "declaration-invalid", testCase.name);
+          for (const pattern of testCase.patterns) {
+            assert.match(error.message, pattern, testCase.name);
+          }
+          return true;
+        });
+      }
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("inline dock:bind keeps stable identity across paragraph reordering and preserves baseline when corrupted", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-bind-history-"));
+  const baselinePath = join(root, "dock.baseline.json");
+  try {
+    await writeFile(join(root, "facts.txt"), "exit=1\n", "utf8");
+    const readmeV1 = [
+      "# Guide",
+      "",
+      "## Usage",
+      "",
+      "Run dock check regularly.",
+      "",
+      '<!-- dock:bind {"id":"cli-failure","with":["cli exit code"]} -->',
+      "Dock exits with 1 on error.",
+      "",
+      "## Notes",
+      "",
+      "Extra context.",
+      "",
+    ].join("\n");
+    await writeFile(join(root, "README.md"), readmeV1, "utf8");
+
+    const config = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [markdown],
+      bindings: [
+        binding("notes-policy", [
+          markdown.from("README.md").section("Notes").reference("notes"),
+        ]),
+      ],
+      references: [markdown.from("facts.txt").reference("cli exit code")],
+    });
+
+    const created = await updateBaseline(config);
+    assert.equal(created.status, "updated");
+    const savedBytes = await readFile(baselinePath, "utf8");
+
+    // Reorder paragraphs/sections and insert blank lines between dock:bind and its body block.
+    const readmeReordered = [
+      "# Guide",
+      "",
+      "## Notes",
+      "",
+      "Extra context.",
+      "",
+      "## Usage",
+      "",
+      "Lead paragraph.",
+      "",
+      "Second paragraph.",
+      "",
+      '<!-- dock:bind {"id":"cli-failure","with":["cli exit code"]} -->',
+      "",
+      "",
+      "Dock exits with 1 on error.",
+      "",
+      "Run dock check regularly.",
+      "",
+    ].join("\n");
+    await writeFile(join(root, "README.md"), readmeReordered, "utf8");
+
+    const reorderedInspect = await inspect(config);
+    assert.deepEqual(
+      reorderedInspect.declarationSources.bindings["cli-failure"],
+      ["README.md:13"],
+    );
+    const reorderedCheck = await check(config);
+    const failureCheck = reorderedCheck.bindings.find(
+      (entry) => entry.bindingId === "cli-failure",
+    );
+    assert.ok(failureCheck && "current" in failureCheck);
+    assert.equal(failureCheck.consistency, "consistent");
+    assert.deepEqual(failureCheck.changes, []);
+    assert.deepEqual(
+      failureCheck.current.references["dock:bind:cli-failure"]?.range,
+      {
+        path: "README.md",
+        start: readmeReordered.indexOf("Dock exits with 1 on error."),
+        end:
+          readmeReordered.indexOf("Dock exits with 1 on error.") +
+          "Dock exits with 1 on error.".length,
+      },
+    );
+
+    // Corrupting the baselined dock:bind must fail inspect, check, and updateBaseline without altering baseline bytes or inferring untracked.
+    const readmeCorrupted = readmeReordered.replace(
+      '<!-- dock:bind {"id":"cli-failure","with":["cli exit code"]} -->',
+      '<!-- dock:bind {"id":"cli-failure","with":[]} -->',
+    );
+    await writeFile(join(root, "README.md"), readmeCorrupted, "utf8");
+
+    for (const op of [
+      () => inspect(config),
+      () => check(config),
+      () => updateBaseline(config),
+    ]) {
+      await assert.rejects(op, (error: unknown) => {
+        assert.ok(error instanceof MaintenanceError);
+        assert.equal(error.code, "declaration-invalid");
+        assert.match(error.message, /README\.md:13/);
+        assert.match(error.message, /"with"/);
+        return true;
+      });
+      assert.equal(await readFile(baselinePath, "utf8"), savedBytes);
+    }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

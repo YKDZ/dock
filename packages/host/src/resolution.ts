@@ -336,6 +336,12 @@ async function discoverPluginDeclarations(
   const bindingsById = new Map<string, BindingDefinition>(
     config.bindings.map((binding) => [binding.id, binding]),
   );
+  const seenBindingSources = new Map<string, readonly string[]>(
+    config.bindings.map((binding) => [
+      binding.id,
+      config.declarationSources.bindings[binding.id] ?? [],
+    ]),
+  );
   const bindingDeclarationSources: Record<string, readonly string[]> = {
     ...config.declarationSources.bindings,
   };
@@ -348,12 +354,11 @@ async function discoverPluginDeclarations(
       binding.declaredAt === undefined
         ? undefined
         : sourceText(binding.declaredAt);
-    const existingBinding = bindingsById.get(binding.id);
-    if (existingBinding !== undefined) {
-      const priorSources = bindingDeclarationSources[binding.id] ?? [];
+    const existingSources = seenBindingSources.get(binding.id);
+    if (existingSources !== undefined) {
       const priorLabel =
-        priorSources.length > 0
-          ? priorSources.join(", ")
+        existingSources.length > 0
+          ? existingSources.join(", ")
           : "TypeScript config bindings";
       issues.push({
         code: "declaration-invalid",
@@ -361,7 +366,12 @@ async function discoverPluginDeclarations(
       });
       continue;
     }
+    seenBindingSources.set(
+      binding.id,
+      declaredAtText === undefined ? [] : [declaredAtText],
+    );
 
+    let bindingValid = true;
     for (const rawReference of binding.ownReferences) {
       const owned = ownReference(rawReference);
       try {
@@ -371,6 +381,7 @@ async function discoverPluginDeclarations(
           code: "declaration-invalid",
           message: `Plugin ${plugin.id} rejected discovered reference ${owned.id}: ${errorMessage(error)}`,
         });
+        bindingValid = false;
         continue;
       }
       const ownedDeclarationSources =
@@ -397,17 +408,21 @@ async function discoverPluginDeclarations(
           code: "declaration-invalid",
           message: `Discovered reference ID ${JSON.stringify(owned.id)} at ${declaredAtText ?? plugin.id} conflicts with existing reference definition${priorSources.length > 0 ? ` (${priorSources})` : ""}.`,
         });
+        bindingValid = false;
       }
     }
 
     const seenMembers = new Set<string>();
-    let bindingValid = true;
+    const reportedDuplicateMembers = new Set<string>();
     for (const referenceId of binding.referenceIds) {
       if (seenMembers.has(referenceId)) {
-        issues.push({
-          code: "declaration-invalid",
-          message: `Duplicate reference ID ${JSON.stringify(referenceId)} in binding ${JSON.stringify(binding.id)}${declaredAtText === undefined ? "" : ` at ${declaredAtText}`}.`,
-        });
+        if (!reportedDuplicateMembers.has(referenceId)) {
+          reportedDuplicateMembers.add(referenceId);
+          issues.push({
+            code: "declaration-invalid",
+            message: `Duplicate reference ID ${JSON.stringify(referenceId)} in binding ${JSON.stringify(binding.id)}${declaredAtText === undefined ? "" : ` at ${declaredAtText}`}.`,
+          });
+        }
         bindingValid = false;
         continue;
       }
@@ -484,14 +499,22 @@ function collectMissingBaselineFilesByPlugin(
 function discoveryIssuesError(
   issues: readonly PluginDiscoveryIssue[],
 ): MaintenanceError {
-  const readIssue = issues.find(
+  const uniqueIssues: PluginDiscoveryIssue[] = [];
+  const seen = new Set<string>();
+  for (const issue of issues) {
+    const key = `${issue.code}\0${issue.message}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    uniqueIssues.push(issue);
+  }
+  const readIssue = uniqueIssues.find(
     (issue) => issue.code === "declaration-source-read-failed",
   );
-  const code = readIssue?.code ?? issues[0]!.code;
+  const code = readIssue?.code ?? uniqueIssues[0]!.code;
   const message =
-    issues.length === 1
-      ? issues[0]!.message
-      : `Invalid declarations:\n${issues.map((issue) => `  - ${issue.message}`).join("\n")}`;
+    uniqueIssues.length === 1
+      ? uniqueIssues[0]!.message
+      : `Invalid declarations:\n${uniqueIssues.map((issue) => `  - ${issue.message}`).join("\n")}`;
   return new MaintenanceError(code, message);
 }
 

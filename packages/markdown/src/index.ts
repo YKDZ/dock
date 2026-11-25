@@ -3,6 +3,13 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
+  isWellFormedJsonString,
+  JsonSyntaxError,
+  parseJsonDocument,
+  type JsonCstNode,
+  type JsonPropertyNode,
+} from "@dock/core";
+import {
   computeLineRange,
   createReference,
   definePlugin,
@@ -12,6 +19,7 @@ import {
   type PluginBatchResult,
   type PluginContext,
   type PluginDeclarationSource,
+  type PluginDiscoveredBinding,
   type PluginDiscoveryInput,
   type PluginDiscoveryIssue,
   type PluginDiscoveryResult,
@@ -61,6 +69,7 @@ export type MarkdownSelectionStep =
   | { kind: "node"; selector: MarkdownNodeSelection }
   | { kind: "tableCell"; selector: MarkdownTableCellSelection }
   | { kind: "marker"; id: string }
+  | { kind: "bind"; id: string }
   | TextSelectionStep;
 
 export type MarkdownSelection = {
@@ -184,39 +193,84 @@ const implementation = definePlugin({
       referencedPaths.add(resolveTarget(reference.target, context.root));
     }
 
-    const filesToValidate = new Set<string>([
+    const configuredPaths = new Set<string>([
       ...explicitSourcePaths,
-      ...missingBaselinePaths,
+      ...referencedPaths,
     ]);
+    const bindings: PluginDiscoveredBinding[] = [];
     const issues: PluginDiscoveryIssue[] = [];
-    for (const absolutePath of filesToValidate) {
+    for (const absolutePath of configuredPaths) {
       const displayPath = displayTarget(absolutePath, context.root);
       let fileState: MarkdownFileState;
       try {
         fileState = await loadSource(absolutePath, displayPath);
       } catch (error) {
-        issues.push({
-          code: "declaration-source-read-failed",
-          message: `Cannot read Markdown declaration source ${displayPath}: ${errorMessage(error)}`,
-        });
+        const readCause =
+          error instanceof MarkdownReferenceError ? error.cause : error;
+        const isMissingReferenceOnlyFile =
+          !explicitSourcePaths.has(absolutePath) &&
+          !missingBaselinePaths.has(absolutePath) &&
+          hasCode(readCause, "ENOENT");
+        if (!isMissingReferenceOnlyFile) {
+          issues.push({
+            code: "declaration-source-read-failed",
+            message: `Cannot read Markdown declaration source ${displayPath}: ${errorMessage(error)}`,
+          });
+        }
         continue;
+      }
+
+      const scanned = fileState.directives();
+      for (const entry of scanned.inlineBindings) {
+        const declaredAt = `${displayPath}:${entry.startLine}`;
+        const bodyReference = createReference<
+          typeof markdownPluginId,
+          string,
+          string,
+          string,
+          MarkdownSelection
+        >(markdownPluginId, inlineMarkdownReferenceId(entry.id), displayPath, {
+          selection: {
+            kind: "markdown",
+            steps: [{ kind: "bind", id: entry.id }],
+          },
+          declaredAt,
+        });
+        bindings.push({
+          id: entry.id,
+          ownReferences: [bodyReference],
+          referenceIds: [bodyReference.id, ...entry.with],
+          declaredAt,
+        });
+      }
+
+      for (const issue of scanned.issues) {
+        if (issue.kind === "bind") {
+          issues.push({
+            code: "declaration-invalid",
+            message: issue.message(displayPath),
+          });
+        }
       }
 
       if (
         explicitSourcePaths.has(absolutePath) &&
-        !referencedPaths.has(absolutePath)
+        !referencedPaths.has(absolutePath) &&
+        scanned.inlineBindings.length === 0
       ) {
-        const directiveIssues = fileState.directives().issues;
-        if (directiveIssues.length > 0) {
+        const markerIssues = scanned.issues.filter(
+          (issue) => issue.kind !== "bind",
+        );
+        if (markerIssues.length > 0) {
           issues.push({
             code: "invalid-marker",
-            message: formatDirectiveIssues(displayPath, directiveIssues),
+            message: formatDirectiveIssues(displayPath, markerIssues),
           });
         }
       }
     }
 
-    return { bindings: [], issues };
+    return { bindings, issues };
   },
   fileInfo(reference: MarkdownReference, context: PluginContext): string {
     return resolveTarget(reference.target, context.root);
@@ -589,6 +643,13 @@ function selectMarkdownRange(
   if (step.kind === "marker") {
     return selectMarker(fileState.markers(), input, step.id);
   }
+  if (step.kind === "bind") {
+    return selectInlineBind(
+      fileState.directives().inlineBindings,
+      input,
+      step.id,
+    );
+  }
   if (
     step.kind === "quote" ||
     step.kind === "match" ||
@@ -630,7 +691,19 @@ type DockDirective = {
   readonly raw: string;
 };
 
+type InlineBindDirective = {
+  readonly id: string;
+  readonly with: readonly string[];
+  readonly start: number;
+  readonly end: number;
+  readonly startLine: number;
+  readonly endLine: number;
+  readonly bodyStart: number;
+  readonly bodyEnd: number;
+};
+
 type DockDirectiveIssue = {
+  readonly kind: "marker" | "bind";
   readonly code: string;
   readonly start: number;
   readonly end: number;
@@ -642,6 +715,11 @@ type DockDirectiveIssue = {
 
 type ScannedDocumentDirectives = {
   readonly markers: readonly DockDirective[];
+  readonly inlineBindings: readonly InlineBindDirective[];
+  readonly directives: readonly {
+    readonly start: number;
+    readonly end: number;
+  }[];
   readonly issues: readonly DockDirectiveIssue[];
 };
 
@@ -655,7 +733,51 @@ type HtmlNode = {
   } | null;
 };
 
+type HtmlBlockContext = {
+  readonly nodeStart: number;
+  readonly nodeEnd: number;
+  readonly parentType: string;
+  readonly nextSibling: MarkdownNode | undefined;
+};
+
 const dockDirectiveCommentPattern = /^<!--\s*dock:/u;
+const bindContainerTypes = new Set(["root", "blockquote", "listItem"]);
+const allowedBindBlockTypes = new Set([
+  "paragraph",
+  "code",
+  "list",
+  "table",
+  "blockquote",
+]);
+
+function inlineMarkdownReferenceId(bindingId: string): string {
+  return `dock:bind:${bindingId}`;
+}
+
+function collectHtmlBlockContexts(
+  source: string,
+  root: MarkdownRoot,
+): HtmlBlockContext[] {
+  const contexts: HtmlBlockContext[] = [];
+  const visit = (node: MarkdownNode): void => {
+    const children = node.children ?? [];
+    for (let index = 0; index < children.length; index++) {
+      const child = children[index]!;
+      if (child.type === "html") {
+        const { start, end } = nodeOffsets(source, child);
+        contexts.push({
+          nodeStart: start,
+          nodeEnd: end,
+          parentType: node.type,
+          nextSibling: children[index + 1],
+        });
+      }
+      visit(child);
+    }
+  };
+  visit(root);
+  return contexts;
+}
 
 function scanDocumentDirectives(
   source: string,
@@ -663,21 +785,22 @@ function scanDocumentDirectives(
 ): ScannedDocumentDirectives {
   // Skip full-document Markdown + HTML fragment scanning when no dock: comment prefix is present.
   if (!markerPrefixPattern.test(source)) {
-    return { markers: [], issues: [] };
+    return { markers: [], inlineBindings: [], directives: [], issues: [] };
   }
 
   const markers: DockDirective[] = [];
+  const inlineBindings: InlineBindDirective[] = [];
+  const directiveSpans: { readonly start: number; readonly end: number }[] = [];
   const issues: DockDirectiveIssue[] = [];
-  const nodes = allNodes(getFullDocumentRoot());
+  const fullRoot = getFullDocumentRoot();
+  const htmlContexts = collectHtmlBlockContexts(source, fullRoot);
   const masked: string[] = source
     .split("")
     .map((character) =>
       character === "\r" || character === "\n" ? character : " ",
     );
-  for (const node of nodes) {
-    if (node.type !== "html") continue;
-    const { start, end } = nodeOffsets(source, node);
-    for (let offset = start; offset < end; offset++) {
+  for (const context of htmlContexts) {
+    for (let offset = context.nodeStart; offset < context.nodeEnd; offset++) {
       masked[offset] = source[offset]!;
     }
   }
@@ -686,7 +809,7 @@ function scanDocumentDirectives(
   const fragment = parseFragment(masked.join(""), {
     sourceCodeLocationInfo: true,
   }) as unknown as HtmlNode;
-  const visit = (html: HtmlNode): void => {
+  const visit = (html: HtmlNode, parentHtml: HtmlNode | undefined): void => {
     const location = html.sourceCodeLocation;
     if (
       html.nodeName === "#comment" &&
@@ -697,23 +820,45 @@ function scanDocumentDirectives(
       const end = location.endOffset;
       const raw = source.slice(start, end);
       if (dockDirectiveCommentPattern.test(raw)) {
-        const parsed = parseDockDirective(source, start, end, raw);
-        if (parsed.kind === "issue") {
-          issues.push(parsed.issue);
+        const htmlContext = htmlContexts.find(
+          (candidate) =>
+            start >= candidate.nodeStart && end <= candidate.nodeEnd,
+        );
+        const parsed = parseDockDirective(
+          source,
+          start,
+          end,
+          raw,
+          parentHtml === fragment,
+          htmlContext,
+        );
+        if (parsed.kind === "issues") {
+          issues.push(...parsed.issues);
+        } else if (parsed.kind === "bind") {
+          inlineBindings.push(parsed.inlineBinding);
+          directiveSpans.push({ start, end });
         } else {
           markers.push(parsed.directive);
+          directiveSpans.push({ start, end });
         }
       }
     }
-    html.childNodes?.forEach(visit);
-    if (html.content !== undefined) visit(html.content);
+    html.childNodes?.forEach((child) => visit(child, html));
+    if (html.content !== undefined) visit(html.content, html);
   };
-  visit(fragment);
+  visit(fragment, undefined);
 
   markers.sort((left, right) => left.start - right.start);
+  inlineBindings.sort((left, right) => left.start - right.start);
+  directiveSpans.sort((left, right) => left.start - right.start);
   validateMarkerPairing(markers, issues);
   issues.sort((left, right) => left.start - right.start);
-  return { markers, issues };
+  return {
+    markers,
+    inlineBindings,
+    directives: directiveSpans,
+    issues,
+  };
 }
 
 function parseDockDirective(
@@ -721,72 +866,91 @@ function parseDockDirective(
   start: number,
   end: number,
   raw: string,
+  atFragmentRoot: boolean,
+  htmlContext: HtmlBlockContext | undefined,
 ):
   | { readonly kind: "directive"; readonly directive: DockDirective }
-  | { readonly kind: "issue"; readonly issue: DockDirectiveIssue } {
+  | { readonly kind: "bind"; readonly inlineBinding: InlineBindDirective }
+  | {
+      readonly kind: "issues";
+      readonly issues: readonly DockDirectiveIssue[];
+    } {
   const { startLine, endLine } = computeLineRange(source, start, end);
   if (!raw.endsWith("-->")) {
     return {
-      kind: "issue",
-      issue: {
-        code: "invalid-marker",
-        start,
-        end,
-        startLine,
-        endLine,
-        message: (displayPath) =>
-          `${displayPath}:${startLine}: Unclosed Dock directive comment (${previewDirective(raw)}): missing closing "-->".`,
-      },
+      kind: "issues",
+      issues: [
+        {
+          kind: "marker",
+          code: "invalid-marker",
+          start,
+          end,
+          startLine,
+          endLine,
+          message: (displayPath) =>
+            `${displayPath}:${startLine}: Unclosed Dock directive comment (${previewDirective(raw)}): missing closing "-->".`,
+        },
+      ],
     };
   }
 
-  const body = raw.slice(4, -3).trim();
+  const inner = raw.slice(4, -3);
+  const body = inner.trim();
   const headerMatch = /^dock:([^\s{]*)(?:([\s\S]*))?$/u.exec(body);
   const name = headerMatch?.[1] ?? "";
   const rest = (headerMatch?.[2] ?? "").trim();
 
   if (name.length === 0) {
     return {
-      kind: "issue",
-      issue: {
-        code: "invalid-marker",
-        start,
-        end,
-        startLine,
-        endLine,
-        message: (displayPath) =>
-          `${displayPath}:${startLine}: Empty Dock directive (${previewDirective(raw)}). Expected dock:start or dock:end.`,
-      },
+      kind: "issues",
+      issues: [
+        {
+          kind: "marker",
+          code: "invalid-marker",
+          start,
+          end,
+          startLine,
+          endLine,
+          message: (displayPath) =>
+            `${displayPath}:${startLine}: Empty Dock directive (${previewDirective(raw)}). Expected dock:start, dock:end, or dock:bind.`,
+        },
+      ],
     };
   }
 
   if (name === "start" || name === "end") {
     if (rest.length === 0) {
       return {
-        kind: "issue",
-        issue: {
-          code: "invalid-marker",
-          start,
-          end,
-          startLine,
-          endLine,
-          message: (displayPath) =>
-            `${displayPath}:${startLine}: Invalid Dock directive "dock:${name}" (${previewDirective(raw)}): missing marker ID.`,
-        },
+        kind: "issues",
+        issues: [
+          {
+            kind: "marker",
+            code: "invalid-marker",
+            start,
+            end,
+            startLine,
+            endLine,
+            message: (displayPath) =>
+              `${displayPath}:${startLine}: Invalid Dock directive "dock:${name}" (${previewDirective(raw)}): missing marker ID.`,
+          },
+        ],
       };
     }
     if (/\s/u.test(rest)) {
       return {
-        kind: "issue",
-        issue: {
-          code: "invalid-marker",
-          start,
-          end,
-          startLine,
-          endLine,
-          message: (displayPath) =>
-            `${displayPath}:${startLine}: Invalid Dock directive "dock:${name}" (${previewDirective(raw)}): marker ID must be a single non-empty token without whitespace.`,
-        },
+        kind: "issues",
+        issues: [
+          {
+            kind: "marker",
+            code: "invalid-marker",
+            start,
+            end,
+            startLine,
+            endLine,
+            message: (displayPath) =>
+              `${displayPath}:${startLine}: Invalid Dock directive "dock:${name}" (${previewDirective(raw)}): marker ID must be a single non-empty token without whitespace.`,
+          },
+        ],
       };
     }
     return {
@@ -803,16 +967,350 @@ function parseDockDirective(
     };
   }
 
-  return {
-    kind: "issue",
-    issue: {
-      code: "invalid-marker",
+  if (name === "bind") {
+    return parseDockBindDirective(
+      source,
       start,
       end,
       startLine,
       endLine,
-      message: (displayPath) =>
-        `${displayPath}:${startLine}: Unknown Dock directive "dock:${name}" (${previewDirective(raw)}). Expected dock:start or dock:end.`,
+      raw,
+      inner,
+      atFragmentRoot,
+      htmlContext,
+    );
+  }
+
+  return {
+    kind: "issues",
+    issues: [
+      {
+        kind: "marker",
+        code: "invalid-marker",
+        start,
+        end,
+        startLine,
+        endLine,
+        message: (displayPath) =>
+          `${displayPath}:${startLine}: Unknown Dock directive "dock:${name}" (${previewDirective(raw)}). Expected dock:start, dock:end, or dock:bind.`,
+      },
+    ],
+  };
+}
+
+function parseDockBindDirective(
+  source: string,
+  start: number,
+  end: number,
+  startLine: number,
+  endLine: number,
+  raw: string,
+  inner: string,
+  atFragmentRoot: boolean,
+  htmlContext: HtmlBlockContext | undefined,
+):
+  | { readonly kind: "bind"; readonly inlineBinding: InlineBindDirective }
+  | {
+      readonly kind: "issues";
+      readonly issues: readonly DockDirectiveIssue[];
+    } {
+  const issues: DockDirectiveIssue[] = [];
+  const header = /^(\s*dock:bind)([\s\S]*)$/u.exec(inner);
+  const afterKeyword = header?.[2] ?? "";
+  const leadingWhitespace = afterKeyword.match(/^\s*/u)?.[0].length ?? 0;
+  const payload = afterKeyword.trim();
+  const payloadStartOffset =
+    start + 4 + (header?.[1]?.length ?? 0) + leadingWhitespace;
+
+  const lineAtPayloadOffset = (offset: number): number =>
+    computeLineRange(
+      source,
+      payloadStartOffset + offset,
+      payloadStartOffset + offset,
+    ).startLine;
+
+  const pushBindIssue = (
+    issueStart: number,
+    issueEnd: number,
+    issueLine: number,
+    formatMessage: (displayPath: string) => string,
+  ): void => {
+    issues.push({
+      kind: "bind",
+      code: "declaration-invalid",
+      start: issueStart,
+      end: issueEnd,
+      startLine: issueLine,
+      endLine: issueLine,
+      message: formatMessage,
+    });
+  };
+
+  let bindingId: string | undefined;
+  let withIds: string[] | undefined;
+
+  if (payload.length === 0) {
+    pushBindIssue(
+      start,
+      end,
+      startLine,
+      (displayPath) =>
+        `${displayPath}:${startLine}: Invalid Dock directive "dock:bind" (${previewDirective(raw)}): missing JSON object parameter.`,
+    );
+  } else {
+    let cst: JsonCstNode | undefined;
+    try {
+      cst = parseJsonDocument(payload);
+    } catch (error) {
+      if (error instanceof JsonSyntaxError) {
+        const errOffset = payloadStartOffset + error.offset;
+        const errLine = lineAtPayloadOffset(error.offset);
+        pushBindIssue(
+          errOffset,
+          Math.min(end, errOffset + 1),
+          errLine,
+          (displayPath) =>
+            `${displayPath}:${errLine}: Invalid JSON in "dock:bind": ${error.message}`,
+        );
+      } else {
+        throw error;
+      }
+    }
+
+    if (cst !== undefined) {
+      if (cst.kind !== "object") {
+        const valueLine = lineAtPayloadOffset(cst.span.start.offset);
+        pushBindIssue(
+          payloadStartOffset + cst.span.start.offset,
+          payloadStartOffset + cst.span.end.offset,
+          valueLine,
+          (displayPath) =>
+            `${displayPath}:${valueLine}: Invalid "dock:bind" parameter: expected a JSON object.`,
+        );
+      } else {
+        const props = new Map<string, JsonPropertyNode>();
+        const duplicatedKeys = new Set<string>();
+        const invalidKeys = new Set<string>();
+
+        for (const prop of cst.properties) {
+          const propLine = lineAtPayloadOffset(prop.keySpan.start.offset);
+          const propAbsStart = payloadStartOffset + prop.keySpan.start.offset;
+          const propAbsEnd = payloadStartOffset + prop.keySpan.end.offset;
+          if (!isWellFormedJsonString(prop.key)) {
+            if (!invalidKeys.has(prop.key)) {
+              invalidKeys.add(prop.key);
+              pushBindIssue(
+                propAbsStart,
+                propAbsEnd,
+                propLine,
+                (displayPath) =>
+                  `${displayPath}:${propLine}: Invalid field name in "dock:bind": contains an unpaired surrogate.`,
+              );
+            }
+            continue;
+          }
+          const first = props.get(prop.key);
+          if (first !== undefined) {
+            if (!duplicatedKeys.has(prop.key)) {
+              duplicatedKeys.add(prop.key);
+              const firstLine = lineAtPayloadOffset(first.keySpan.start.offset);
+              pushBindIssue(
+                propAbsStart,
+                propAbsEnd,
+                propLine,
+                (displayPath) =>
+                  `${displayPath}:${propLine}: Duplicate field ${JSON.stringify(prop.key)} in "dock:bind" (lines ${firstLine} and ${propLine}).`,
+              );
+            }
+            continue;
+          }
+          props.set(prop.key, prop);
+          if (prop.key !== "id" && prop.key !== "with") {
+            pushBindIssue(
+              propAbsStart,
+              propAbsEnd,
+              propLine,
+              (displayPath) =>
+                `${displayPath}:${propLine}: Unknown field ${JSON.stringify(prop.key)} in "dock:bind". Expected only "id" and "with".`,
+            );
+          }
+        }
+
+        const idProp = props.get("id");
+        if (idProp === undefined && !invalidKeys.has("id")) {
+          pushBindIssue(
+            start,
+            end,
+            startLine,
+            (displayPath) =>
+              `${displayPath}:${startLine}: Missing required field "id" in "dock:bind".`,
+          );
+        } else if (idProp !== undefined && !duplicatedKeys.has("id")) {
+          const idLine = lineAtPayloadOffset(idProp.value.span.start.offset);
+          const idStart = payloadStartOffset + idProp.value.span.start.offset;
+          const idEnd = payloadStartOffset + idProp.value.span.end.offset;
+          if (
+            idProp.value.kind !== "string" ||
+            idProp.value.value.length === 0
+          ) {
+            pushBindIssue(
+              idStart,
+              idEnd,
+              idLine,
+              (displayPath) =>
+                `${displayPath}:${idLine}: Invalid field "id" in "dock:bind": must be a non-empty string.`,
+            );
+          } else if (!isWellFormedJsonString(idProp.value.value)) {
+            pushBindIssue(
+              idStart,
+              idEnd,
+              idLine,
+              (displayPath) =>
+                `${displayPath}:${idLine}: Invalid field "id" in "dock:bind": contains an unpaired surrogate.`,
+            );
+          } else {
+            bindingId = idProp.value.value;
+          }
+        }
+
+        const withProp = props.get("with");
+        if (withProp === undefined && !invalidKeys.has("with")) {
+          pushBindIssue(
+            start,
+            end,
+            startLine,
+            (displayPath) =>
+              `${displayPath}:${startLine}: Missing required field "with" in "dock:bind".`,
+          );
+        } else if (withProp !== undefined && !duplicatedKeys.has("with")) {
+          const withLine = lineAtPayloadOffset(
+            withProp.value.span.start.offset,
+          );
+          const withStart =
+            payloadStartOffset + withProp.value.span.start.offset;
+          const withEnd = payloadStartOffset + withProp.value.span.end.offset;
+          if (withProp.value.kind !== "array") {
+            pushBindIssue(
+              withStart,
+              withEnd,
+              withLine,
+              (displayPath) =>
+                `${displayPath}:${withLine}: Invalid field "with" in "dock:bind": must be a non-empty array of reference IDs.`,
+            );
+          } else if (withProp.value.items.length === 0) {
+            pushBindIssue(
+              withStart,
+              withEnd,
+              withLine,
+              (displayPath) =>
+                `${displayPath}:${withLine}: Invalid field "with" in "dock:bind": reference ID list cannot be empty.`,
+            );
+          } else {
+            const collectedWith: string[] = [];
+            let allItemsValid = true;
+            for (const [index, item] of withProp.value.items.entries()) {
+              const itemLine = lineAtPayloadOffset(item.span.start.offset);
+              const itemStart = payloadStartOffset + item.span.start.offset;
+              const itemEnd = payloadStartOffset + item.span.end.offset;
+              if (item.kind !== "string" || item.value.length === 0) {
+                allItemsValid = false;
+                pushBindIssue(
+                  itemStart,
+                  itemEnd,
+                  itemLine,
+                  (displayPath) =>
+                    `${displayPath}:${itemLine}: Invalid field "with[${index}]" in "dock:bind": must be a non-empty string.`,
+                );
+              } else if (!isWellFormedJsonString(item.value)) {
+                allItemsValid = false;
+                pushBindIssue(
+                  itemStart,
+                  itemEnd,
+                  itemLine,
+                  (displayPath) =>
+                    `${displayPath}:${itemLine}: Invalid field "with[${index}]" in "dock:bind": contains an unpaired surrogate.`,
+                );
+              } else {
+                collectedWith.push(item.value);
+              }
+            }
+            if (allItemsValid) {
+              withIds = collectedWith;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const label =
+    bindingId === undefined ? `"dock:bind"` : `"dock:bind" (${bindingId})`;
+  const isStandaloneBlock =
+    atFragmentRoot &&
+    htmlContext !== undefined &&
+    bindContainerTypes.has(htmlContext.parentType) &&
+    source.slice(htmlContext.nodeStart, start).trim().length === 0 &&
+    source.slice(end, htmlContext.nodeEnd).trim().length === 0;
+
+  let bodyRange: NodeOffsets | undefined;
+  if (!isStandaloneBlock) {
+    pushBindIssue(
+      start,
+      end,
+      startLine,
+      (displayPath) =>
+        `${displayPath}:${startLine}: Invalid ${label}: must be a standalone block-level HTML comment.`,
+    );
+  } else if (htmlContext.nextSibling === undefined) {
+    pushBindIssue(
+      start,
+      end,
+      startLine,
+      (displayPath) =>
+        `${displayPath}:${startLine}: Invalid ${label}: missing immediately following Markdown block before end of document or container.`,
+    );
+  } else if (!allowedBindBlockTypes.has(htmlContext.nextSibling.type)) {
+    const nextNode = htmlContext.nextSibling;
+    const nextDescription =
+      nextNode.type === "html"
+        ? `HTML block (${previewDirective(
+            source.slice(
+              nodeOffsets(source, nextNode).start,
+              nodeOffsets(source, nextNode).end,
+            ),
+          )})`
+        : nextNode.type;
+    pushBindIssue(
+      start,
+      end,
+      startLine,
+      (displayPath) =>
+        `${displayPath}:${startLine}: Invalid ${label}: must be immediately followed by a Markdown block (paragraph, code, list, table, or blockquote), found ${nextDescription}.`,
+    );
+  } else {
+    bodyRange = nodeOffsets(source, htmlContext.nextSibling);
+  }
+
+  if (
+    issues.length > 0 ||
+    bindingId === undefined ||
+    withIds === undefined ||
+    bodyRange === undefined
+  ) {
+    return { kind: "issues", issues };
+  }
+
+  return {
+    kind: "bind",
+    inlineBinding: {
+      id: bindingId,
+      with: withIds,
+      start,
+      end,
+      startLine,
+      endLine,
+      bodyStart: bodyRange.start,
+      bodyEnd: bodyRange.end,
     },
   };
 }
@@ -836,6 +1334,7 @@ function validateMarkerPairing(
       const target = starts[1]!;
       const lineList = starts.map((marker) => marker.startLine).join(", ");
       issues.push({
+        kind: "marker",
         code: "invalid-marker",
         start: target.start,
         end: target.end,
@@ -851,6 +1350,7 @@ function validateMarkerPairing(
       const target = ends[1]!;
       const lineList = ends.map((marker) => marker.startLine).join(", ");
       issues.push({
+        kind: "marker",
         code: "invalid-marker",
         start: target.start,
         end: target.end,
@@ -865,6 +1365,7 @@ function validateMarkerPairing(
     if (starts.length >= 1 && ends.length === 0) {
       const opening = starts[0]!;
       issues.push({
+        kind: "marker",
         code: "invalid-marker",
         start: opening.start,
         end: opening.end,
@@ -879,6 +1380,7 @@ function validateMarkerPairing(
     if (starts.length === 0 && ends.length >= 1) {
       const closing = ends[0]!;
       issues.push({
+        kind: "marker",
         code: "invalid-marker",
         start: closing.start,
         end: closing.end,
@@ -898,6 +1400,7 @@ function validateMarkerPairing(
       const opening = starts[0]!;
       const closing = ends[0]!;
       issues.push({
+        kind: "marker",
         code: "invalid-marker",
         start: closing.start,
         end: closing.end,
@@ -940,14 +1443,35 @@ function markdownFact(fileState: MarkdownFileState, input: TextRange): string {
   const { source } = fileState;
   let result = "";
   let cursor = input.start;
-  for (const marker of fileState.markers()) {
-    if (marker.end <= input.start || marker.start >= input.end) continue;
-    const start = Math.max(input.start, marker.start);
-    const end = Math.min(input.end, marker.end);
+  for (const directive of fileState.directives().directives) {
+    if (directive.end <= input.start || directive.start >= input.end) continue;
+    const start = Math.max(input.start, directive.start);
+    const end = Math.min(input.end, directive.end);
     result += source.slice(cursor, start);
     cursor = Math.max(cursor, end);
   }
   return result + source.slice(cursor, input.end);
+}
+
+function selectInlineBind(
+  inlineBindings: readonly InlineBindDirective[],
+  input: TextRange,
+  id: string,
+): TextRange {
+  if (typeof id !== "string" || id.length === 0) {
+    throw invalidSelector("Inline bind ID must be a non-empty string.");
+  }
+  const entry = one(
+    inlineBindings.filter((candidate) => candidate.id === id),
+    `inline binding ${id}`,
+  );
+  if (entry.bodyStart < input.start || entry.bodyEnd > input.end) {
+    throw new MarkdownReferenceError(
+      "missing-selection",
+      `Inline binding ${id} is outside the current selection range.`,
+    );
+  }
+  return { path: input.path, start: entry.bodyStart, end: entry.bodyEnd };
 }
 
 function selectMarker(
@@ -1383,6 +1907,19 @@ function assertMarkdownStep(
     }
     throw invalidSelector(
       "Marker selection must provide a non-empty single-line ID with no extra fields.",
+    );
+  }
+  if (value.kind === "bind") {
+    if (
+      Object.keys(value).length === 2 &&
+      typeof value.id === "string" &&
+      value.id.length > 0 &&
+      isWellFormedJsonString(value.id)
+    ) {
+      return;
+    }
+    throw invalidSelector(
+      "Inline bind selection must provide a non-empty ID with no extra fields.",
     );
   }
   throw invalidSelector("Unsupported Markdown selection step.");
