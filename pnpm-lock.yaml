@@ -305,6 +305,9 @@ importers:
       '@dock/tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@dock/vitest':
+        specifier: workspace:*
+        version: link:../vitest
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
@@ -320,9 +323,6 @@ importers:
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
-      vitest:
-        specifier: 4.1.11
-        version: 4.1.11(@types/node@26.6.6)(yaml@2.9.1)
 
   packages/host:
     dependencies:
@@ -366,6 +366,37 @@ importers:
       typescript-7:
         specifier: 'catalog:'
         version: typescript@7.0.2
+
+  packages/vitest:
+    dependencies:
+      '@dock/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dock/host':
+        specifier: workspace:*
+        version: link:../host
+    devDependencies:
+      '@dock/tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.79.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.94.0
+      tsrs:
+        specifier: 'catalog:'
+        version: 7.1.0-beta.tsrs4
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+      vitest:
+        specifier: 4.1.11
+        version: 4.1.11(@types/node@26.6.6)(yaml@2.9.1)
 
 packages:
 

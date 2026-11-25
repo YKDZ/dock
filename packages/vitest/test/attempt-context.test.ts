@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   installVitestAttemptCapture,
   recordVitestObservation,
-} from "../../src/vitest/attempt-context.ts";
+} from "../src/attempt-context.ts";
 
 void test("reinstalling aroundEach hooks records only one real attempt for the same test", async () => {
   const handlers: ((
@@ -60,4 +60,11 @@ void test("reinstalling aroundEach hooks records only one real attempt for the s
   assert.deepEqual(cancelledMetadata.dockVitestAttempts, [
     { attempt: 1, observations: [], reads: [] },
   ]);
+  assert.equal(
+    Object.hasOwn(
+      globalThis,
+      Symbol.for("@ykdz/dock/vitest/0.3.0/attempt-context"),
+    ),
+    true,
+  );
 });

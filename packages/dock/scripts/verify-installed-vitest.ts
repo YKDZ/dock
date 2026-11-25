@@ -131,6 +131,7 @@ const fixtureDirectory = join(
 const forbiddenLegacyPackages = [
   "@dock/core",
   "@dock/host",
+  "@dock/vitest",
   "@ykdz/dock-core",
   "@ykdz/dock-reference-file",
   "@ykdz/dock-reference-markdown",

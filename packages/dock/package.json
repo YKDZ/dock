@@ -78,12 +78,12 @@
     "@dock/core": "workspace:*",
     "@dock/host": "workspace:*",
     "@dock/tooling-config": "workspace:*",
+    "@dock/vitest": "workspace:*",
     "@types/node": "catalog:",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",
     "tsrs": "catalog:",
-    "typescript-7": "catalog:",
-    "vitest": "4.1.11"
+    "typescript-7": "catalog:"
   },
   "peerDependencies": {
     "vitest": "4.1.11 || 5.0.3"
