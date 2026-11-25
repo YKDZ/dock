@@ -124,6 +124,7 @@ const forbiddenBasePackages = [
   "@dock/typescript",
   "@dock/vitest",
   "@dock/node-test",
+  "@dock/tooling-config",
   "@ykdz/dock-core",
   "@ykdz/dock-reference-file",
   "@ykdz/dock-reference-markdown",
@@ -2063,6 +2064,210 @@ async function verifyInstalledMarkdownSmoke(
     inlineCorruptJs.stdout + inlineCorruptJs.stderr,
   );
 
+  // Verify comprehensive dock:bind syntax, field, duplicate-key, placement, member-duplicate, unknown-ref, and ID-conflict diagnostics via installed CLI.
+  const bindErrorCases: readonly {
+    readonly name: string;
+    readonly guide: string;
+    readonly code: string;
+    readonly patterns: readonly RegExp[];
+  }[] = [
+    {
+      name: "missing JSON payload",
+      guide: "# CLI Guide\n\n<!-- dock:bind -->\n\nBody.\n",
+      code: "declaration-invalid",
+      patterns: [/inline-guide\.md:3/, /missing JSON object parameter/],
+    },
+    {
+      name: "invalid JSON syntax",
+      guide: '# CLI Guide\n\n<!-- dock:bind {"id":"a", -->\n\nBody.\n',
+      code: "declaration-invalid",
+      patterns: [/inline-guide\.md:3/, /Invalid JSON in "dock:bind"/],
+    },
+    {
+      name: "non-object JSON",
+      guide: '# CLI Guide\n\n<!-- dock:bind ["a"] -->\n\nBody.\n',
+      code: "declaration-invalid",
+      patterns: [/inline-guide\.md:3/, /expected a JSON object/],
+    },
+    {
+      name: "missing required fields",
+      guide: "# CLI Guide\n\n<!-- dock:bind {} -->\n\nBody.\n",
+      code: "declaration-invalid",
+      patterns: [
+        /inline-guide\.md:3.*Missing required field "id"/,
+        /inline-guide\.md:3.*Missing required field "with"/,
+      ],
+    },
+    {
+      name: "raw duplicate JSON keys",
+      guide: [
+        "# CLI Guide",
+        "",
+        '<!-- dock:bind {"id":"a","id":"b","with":["cli exit code"]} -->',
+        "",
+        "Body 1.",
+        "",
+        '<!-- dock:bind {"id":"c","with":["cli exit code"],"with":["guide-exit-codes"]} -->',
+        "",
+        "Body 2.",
+        "",
+      ].join("\n"),
+      code: "declaration-invalid",
+      patterns: [
+        /inline-guide\.md:3.*Duplicate field "id"/,
+        /inline-guide\.md:7.*Duplicate field "with"/,
+      ],
+    },
+    {
+      name: "wrong types and empty values",
+      guide: [
+        "# CLI Guide",
+        "",
+        '<!-- dock:bind {"id":123,"with":"cli exit code"} -->',
+        "",
+        "Body 1.",
+        "",
+        '<!-- dock:bind {"id":"","with":[""]} -->',
+        "",
+        "Body 2.",
+        "",
+      ].join("\n"),
+      code: "declaration-invalid",
+      patterns: [
+        /inline-guide\.md:3.*Invalid field "id"/,
+        /inline-guide\.md:3.*Invalid field "with"/,
+        /inline-guide\.md:7.*Invalid field "id"/,
+        /inline-guide\.md:7.*Invalid field "with\[0\]"/,
+      ],
+    },
+    {
+      name: "missing following block before heading and at EOF",
+      guide: [
+        "# CLI Guide",
+        "",
+        '<!-- dock:bind {"id":"before-heading","with":["cli exit code"]} -->',
+        "## Exit Codes",
+        "",
+        "Exit code is 1 when inconsistent.",
+        "",
+        '<!-- dock:bind {"id":"at-eof","with":["cli exit code"]} -->',
+        "",
+      ].join("\n"),
+      code: "declaration-invalid",
+      patterns: [
+        /inline-guide\.md:3.*before-heading.*heading/,
+        /inline-guide\.md:8.*at-eof.*end of document/,
+      ],
+    },
+    {
+      name: "duplicate member in with",
+      guide: [
+        "# CLI Guide",
+        "",
+        '<!-- dock:bind {"id":"dup-member","with":["cli exit code","cli exit code"]} -->',
+        "Body.",
+        "",
+        "## Exit Codes",
+        "",
+        "Exit code is 1 when inconsistent.",
+        "",
+      ].join("\n"),
+      code: "declaration-invalid",
+      patterns: [
+        /Duplicate reference ID "cli exit code"/,
+        /dup-member/,
+        /inline-guide\.md:3/,
+      ],
+    },
+    {
+      name: "unknown reference ID",
+      guide: [
+        "# CLI Guide",
+        "",
+        '<!-- dock:bind {"id":"unknown-ref-bind","with":["missing-ref"]} -->',
+        "Body.",
+        "",
+        "## Exit Codes",
+        "",
+        "Exit code is 1 when inconsistent.",
+        "",
+      ].join("\n"),
+      code: "declaration-invalid",
+      patterns: [
+        /Unknown reference ID "missing-ref"/,
+        /unknown-ref-bind/,
+        /inline-guide\.md:3/,
+      ],
+    },
+    {
+      name: "ID conflict with existing TypeScript binding",
+      guide: [
+        "# CLI Guide",
+        "",
+        '<!-- dock:bind {"id":"exit-docs","with":["cli exit code"]} -->',
+        "Conflicts with TS binding.",
+        "",
+        "## Exit Codes",
+        "",
+        "Exit code is 1 when inconsistent.",
+        "",
+      ].join("\n"),
+      code: "declaration-invalid",
+      patterns: [
+        /Duplicate binding ID "exit-docs"/,
+        /inline-guide\.md:3/,
+        /TypeScript config bindings/,
+      ],
+    },
+  ];
+
+  for (const bindCase of bindErrorCases) {
+    await writeFile(inlineGuidePath, bindCase.guide, "utf8");
+    const checkFailed = await run(
+      bin,
+      ["check", "--config", "inline-bind.config.mjs"],
+      dir,
+    );
+    assert.equal(
+      checkFailed.code,
+      1,
+      `${bindCase.name}: ${checkFailed.stdout}`,
+    );
+    assert.match(
+      checkFailed.stderr,
+      new RegExp(`Maintenance failed \\(${bindCase.code}\\)`),
+      bindCase.name,
+    );
+    for (const pattern of bindCase.patterns) {
+      assert.match(
+        checkFailed.stderr,
+        pattern,
+        `${bindCase.name}: ${checkFailed.stderr}`,
+      );
+    }
+
+    const updateFailed = await run(
+      bin,
+      [
+        "baseline",
+        "update",
+        "--config",
+        "inline-bind.config.mjs",
+        "--output",
+        "structured",
+      ],
+      dir,
+    );
+    assert.equal(updateFailed.code, 1, bindCase.name);
+    const envelope = parseEnvelope(updateFailed.stderr);
+    assert.equal(envelope.variant, "maintenanceFailed", bindCase.name);
+    assert.equal(envelope.data?.code, bindCase.code, bindCase.name);
+    for (const pattern of bindCase.patterns) {
+      assert.match(envelope.data?.message ?? "", pattern, bindCase.name);
+    }
+    assert.deepEqual(await readFile(inlineBaselinePath), savedInlineBaseline);
+  }
+
   await verifyInstalledExplicitMarkdownSources(
     bin,
     join(dir, "explicit-markdown-sources"),
@@ -2435,6 +2640,21 @@ async function verifyInstalledExplicitMarkdownSources(
   assert.equal(
     partialCheck.stdout,
     "Scope: keep-binding\nAll checked bindings are consistent with baseline.\n",
+  );
+
+  const untrackedText = await run(
+    bin,
+    ["check", "--config", "ac4.config.mjs"],
+    dir,
+  );
+  assert.equal(untrackedText.code, 1, untrackedText.stderr);
+  assert.match(
+    untrackedText.stdout,
+    /Binding inline-one\nChange: binding removed \(no longer in current declarations\)/,
+  );
+  assert.match(
+    untrackedText.stdout,
+    /Binding inline-two\nChange: binding removed \(no longer in current declarations\)/,
   );
 
   const untrackedFull = await run(
@@ -3803,7 +4023,7 @@ async function verifyV3BaselineDiagnostics(consumer: string): Promise<void> {
     )
     .replace(
       '"id": "member alpha",',
-      '"id": "member alpha",\n                "memberExtra": "bad",',
+      '"id": "member alpha",\n                "id": "member alpha",\n                "memberExtra": "bad",',
     );
   assert.notEqual(multiCorrupted, prettyRaw);
   await writeFile(baselinePath, multiCorrupted, "utf8");
@@ -3819,6 +4039,7 @@ async function verifyV3BaselineDiagnostics(consumer: string): Promise<void> {
   assert.match(multiText.stderr, /\$\.unknownRoot/);
   assert.match(multiText.stderr, /references\["plain fact"\]\.vaule/);
   assert.match(multiText.stderr, /references\["plain fact"\]\.definition\.id/);
+  assert.match(multiText.stderr, /value\[0\]\.id/);
   assert.match(multiText.stderr, /value\[0\]\.memberExtra/);
 
   const multiUpdate = await run(
@@ -3827,6 +4048,16 @@ async function verifyV3BaselineDiagnostics(consumer: string): Promise<void> {
     consumer,
   );
   assert.equal(multiUpdate.code, 1);
+  assert.equal(multiUpdate.stdout, "");
+  assert.match(multiUpdate.stderr, /Maintenance failed \(baseline-invalid\)/);
+  assert.match(multiUpdate.stderr, /\$\.unknownRoot/);
+  assert.match(multiUpdate.stderr, /references\["plain fact"\]\.vaule/);
+  assert.match(
+    multiUpdate.stderr,
+    /references\["plain fact"\]\.definition\.id/,
+  );
+  assert.match(multiUpdate.stderr, /value\[0\]\.id/);
+  assert.match(multiUpdate.stderr, /value\[0\]\.memberExtra/);
   assert.equal(await readFile(baselinePath, "utf8"), multiCorrupted);
 
   const jsCorrupted = await run(

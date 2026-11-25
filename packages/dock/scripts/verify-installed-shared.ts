@@ -113,6 +113,13 @@ export async function assertForbiddenDependencies(
       `${contextLabel} must not depend on ${dependency}`,
     );
   }
+  for (const name of names) {
+    assert.equal(
+      name.startsWith("@dock/"),
+      false,
+      `${contextLabel} must not install internal workspace package ${name}`,
+    );
+  }
   return names;
 }
 

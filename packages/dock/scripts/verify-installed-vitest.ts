@@ -137,6 +137,7 @@ const forbiddenLegacyPackages = [
   "@dock/typescript",
   "@dock/vitest",
   "@dock/node-test",
+  "@dock/tooling-config",
   "@ykdz/dock-core",
   "@ykdz/dock-reference-file",
   "@ykdz/dock-reference-markdown",
