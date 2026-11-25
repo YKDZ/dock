@@ -2,6 +2,8 @@ import { accessSync } from "node:fs";
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { canonicalJson, type JsonValue } from "@dock/core";
+
 import {
   createReference,
   definePlugin,
@@ -17,7 +19,6 @@ import type {
   ReferencePlugin,
   ReferenceValue,
 } from "../contracts.ts";
-import { canonicalJson, type JsonValue } from "../core/index.ts";
 import {
   readReferenceInTest,
   recordVitestObservation,

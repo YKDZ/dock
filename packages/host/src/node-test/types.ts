@@ -1,4 +1,4 @@
-import type { JsonValue, TextRange } from "../core/index.ts";
+import type { JsonValue, TextRange } from "@dock/core";
 
 export type NodeRunConfiguration = {
   readonly framework: string;

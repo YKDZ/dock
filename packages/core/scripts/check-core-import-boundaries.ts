@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-const sourceDirectory = fileURLToPath(new URL("../src/core/", import.meta.url));
+const sourceDirectory = fileURLToPath(new URL("../src/", import.meta.url));
 const allowedImports: Record<string, readonly string[]> = {
   "json-value": [],
   contracts: ["json-value"],
@@ -31,14 +31,14 @@ for (const entry of readdirSync(sourceDirectory, { withFileTypes: true })) {
   }
 
   const source = readFileSync(
-    new URL(`../src/core/${entry.name}`, import.meta.url),
+    new URL(`../src/${entry.name}`, import.meta.url),
     "utf8",
   );
   for (const match of source.matchAll(importPattern)) {
     const specifier = match[1] ?? match[2] ?? match[3]!;
     if (!specifier.startsWith("./")) {
       violations.push(
-        `${entry.name} cannot depend on modules outside src/core/: ${specifier}`,
+        `${entry.name} cannot depend on modules outside src/: ${specifier}`,
       );
       continue;
     }

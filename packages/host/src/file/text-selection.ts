@@ -1,4 +1,4 @@
-import type { TextRange } from "../core/index.ts";
+import type { TextRange } from "@dock/core";
 
 export type TextSelectionStep =
   | { readonly kind: "quote"; readonly text: string }

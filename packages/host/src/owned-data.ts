@@ -1,5 +1,6 @@
+import { copyJsonValue, type JsonValue } from "@dock/core";
+
 import type { PluginInformation, Reference } from "./contracts.ts";
-import { copyJsonValue, type JsonValue } from "./core/index.ts";
 
 export function ownReference(reference: Reference): Reference {
   return Object.freeze({

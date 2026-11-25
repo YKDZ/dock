@@ -1,12 +1,13 @@
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { NormalizedReference } from "./authoring.ts";
 import type {
   Baseline,
   BindingDefinition,
   ReferenceDefinition,
-} from "./core/index.ts";
+} from "@dock/core";
+
+import type { NormalizedReference } from "./authoring.ts";
 
 export type MaintenanceScope = {
   readonly binding?: readonly string[];

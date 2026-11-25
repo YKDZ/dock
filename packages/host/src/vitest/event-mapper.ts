@@ -1,6 +1,6 @@
 import { relative, resolve } from "node:path";
 
-import { isJsonValue, type JsonValue, type TextRange } from "../core/index.ts";
+import { isJsonValue, type JsonValue, type TextRange } from "@dock/core";
 
 type VitestTestStatus =
   | "passed"

@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { readFileSync } from "node:fs";
 
+import { copyJsonValue, type JsonValue } from "@dock/core";
+
 import type {
   Config,
   PluginReadResult,
@@ -8,7 +10,6 @@ import type {
   ReferencePlugin,
   ReferenceValue,
 } from "../contracts.ts";
-import { copyJsonValue, type JsonValue } from "../core/index.ts";
 import { readReference } from "../read.ts";
 import type {
   VitestObservationRecord,

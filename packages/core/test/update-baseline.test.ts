@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { check, updateBaseline } from "@ykdz/dock/core";
-import type { Baseline, CheckInput, JsonValue } from "@ykdz/dock/core";
+import { assertBaseline, check, updateBaseline } from "@dock/core";
+import type { Baseline, CheckInput, JsonValue } from "@dock/core";
 
 void test("creates a baseline directly and updates valid differences without requiring a prior check", () => {
   const input: CheckInput = {
@@ -80,6 +80,10 @@ void test("unsupported or corrupted baselines fail explicitly instead of pretend
     () => updateBaseline({ ...input, baseline: damaged }),
     TypeError,
   );
+  assertBaseline(undefined);
+  assertBaseline(created.baseline);
+  assert.throws(() => assertBaseline(damaged), TypeError);
+  assert.throws(() => assertBaseline(unsupportedV2), /version 3/u);
 });
 
 void test("empty update scope cannot implicitly clear an existing baseline", () => {

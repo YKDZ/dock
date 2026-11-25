@@ -1,4 +1,4 @@
-export { canonicalJson, copyJsonValue, isJsonValue } from "./core/index.ts";
+export { canonicalJson, copyJsonValue, isJsonValue } from "@dock/core";
 export type {
   Baseline,
   BindingChange,
@@ -9,7 +9,7 @@ export type {
   ReferenceResult,
   TextRange,
   JsonValue,
-} from "./core/index.ts";
+} from "@dock/core";
 export type {
   Binding,
   Config,

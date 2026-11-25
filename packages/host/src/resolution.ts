@@ -1,6 +1,16 @@
 import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
+import {
+  assertBaseline,
+  resolveCheckScope,
+  type Baseline,
+  type BindingDefinition,
+  type CheckContext,
+  type JsonValue,
+  type ReferenceDefinition,
+} from "@dock/core";
+
 import { normalizeConfig, type NormalizedReference } from "./authoring.ts";
 import type {
   Config,
@@ -9,15 +19,6 @@ import type {
   PluginRequest,
   ReferencePlugin,
 } from "./contracts.ts";
-import { assertBaseline } from "./core/contracts.ts";
-import {
-  resolveCheckScope,
-  type Baseline,
-  type BindingDefinition,
-  type CheckContext,
-  type JsonValue,
-  type ReferenceDefinition,
-} from "./core/index.ts";
 import { MaintenanceError } from "./errors.ts";
 import { ownJsonValue, ownPluginInformation } from "./owned-data.ts";
 import {

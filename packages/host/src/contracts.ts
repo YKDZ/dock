@@ -3,9 +3,9 @@ import type {
   MemberDiscoveryCompleteness,
   ReferenceMemberResult,
   TextRange,
-} from "./core/index.ts";
+} from "@dock/core";
 
-export type { JsonValue, TextRange } from "./core/index.ts";
+export type { JsonValue, TextRange } from "@dock/core";
 
 /** Explicitly recorded declaration source, independent of reference target and config entry. */
 export type DeclarationSource = string | URL;

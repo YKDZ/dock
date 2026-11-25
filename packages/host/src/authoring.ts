@@ -1,3 +1,5 @@
+import { canonicalJson, isJsonValue, type JsonValue } from "@dock/core";
+
 import type {
   Binding,
   Config,
@@ -9,7 +11,6 @@ import type {
   ReferenceValue,
   RegisteredReference,
 } from "./contracts.ts";
-import { canonicalJson, isJsonValue, type JsonValue } from "./core/index.ts";
 import { ownReference } from "./owned-data.ts";
 
 export type {

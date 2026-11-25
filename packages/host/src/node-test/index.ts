@@ -1,6 +1,8 @@
 import { isAbsolute, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { canonicalJson } from "@dock/core";
+
 import {
   createReference,
   definePlugin,
@@ -20,7 +22,6 @@ import type {
   ReferencePlugin,
   ReferenceValue,
 } from "../contracts.ts";
-import { canonicalJson } from "../core/json-value.ts";
 import { readReference } from "../read.ts";
 import { executeNodeTestRun } from "./native-runner.ts";
 import {

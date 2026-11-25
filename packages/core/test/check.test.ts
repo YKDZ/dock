@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { check, isJsonValue, updateBaseline } from "@ykdz/dock/core";
+import { check, isJsonValue, updateBaseline } from "@dock/core";
 import type {
   BindingCheckResult,
   BindingDefinition,
@@ -13,7 +13,7 @@ import type {
   ReferenceMemberResult,
   ReferenceResult,
   TextRange,
-} from "@ykdz/dock/core";
+} from "@dock/core";
 
 const references: ReferenceDefinition[] = [
   {
