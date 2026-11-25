@@ -44,7 +44,7 @@ async function runCli(argv: readonly string[]) {
 
 async function createConfigWorkspace() {
   const root = await mkdtemp(join(tmpdir(), "dock-cli-contract-test-"));
-  const nodeModulesDock = join(root, "node_modules", "@ykdz", "dock");
+  const nodeModulesDock = join(root, "node_modules", "@boringparts", "dock");
   await writeFile(
     join(root, "package.json"),
     JSON.stringify({
@@ -130,7 +130,7 @@ void test("inspect, check, and baseline update share handlers across English tex
       [
         'import { readFile } from "node:fs/promises";',
         'import { join } from "node:path";',
-        'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+        'import { binding, createReference, defineConfig, definePlugin } from "@boringparts/dock";',
         "const plugin = definePlugin({",
         '  id: "fixture:text-fact",',
         "  validate() {},",
@@ -526,7 +526,7 @@ void test("CLI check and baseline update reject legacy version 2 baseline withou
                 definition: {
                   id: "fact-ref",
                   target: {
-                    pluginId: "@ykdz/dock-reference-file",
+                    pluginId: "dock:file",
                     target: "fact.txt",
                     fileInfo: "fact.txt",
                   },
@@ -544,7 +544,7 @@ void test("CLI check and baseline update reject legacy version 2 baseline withou
     await writeFile(
       configPath,
       [
-        'import { binding, defineConfig, file } from "@ykdz/dock";',
+        'import { binding, defineConfig, file } from "@boringparts/dock";',
         "export default defineConfig({",
         "  plugins: [file],",
         '  bindings: [binding("doc-policy", [file.from("fact.txt").reference("fact-ref")])],',
@@ -611,7 +611,7 @@ void test("lists related references with line-based locations, fallbacks, plugin
       [
         'import { readFileSync } from "node:fs";',
         'import { join } from "node:path";',
-        'import { binding, createReference, defineConfig, definePlugin, file } from "@ykdz/dock";',
+        'import { binding, createReference, defineConfig, definePlugin, file } from "@boringparts/dock";',
         "const customPlugin = definePlugin({",
         '  id: "fixture:custom",',
         "  validate() {},",
@@ -925,9 +925,9 @@ void test("renders local line-level context hunks for multiline text fact change
     await writeFile(
       configPath,
       [
-        'import { binding, defineConfig, file } from "@ykdz/dock";',
-        'import { markdown } from "@ykdz/dock/markdown";',
-        'import { typescript } from "@ykdz/dock/typescript";',
+        'import { binding, defineConfig, file } from "@boringparts/dock";',
+        'import { markdown } from "@boringparts/dock/markdown";',
+        'import { typescript } from "@boringparts/dock/typescript";',
         "export default defineConfig({",
         "  plugins: [file, markdown, typescript],",
         "  bindings: [",
@@ -1013,7 +1013,7 @@ void test("renders local line-level context hunks for multiline text fact change
 });
 
 void test("reports empty-selection at top level without claiming consistency, isolates missing-file errors to binding, and reports invalid plugin diagnostics separately", async () => {
-  const { updateBaseline } = await import("@ykdz/dock");
+  const { updateBaseline } = await import("@boringparts/dock");
   const root = await createConfigWorkspace();
   const emptyConfigPath = join(root, "empty.config.mjs");
   const fileConfigPath = join(root, "dock.config.mjs");
@@ -1025,7 +1025,7 @@ void test("reports empty-selection at top level without claiming consistency, is
     await writeFile(
       emptyConfigPath,
       [
-        'import { defineConfig } from "@ykdz/dock";',
+        'import { defineConfig } from "@boringparts/dock";',
         "export default defineConfig({ plugins: [], bindings: [] });",
       ].join("\n"),
     );
@@ -1072,7 +1072,7 @@ void test("reports empty-selection at top level without claiming consistency, is
     await writeFile(
       fileConfigPath,
       [
-        'import { binding, defineConfig, file } from "@ykdz/dock";',
+        'import { binding, defineConfig, file } from "@boringparts/dock";',
         "export default defineConfig({",
         "  plugins: [file],",
         '  bindings: [binding("guide-policy", [file.from("guide.txt").reference("guide-ref")])],',
@@ -1151,7 +1151,7 @@ void test("reports empty-selection at top level without claiming consistency, is
     await writeFile(
       diagConfigPath,
       [
-        'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+        'import { binding, createReference, defineConfig, definePlugin } from "@boringparts/dock";',
         "const plugin = definePlugin({",
         '  id: "fixture:bad-diag",',
         "  validate() {},",
@@ -1252,7 +1252,7 @@ void test("CLI and JS API distinguish V3 baseline corruption diagnostics from no
       [
         'import { readFileSync } from "node:fs";',
         'import { join } from "node:path";',
-        'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+        'import { binding, createReference, defineConfig, definePlugin } from "@boringparts/dock";',
         "const plugin = definePlugin({",
         '  id: "fixture:v3-diag",',
         "  validate() {},",
@@ -1460,7 +1460,7 @@ void test("deduplicates repeated root-cause explanations in default CLI text whi
                 definition: {
                   id: "usage-para",
                   target: {
-                    pluginId: "@ykdz/dock-reference-markdown",
+                    pluginId: "dock:markdown",
                     target: "guide.md",
                     fileInfo: "guide.md",
                   },
@@ -1475,7 +1475,7 @@ void test("deduplicates repeated root-cause explanations in default CLI text whi
                 definition: {
                   id: "usage-heading",
                   target: {
-                    pluginId: "@ykdz/dock-reference-markdown",
+                    pluginId: "dock:markdown",
                     target: "guide.md",
                     fileInfo: "guide.md",
                   },
@@ -1498,7 +1498,7 @@ void test("deduplicates repeated root-cause explanations in default CLI text whi
                 definition: {
                   id: "notes-para",
                   target: {
-                    pluginId: "@ykdz/dock-reference-markdown",
+                    pluginId: "dock:markdown",
                     target: "guide.md",
                     fileInfo: "guide.md",
                   },
@@ -1521,8 +1521,8 @@ void test("deduplicates repeated root-cause explanations in default CLI text whi
     await writeFile(
       configPath,
       [
-        'import { binding, defineConfig } from "@ykdz/dock";',
-        'import { markdown } from "@ykdz/dock/markdown";',
+        'import { binding, defineConfig } from "@boringparts/dock";',
+        'import { markdown } from "@boringparts/dock/markdown";',
         "export default defineConfig({",
         "  plugins: [markdown],",
         "  bindings: [",
@@ -1613,8 +1613,8 @@ void test("deduplicates repeated root-cause explanations in default CLI text whi
     await writeFile(
       missingSourceConfig,
       [
-        'import { defineConfig } from "@ykdz/dock";',
-        'import { markdown } from "@ykdz/dock/markdown";',
+        'import { defineConfig } from "@boringparts/dock";',
+        'import { markdown } from "@boringparts/dock/markdown";',
         "export default defineConfig({",
         `  baseline: ${JSON.stringify(baselinePath)},`,
         "  plugins: [markdown],",

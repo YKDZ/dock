@@ -1,10 +1,14 @@
-import { binding, defineConfig } from "@ykdz/dock";
+import { binding, defineConfig } from "@boringparts/dock";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestStatus,
-} from "@ykdz/dock/node-test";
-import { defineVitestRun, vitest, vitestStatus } from "@ykdz/dock/vitest";
+} from "@boringparts/dock/node-test";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@boringparts/dock/vitest";
 
 const identity = "shared run identity";
 const files = ["test/shared.test.mts"] as const;

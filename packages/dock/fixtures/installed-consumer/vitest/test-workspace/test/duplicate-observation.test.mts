@@ -1,4 +1,4 @@
-import { defineVitestObservation } from "@ykdz/dock/vitest";
+import { defineVitestObservation } from "@boringparts/dock/vitest";
 import { test } from "vitest";
 
 const value = defineVitestObservation("duplicate-value", "sample");

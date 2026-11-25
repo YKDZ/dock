@@ -4,7 +4,7 @@ import {
   defineConfig,
   inspect,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 import {
   catalogPlugin,

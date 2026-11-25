@@ -12,9 +12,9 @@
     "dock:baseline": "dock baseline update --config dock.config.ts && oxfmt --write dock.baseline.json"
   },
   "devDependencies": {
+    "@boringparts/dock": "workspace:*",
     "@dock/tooling-config": "workspace:*",
     "@types/node": "catalog:",
-    "@ykdz/dock": "workspace:*",
     "dock": "workspace:*",
     "oxfmt": "catalog:",
     "oxlint": "catalog:",

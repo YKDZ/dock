@@ -1,4 +1,4 @@
-import { typescript } from "@ykdz/dock/typescript";
+import { typescript } from "@boringparts/dock/typescript";
 
 // @ts-expect-error Declaration kind must belong to the supported set.
 typescript.from("symbol-source.ts").symbol("calculate", "enum");

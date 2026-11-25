@@ -1,4 +1,4 @@
-import { binding, defineConfig } from "@ykdz/dock";
+import { binding, defineConfig } from "@boringparts/dock";
 
 import { catalogPlugin, catalogReference } from "./external-plugin.mts";
 import { policy } from "./reexported-declarations.mts";

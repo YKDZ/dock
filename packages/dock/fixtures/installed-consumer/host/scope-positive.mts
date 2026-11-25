@@ -10,7 +10,7 @@ import {
   type PluginContext,
   type PluginRequest,
   type Reference,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 type ScopeReference = Reference<
   "fixture:scope",

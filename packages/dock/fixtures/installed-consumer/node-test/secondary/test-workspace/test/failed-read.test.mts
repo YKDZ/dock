@@ -6,7 +6,7 @@ import {
   beginExecution,
   defineNodeTestObservation,
   nodeTest as secondaryNodeTest,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 import {
   currentText,

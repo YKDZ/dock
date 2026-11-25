@@ -1,4 +1,4 @@
-import { binding } from "@ykdz/dock";
+import { binding } from "@boringparts/dock";
 
 import { catalogReference } from "./external-plugin.mts";
 

@@ -1,4 +1,9 @@
-import { binding, defineConfig, file, type FileReference } from "@ykdz/dock";
+import {
+  binding,
+  defineConfig,
+  file,
+  type FileReference,
+} from "@boringparts/dock";
 
 const guide: FileReference = file.from("guide.md").reference("guide");
 

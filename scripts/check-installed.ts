@@ -4,7 +4,7 @@ const resolveTarball = spawnSync(
   "pnpm",
   [
     "--filter",
-    "@ykdz/dock",
+    "@boringparts/dock",
     "exec",
     "node",
     "--input-type=module",
@@ -22,12 +22,15 @@ if (resolveTarball.status !== 0) {
 const tarball = resolveTarball.stdout.trim();
 if (tarball === "") {
   process.stderr.write(
-    "Failed to resolve @ykdz/dock tarball path from package directory.\n",
+    "Failed to resolve @boringparts/dock tarball path from package directory.\n",
   );
   process.exit(1);
 }
 
-for (const packageName of ["@ykdz/dock", "@dock/consumer-readme"] as const) {
+for (const packageName of [
+  "@boringparts/dock",
+  "@dock/consumer-readme",
+] as const) {
   const result = spawnSync(
     "pnpm",
     [

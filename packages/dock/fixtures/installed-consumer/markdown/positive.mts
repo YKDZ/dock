@@ -5,12 +5,12 @@ import {
   readReference,
   type PluginReadResult,
   type ReferenceValue,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 import {
   markdown,
   type MarkdownDeclarationSource,
   type MarkdownReference,
-} from "@ykdz/dock/markdown";
+} from "@boringparts/dock/markdown";
 
 const chapter = markdown
   .from("guide.md")

@@ -1,5 +1,5 @@
-import { binding, defineConfig } from "@ykdz/dock";
-import { defineVitestRun, vitest, vitestSuite } from "@ykdz/dock/vitest";
+import { binding, defineConfig } from "@boringparts/dock";
+import { defineVitestRun, vitest, vitestSuite } from "@boringparts/dock/vitest";
 
 import { settings, steps } from "./test-workspace/groups.observations.mts";
 

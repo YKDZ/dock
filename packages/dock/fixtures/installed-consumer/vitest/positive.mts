@@ -1,12 +1,12 @@
-import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
+import { binding, defineConfig, type ReferenceValue } from "@boringparts/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
   vitest,
   vitestObservation,
   vitestStatus,
-} from "@ykdz/dock/vitest";
-import type { VitestTestSelection } from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
+import type { VitestTestSelection } from "@boringparts/dock/vitest";
 
 const run = defineVitestRun("installed status check", {
   files: ["test/retry.test.mts"],

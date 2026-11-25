@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile, rename, rm, writeFile } from "node:fs/promises";
 
-import { check, MaintenanceError, updateBaseline } from "@ykdz/dock";
+import { check, MaintenanceError, updateBaseline } from "@boringparts/dock";
 
 await verifyDirectEntryAndRecovery();
 await verifyReexportedDeclaration();

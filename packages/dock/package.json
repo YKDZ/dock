@@ -1,15 +1,15 @@
 {
-  "name": "@ykdz/dock",
-  "version": "0.3.0",
-  "homepage": "https://github.com/YKDZ/dock",
+  "name": "@boringparts/dock",
+  "version": "0.4.0",
+  "description": "Find the docs to review after a change.",
+  "homepage": "https://github.com/boringparts/dock",
   "bugs": {
-    "url": "https://github.com/YKDZ/dock/issues"
+    "url": "https://github.com/boringparts/dock/issues"
   },
   "license": "MIT",
-  "author": "YKDZ",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/YKDZ/dock.git",
+    "url": "git+https://github.com/boringparts/dock.git",
     "directory": "packages/dock"
   },
   "bin": {

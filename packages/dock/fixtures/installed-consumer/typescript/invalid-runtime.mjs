@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 
-import { readReference } from "@ykdz/dock";
-import { typescript } from "@ykdz/dock/typescript";
+import { readReference } from "@boringparts/dock";
+import { typescript } from "@boringparts/dock/typescript";
 
 import config from "./dock.config.mjs";
 
 const invalid = {
   id: "invalid-selection",
-  pluginId: "@ykdz/dock-reference-typescript",
+  pluginId: "dock:typescript",
   target: "symbol-source.ts",
   selection: { kind: "typescript", steps: [{ kind: "symbol", name: [] }] },
 };

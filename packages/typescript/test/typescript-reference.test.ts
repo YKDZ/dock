@@ -8,9 +8,9 @@ import { pathToFileURL } from "node:url";
 import { binding, check, defineConfig, readReference } from "@dock/host";
 import { typescript, typescriptPluginId } from "@dock/typescript";
 
-void test("typescript plugin preserves legacy plugin ID", () => {
-  assert.equal(typescriptPluginId, "@ykdz/dock-reference-typescript");
-  assert.equal(typescript.id, "@ykdz/dock-reference-typescript");
+void test("typescript plugin uses dock:typescript plugin ID", () => {
+  assert.equal(typescriptPluginId, "dock:typescript");
+  assert.equal(typescript.id, "dock:typescript");
 });
 
 void test("symbol selection narrowed by plain text steps returns identical UTF-16 ranges in readReference and check", async () => {

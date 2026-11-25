@@ -1,10 +1,10 @@
-import { defineConfig } from "@ykdz/dock";
+import { defineConfig } from "@boringparts/dock";
 import {
   defineVitestRun,
   readReferenceInTest,
   vitest,
   vitestStatus,
-} from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
 
 const run = defineVitestRun("unreadable test status", {
   files: ["test/stable.test.mts"],

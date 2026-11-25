@@ -3,7 +3,7 @@ import { test } from "node:test";
 import {
   beginExecution,
   defineNodeTestObservation,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 const repeated = defineNodeTestObservation("duplicate.value", 0);
 

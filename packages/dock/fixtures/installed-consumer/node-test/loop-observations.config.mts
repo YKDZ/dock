@@ -1,10 +1,10 @@
-import { binding, defineConfig } from "@ykdz/dock";
+import { binding, defineConfig } from "@boringparts/dock";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 export const amount = defineNodeTestObservation("amount", 0);
 const run = defineNodeTestRun("loop-registered-observations", {

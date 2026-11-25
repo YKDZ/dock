@@ -12,7 +12,7 @@ import {
   definePlugin,
   inspect,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 const root = await mkdtemp(join(tmpdir(), "dock-host-batch-installed-"));
 const workerRoot = await mkdtemp(
@@ -125,7 +125,7 @@ try {
 
   await writeFile(
     cliConfigPath,
-    `import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";
+    `import { binding, createReference, defineConfig, definePlugin } from "@boringparts/dock";
 
 const makePlugin = (id, value) => definePlugin({
   id,
@@ -163,7 +163,7 @@ export default defineConfig({
   const installedCli = join(
     process.cwd(),
     "node_modules",
-    "@ykdz",
+    "@boringparts",
     "dock",
     "dist",
     "cli.js",
@@ -283,7 +283,7 @@ export default defineConfig({
       }`;
     await writeFile(
       workerConfigPath,
-      `import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";
+      `import { binding, createReference, defineConfig, definePlugin } from "@boringparts/dock";
 
 const plugin = definePlugin({
   id: ${JSON.stringify(pluginId)},

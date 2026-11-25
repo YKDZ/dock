@@ -3,12 +3,12 @@ import {
   file,
   type PluginReadResult,
   type ReferenceValue,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 import {
   defineVitestObservation,
   readReferenceInTest,
   vitestObservation,
-} from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
 
 import { sharedRun, sharedShape } from "../positive.mjs";
 

@@ -1,5 +1,5 @@
-import { binding, defineConfig, file } from "@ykdz/dock";
-import { markdown } from "@ykdz/dock/markdown";
+import { binding, defineConfig, file } from "@boringparts/dock";
+import { markdown } from "@boringparts/dock/markdown";
 
 const guideTarget = process.env.DOCK_MARKDOWN_TARGET ?? "guide.md";
 const sectionHeading =

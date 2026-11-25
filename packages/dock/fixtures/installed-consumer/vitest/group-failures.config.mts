@@ -1,10 +1,10 @@
-import { binding, defineConfig } from "@ykdz/dock";
+import { binding, defineConfig } from "@boringparts/dock";
 import {
   defineVitestRun,
   vitest,
   vitestStatus,
   vitestSuite,
-} from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
 
 import { settings } from "./test-workspace/groups.observations.mts";
 

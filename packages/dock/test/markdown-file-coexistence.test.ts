@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
-import { defineConfig, file, readReference } from "@ykdz/dock";
-import { markdown } from "@ykdz/dock/markdown";
+import { defineConfig, file, readReference } from "@boringparts/dock";
+import { markdown } from "@boringparts/dock/markdown";
 
 void test("plain file plugin preserves raw text when registered alongside markdown plugin", async () => {
   const source = "# 标题\n\n<!-- 普通注释 -->\n";
@@ -25,8 +25,8 @@ void test("plain file plugin preserves raw text when registered alongside markdo
   }
 });
 
-void test("@ykdz/dock/core exposes only the public domain API without internal CST helpers", async () => {
-  const coreModule = (await import("@ykdz/dock/core")) as Record<
+void test("@boringparts/dock/core exposes only the public domain API without internal CST helpers", async () => {
+  const coreModule = (await import("@boringparts/dock/core")) as Record<
     string,
     unknown
   >;
@@ -45,7 +45,7 @@ void test("@ykdz/dock/core exposes only the public domain API without internal C
     assert.equal(
       expected in coreModule,
       true,
-      `Expected @ykdz/dock/core to export ${expected}`,
+      `Expected @boringparts/dock/core to export ${expected}`,
     );
   }
   for (const internal of [
@@ -59,7 +59,7 @@ void test("@ykdz/dock/core exposes only the public domain API without internal C
     assert.equal(
       internal in coreModule,
       false,
-      `Expected @ykdz/dock/core NOT to export internal helper ${internal}`,
+      `Expected @boringparts/dock/core NOT to export internal helper ${internal}`,
     );
   }
 });

@@ -10,7 +10,7 @@ import {
   definePlugin,
   file,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 const target = "public-api-guide.txt";
 const baseline = "dock.baseline.json";

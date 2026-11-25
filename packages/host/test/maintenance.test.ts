@@ -191,7 +191,7 @@ void test("legacy version 2 baseline fails check and updateBaseline with rebuild
                 definition: {
                   id: "guide",
                   target: {
-                    pluginId: "@ykdz/dock-reference-file",
+                    pluginId: "dock:file",
                     target: "guide.md",
                     fileInfo: "guide.md",
                   },

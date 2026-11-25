@@ -1,10 +1,10 @@
-import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
+import { binding, defineConfig, type ReferenceValue } from "@boringparts/dock";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 import { sharedRun, sharedShape } from "../positive.mjs";
 

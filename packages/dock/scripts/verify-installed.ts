@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   assert.equal(
     artifacts.length,
     1,
-    "Installed verification expects the @ykdz/dock tarball path.",
+    "Installed verification expects the @boringparts/dock tarball path.",
   );
   const dockTarball = resolve(process.cwd(), artifacts[0]!);
   await access(dockTarball);
@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   await verifyInstalledBase(dockTarball);
   await verifyInstalledVitest(dockTarball);
   process.stdout.write(
-    "Clean @ykdz/dock installed verification (base no-vitest, Vitest 4.1.11, Vitest 5.0.3, CLI, and v2 migration) passed.\n",
+    "Clean @boringparts/dock installed verification (base no-vitest, Vitest 4.1.11, Vitest 5.0.3, CLI, and v2 migration) passed.\n",
   );
 }
 

@@ -1,9 +1,9 @@
-import { binding, defineConfig } from "@ykdz/dock";
+import { binding, defineConfig } from "@boringparts/dock";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestStatus,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 const run = defineNodeTestRun("effective-root-run", {
   files: ["test/rooted.test.mts"],

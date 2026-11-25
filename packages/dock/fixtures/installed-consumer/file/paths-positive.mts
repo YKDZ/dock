@@ -4,7 +4,7 @@ import {
   type FileTextSelection,
   type ReferenceOptions,
   type ReferenceValue,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 const localText = file
   .at(import.meta.url)

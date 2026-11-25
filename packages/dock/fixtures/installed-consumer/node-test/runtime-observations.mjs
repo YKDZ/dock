@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { defineNodeTestObservation } from "@ykdz/dock/node-test";
+import { defineNodeTestObservation } from "@boringparts/dock/node-test";
 
 const number = defineNodeTestObservation("runtime.number", 0);
 const array = defineNodeTestObservation("runtime.array", [0]);

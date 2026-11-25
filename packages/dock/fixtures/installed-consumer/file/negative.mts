@@ -12,7 +12,7 @@ import {
   type PluginRequest,
   type PluginResult,
   type Reference,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 import { splitConfig } from "./composition.mjs";
 import { catalogReference } from "./external-plugin.mts";

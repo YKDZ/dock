@@ -1,11 +1,11 @@
-import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
+import { binding, defineConfig, type ReferenceValue } from "@boringparts/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
   vitest,
   vitestObservation,
   vitestStatus,
-} from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
 
 // @ts-expect-error Test run requires at least one native test file.
 defineVitestRun("empty run", { files: [] });

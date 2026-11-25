@@ -5,7 +5,7 @@ import {
   type PluginBatchResult,
   type PluginRequest,
   type Reference,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 export const physicalPluginId = "@fixture/physical" as const;
 export type PhysicalTarget = { readonly path: string };

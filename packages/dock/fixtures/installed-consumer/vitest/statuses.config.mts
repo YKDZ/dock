@@ -1,5 +1,9 @@
-import { binding, defineConfig } from "@ykdz/dock";
-import { defineVitestRun, vitest, vitestStatus } from "@ykdz/dock/vitest";
+import { binding, defineConfig } from "@boringparts/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@boringparts/dock/vitest";
 
 const run = defineVitestRun("multiple non-passing statuses", {
   files: ["test/statuses.test.mts"],

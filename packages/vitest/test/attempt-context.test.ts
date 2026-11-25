@@ -1,10 +1,23 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
   installVitestAttemptCapture,
   recordVitestObservation,
 } from "../src/attempt-context.ts";
+import { vitest, vitestPluginId } from "../src/index.ts";
+
+const packageVersion = (
+  JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  ) as { readonly version: string }
+).version;
+
+void test("vitest plugin uses dock:vitest plugin ID", () => {
+  assert.equal(vitestPluginId, "dock:vitest");
+  assert.equal(vitest.id, "dock:vitest");
+});
 
 void test("reinstalling aroundEach hooks records only one real attempt for the same test", async () => {
   const handlers: ((
@@ -63,7 +76,7 @@ void test("reinstalling aroundEach hooks records only one real attempt for the s
   assert.equal(
     Object.hasOwn(
       globalThis,
-      Symbol.for("@ykdz/dock/vitest/0.3.0/attempt-context"),
+      Symbol.for(`@boringparts/dock/vitest/${packageVersion}/attempt-context`),
     ),
     true,
   );

@@ -125,12 +125,6 @@ const forbiddenBasePackages = [
   "@dock/vitest",
   "@dock/node-test",
   "@dock/tooling-config",
-  "@ykdz/dock-core",
-  "@ykdz/dock-reference-file",
-  "@ykdz/dock-reference-markdown",
-  "@ykdz/dock-reference-typescript",
-  "@ykdz/dock-reference-node-test",
-  "@ykdz/dock-reference-vitest",
   "remark",
   "markdown-it",
 ] as const;
@@ -206,31 +200,64 @@ async function verifyBaseEnvironmentMetadata(
   secondary: string,
 ): Promise<void> {
   const [primaryHost, secondaryHost] = await Promise.all([
-    realpath(join(primary, "node_modules", "@ykdz", "dock")),
-    realpath(join(secondary, "node_modules", "@ykdz", "dock")),
+    realpath(join(primary, "node_modules", "@boringparts", "dock")),
+    realpath(join(secondary, "node_modules", "@boringparts", "dock")),
   ]);
   assert.notEqual(
     primaryHost,
     secondaryHost,
-    "Dual-install verification must resolve two separate physical @ykdz/dock copies.",
+    "Dual-install verification must resolve two separate physical @boringparts/dock copies.",
   );
 
-  const [primaryPkg, secondaryPkg, bundledTs] = await Promise.all([
-    readFile(join(primaryHost, "package.json"), "utf8"),
-    readFile(join(secondaryHost, "package.json"), "utf8"),
-    readFile(
-      join(primary, "node_modules", "typescript", "package.json"),
-      "utf8",
-    ),
-  ]);
+  const [primaryPkg, secondaryPkg, bundledTs, licenseText, readmeText] =
+    await Promise.all([
+      readFile(join(primaryHost, "package.json"), "utf8"),
+      readFile(join(secondaryHost, "package.json"), "utf8"),
+      readFile(
+        join(primary, "node_modules", "typescript", "package.json"),
+        "utf8",
+      ),
+      readFile(join(primaryHost, "LICENSE"), "utf8"),
+      readFile(join(primaryHost, "README.md"), "utf8"),
+    ]);
   const primaryManifest = JSON.parse(primaryPkg) as {
+    readonly name: string;
     readonly version: string;
+    readonly description?: string;
+    readonly homepage?: string;
+    readonly bugs?: { readonly url?: string };
+    readonly license?: string;
+    readonly author?: unknown;
+    readonly repository?: {
+      readonly type?: string;
+      readonly url?: string;
+      readonly directory?: string;
+    };
     readonly exports?: Record<string, unknown>;
   };
   const secondaryManifest = JSON.parse(secondaryPkg) as {
     readonly version: string;
   };
+  assert.equal(primaryManifest.name, "@boringparts/dock");
   assert.equal(primaryManifest.version, secondaryManifest.version);
+  assert.equal(
+    primaryManifest.description,
+    "Find the docs to review after a change.",
+  );
+  assert.equal(primaryManifest.homepage, "https://github.com/boringparts/dock");
+  assert.equal(
+    primaryManifest.bugs?.url,
+    "https://github.com/boringparts/dock/issues",
+  );
+  assert.equal(primaryManifest.license, "MIT");
+  assert.equal(primaryManifest.author, undefined);
+  assert.deepEqual(primaryManifest.repository, {
+    type: "git",
+    url: "git+https://github.com/boringparts/dock.git",
+    directory: "packages/dock",
+  });
+  assert.match(licenseText, /Copyright \(c\) 2026 boringparts/u);
+  assert.match(readmeText, /https:\/\/github\.com\/boringparts\/dock#readme/u);
   assert.equal(
     (JSON.parse(bundledTs) as { readonly version?: unknown }).version,
     "5.9.3",
@@ -246,7 +273,7 @@ async function verifyBaseEnvironmentMetadata(
   ]) {
     assert.ok(
       subpaths.includes(subpath),
-      `Installed @ykdz/dock is missing expected subpath ${subpath}.`,
+      `Installed @boringparts/dock is missing expected subpath ${subpath}.`,
     );
   }
 
@@ -256,7 +283,7 @@ async function verifyBaseEnvironmentMetadata(
   await assertForbiddenDependencies(
     primary,
     forbiddenBasePackages,
-    "Base installed @ykdz/dock consumer",
+    "Base installed @boringparts/dock consumer",
   );
 
   const versionResult = await run(dockBin(primary), ["--version"], primary);
@@ -280,7 +307,7 @@ async function verifyMissingVitestPeerBehavior(
     `  type CheckReport,`,
     `  type Config,`,
     `  type ReferenceValue,`,
-    `} from "@ykdz/dock";`,
+    `} from "@boringparts/dock";`,
     `import {`,
     `  assertBaseline,`,
     `  assertJsonValue,`,
@@ -293,10 +320,10 @@ async function verifyMissingVitestPeerBehavior(
     `  type Baseline,`,
     `  type CheckError,`,
     `  type CheckReport as CoreCheckReport,`,
-    `} from "@ykdz/dock/core";`,
-    `import { markdown, markdownPluginId } from "@ykdz/dock/markdown";`,
-    `import { typescript, typescriptPluginId } from "@ykdz/dock/typescript";`,
-    `import { nodeTest, nodeTestPluginId } from "@ykdz/dock/node-test";`,
+    `} from "@boringparts/dock/core";`,
+    `import { markdown, markdownPluginId } from "@boringparts/dock/markdown";`,
+    `import { typescript, typescriptPluginId } from "@boringparts/dock/typescript";`,
+    `import { nodeTest, nodeTestPluginId } from "@boringparts/dock/node-test";`,
     ``,
     `const doc = file.from("sample.txt").match("status: ([^\\\\n]+)", 1).reference("doc-status");`,
     `const valueCheck: ReferenceValue<typeof doc> = "ready";`,
@@ -353,12 +380,12 @@ async function verifyMissingVitestPeerBehavior(
     join(scenario, "runtime.mjs"),
     [
       `import assert from "node:assert/strict";`,
-      `import { binding, check, defineConfig, file, inspect, readReference, updateBaseline } from "@ykdz/dock";`,
-      `import { assertBaseline, assertJsonValue, canonicalJson, check as checkCore, isJsonValue, updateBaseline as updateCoreBaseline } from "@ykdz/dock/core";`,
-      `import { markdown, markdownPluginId } from "@ykdz/dock/markdown";`,
-      `import { typescript, typescriptPluginId } from "@ykdz/dock/typescript";`,
-      `import { nodeTest, nodeTestPluginId } from "@ykdz/dock/node-test";`,
-      `import { defineVitestRun, vitest, vitestPluginId, vitestStatus } from "@ykdz/dock/vitest";`,
+      `import { binding, check, defineConfig, file, inspect, readReference, updateBaseline } from "@boringparts/dock";`,
+      `import { assertBaseline, assertJsonValue, canonicalJson, check as checkCore, isJsonValue, updateBaseline as updateCoreBaseline } from "@boringparts/dock/core";`,
+      `import { markdown, markdownPluginId } from "@boringparts/dock/markdown";`,
+      `import { typescript, typescriptPluginId } from "@boringparts/dock/typescript";`,
+      `import { nodeTest, nodeTestPluginId } from "@boringparts/dock/node-test";`,
+      `import { defineVitestRun, vitest, vitestPluginId, vitestStatus } from "@boringparts/dock/vitest";`,
       ``,
       `const doc = file.from("sample.txt").match("status: ([^\\\\n]+)", 1).reference("doc-status");`,
       `const nonVitestConfig = defineConfig({ plugins: [file, markdown, typescript, nodeTest], bindings: [binding("doc", [doc])] });`,
@@ -656,7 +683,7 @@ async function verifyCliContractSmoke(bin: string, dir: string): Promise<void> {
     [
       'import { readFile } from "node:fs/promises";',
       'import { join } from "node:path";',
-      'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+      'import { binding, createReference, defineConfig, definePlugin } from "@boringparts/dock";',
       "const plugin = definePlugin({",
       '  id: "fixture:cli-installed",',
       "  validate() {},",
@@ -844,7 +871,7 @@ async function verifyCliContractSmoke(bin: string, dir: string): Promise<void> {
   const emptyConfig = join(emptyDir, "empty.config.mjs");
   await writeFile(
     emptyConfig,
-    'import { defineConfig } from "@ykdz/dock";\nexport default defineConfig({ plugins: [], bindings: [] });\n',
+    'import { defineConfig } from "@boringparts/dock";\nexport default defineConfig({ plugins: [], bindings: [] });\n',
     "utf8",
   );
   const emptyUpdateText = await run(
@@ -880,8 +907,8 @@ async function verifyCliContractSmoke(bin: string, dir: string): Promise<void> {
       'import assert from "node:assert/strict";',
       'import { spawnSync } from "node:child_process";',
       'import { readFile } from "node:fs/promises";',
-      'import { updateBaseline } from "@ykdz/dock";',
-      'import { updateBaseline as updateCoreBaseline } from "@ykdz/dock/core";',
+      'import { updateBaseline } from "@boringparts/dock";',
+      'import { updateBaseline as updateCoreBaseline } from "@boringparts/dock/core";',
       "",
       "function summarizeUpdateOutcome(status, report, topLevelErrors) {",
       "  const bindingErrors = report.bindings.flatMap((entry) =>",
@@ -1015,7 +1042,7 @@ async function verifyInstalledErrorWithConfirmedChange(
     [
       'import { readFileSync } from "node:fs";',
       'import { join } from "node:path";',
-      'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+      'import { binding, createReference, defineConfig, definePlugin } from "@boringparts/dock";',
       "",
       "const suitePlugin = definePlugin({",
       '  id: "fixture:installed-suite",',
@@ -1182,7 +1209,7 @@ async function verifyInstalledErrorWithConfirmedChange(
     [
       'import assert from "node:assert/strict";',
       'import { readFile } from "node:fs/promises";',
-      'import { check, updateBaseline } from "@ykdz/dock";',
+      'import { check, updateBaseline } from "@boringparts/dock";',
       "",
       'const beforeBytes = await readFile("dock.baseline.json");',
       'const checked = await check("dock.config.mjs");',
@@ -1271,7 +1298,7 @@ async function verifyInstalledFileSmoke(
     "Scope: guide-policy\nAll checked bindings are consistent with baseline.\n",
   );
 
-  // Verify quote, match capture, region, processor ID, CLI source line numbers, and V3 baseline compatibility from @ykdz/dock root.
+  // Verify quote, match capture, region, processor ID, CLI source line numbers, and V3 baseline compatibility from @boringparts/dock root.
   const appEnvPath = join(dir, "app.env");
   await writeFile(
     appEnvPath,
@@ -1288,8 +1315,8 @@ async function verifyInstalledFileSmoke(
   await writeFile(
     join(dir, "v3-lines.config.mjs"),
     [
-      'import { binding, defineConfig, file, filePluginId } from "@ykdz/dock";',
-      'if (file.id !== "@ykdz/dock-reference-file" || filePluginId !== "@ykdz/dock-reference-file") {',
+      'import { binding, defineConfig, file, filePluginId } from "@boringparts/dock";',
+      'if (file.id !== "dock:file" || filePluginId !== "dock:file") {',
       "  throw new Error(`Unexpected file plugin ID: ${file.id}`);",
       "}",
       "export default defineConfig({",
@@ -1322,7 +1349,7 @@ async function verifyInstalledFileSmoke(
               definition: {
                 id: "quoted-host",
                 target: {
-                  pluginId: "@ykdz/dock-reference-file",
+                  pluginId: "dock:file",
                   target: "app.env",
                   fileInfo: "app.env",
                 },
@@ -1337,7 +1364,7 @@ async function verifyInstalledFileSmoke(
               definition: {
                 id: "matched-port",
                 target: {
-                  pluginId: "@ykdz/dock-reference-file",
+                  pluginId: "dock:file",
                   target: "app.env",
                   fileInfo: "app.env",
                 },
@@ -1352,7 +1379,7 @@ async function verifyInstalledFileSmoke(
               definition: {
                 id: "runtime-region",
                 target: {
-                  pluginId: "@ykdz/dock-reference-file",
+                  pluginId: "dock:file",
                   target: "app.env",
                   fileInfo: "app.env",
                 },
@@ -1454,15 +1481,15 @@ async function verifyInstalledMarkdownSmoke(
     );
   }
 
-  // Verify quote, match capture, named region, processor ID, and V3 baseline compatibility via @ykdz/dock/markdown.
+  // Verify quote, match capture, named region, processor ID, and V3 baseline compatibility via @boringparts/dock/markdown.
   await writeFile(
     join(dir, "text-selection-verify.mjs"),
     [
       'import assert from "node:assert/strict";',
-      'import { defineConfig, readReference } from "@ykdz/dock";',
-      'import { markdown, markdownPluginId } from "@ykdz/dock/markdown";',
-      'assert.equal(markdownPluginId, "@ykdz/dock-reference-markdown");',
-      'assert.equal(markdown.id, "@ykdz/dock-reference-markdown");',
+      'import { defineConfig, readReference } from "@boringparts/dock";',
+      'import { markdown, markdownPluginId } from "@boringparts/dock/markdown";',
+      'assert.equal(markdownPluginId, "dock:markdown");',
+      'assert.equal(markdown.id, "dock:markdown");',
       "const config = defineConfig({ plugins: [markdown], bindings: [] });",
       'const quoted = await readReference(config, markdown.from("guide.md").section(["指南", "安装"]).quote("安装片段：版本一。").reference("md-quote"));',
       'assert.equal(quoted.value, "安装片段：版本一。");',
@@ -1487,8 +1514,8 @@ async function verifyInstalledMarkdownSmoke(
   await writeFile(
     join(dir, "v3-markdown.config.mjs"),
     [
-      'import { binding, defineConfig } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { binding, defineConfig } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
       "export default defineConfig({",
       '  baseline: "v3-markdown.baseline.json",',
       "  plugins: [markdown],",
@@ -1517,7 +1544,7 @@ async function verifyInstalledMarkdownSmoke(
               definition: {
                 id: "stable-port",
                 target: {
-                  pluginId: "@ykdz/dock-reference-markdown",
+                  pluginId: "dock:markdown",
                   target: "guide.md",
                   fileInfo: "guide.md",
                 },
@@ -1535,7 +1562,7 @@ async function verifyInstalledMarkdownSmoke(
               definition: {
                 id: "table-cell",
                 target: {
-                  pluginId: "@ykdz/dock-reference-markdown",
+                  pluginId: "dock:markdown",
                   target: "guide.md",
                   fileInfo: "guide.md",
                 },
@@ -1695,8 +1722,8 @@ async function verifyInstalledMarkdownSmoke(
     join(dir, "read-standalone-only.mjs"),
     [
       'import assert from "node:assert/strict";',
-      'import { defineConfig, readReference } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { defineConfig, readReference } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
       "const cfg = defineConfig({ plugins: [markdown], bindings: [] });",
       'const read = await readReference(cfg, markdown.from("guide.md").marker("standalone-only").reference("standalone-only"));',
       'assert.equal(read.value, "ok");',
@@ -1718,8 +1745,8 @@ async function verifyInstalledMarkdownSmoke(
   await writeFile(
     join(dir, "multi-binding-markers.config.mjs"),
     [
-      'import { binding, defineConfig } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { binding, defineConfig } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
       "export default defineConfig({",
       '  baseline: "markdown.baseline.json",',
       "  plugins: [markdown],",
@@ -1811,8 +1838,8 @@ async function verifyInstalledMarkdownSmoke(
   await writeFile(
     join(dir, "unreadable-source.config.mjs"),
     [
-      'import { defineConfig } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { defineConfig } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
       "export default defineConfig({",
       '  baseline: "markdown.baseline.json",',
       "  plugins: [markdown],",
@@ -1848,8 +1875,8 @@ async function verifyInstalledMarkdownSmoke(
   await writeFile(
     join(dir, "inline-bind.config.mjs"),
     [
-      'import { binding, defineConfig, file } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { binding, defineConfig, file } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
       "export default defineConfig({",
       '  baseline: "inline-bind.baseline.json",',
       "  plugins: [file, markdown],",
@@ -2034,7 +2061,7 @@ async function verifyInstalledMarkdownSmoke(
     [
       'import assert from "node:assert/strict";',
       'import { readFile } from "node:fs/promises";',
-      'import { check, MaintenanceError, updateBaseline } from "@ykdz/dock";',
+      'import { check, MaintenanceError, updateBaseline } from "@boringparts/dock";',
       'const before = await readFile("inline-bind.baseline.json");',
       'for (const op of [() => check("inline-bind.config.mjs"), () => updateBaseline("inline-bind.config.mjs")]) {',
       "  await assert.rejects(op, (error) => {",
@@ -2342,9 +2369,9 @@ async function verifyInstalledExplicitMarkdownSources(
   await writeFile(
     sourceOnlyConfigPath,
     [
-      'import { defineConfig, file } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
-      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'import { defineConfig, file } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@boringparts/dock/node-test";',
       'const guideRun = defineNodeTestRun("guide-run", { files: ["guide.test.mjs"] });',
       'const unusedRun = defineNodeTestRun("unused-run", { files: ["unused.test.mjs"] });',
       "export default defineConfig({",
@@ -2366,8 +2393,8 @@ async function verifyInstalledExplicitMarkdownSources(
     [
       'import assert from "node:assert/strict";',
       'import { readFile } from "node:fs/promises";',
-      'import { check, defineConfig, file, inspect } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { check, defineConfig, file, inspect } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
       "",
       "assert.throws(",
       "  () => defineConfig({ plugins: [] }),",
@@ -2445,9 +2472,9 @@ async function verifyInstalledExplicitMarkdownSources(
   await writeFile(
     combinedConfigPath,
     [
-      'import { binding, defineConfig, file } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
-      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'import { binding, defineConfig, file } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@boringparts/dock/node-test";',
       'const guideRun = defineNodeTestRun("guide-run", { files: ["guide.test.mjs"] });',
       'const factRef = file.from("fact.txt").reference("fact ref");',
       'const keepRef = file.from("keep.txt").reference("keep ref");',
@@ -2601,9 +2628,9 @@ async function verifyInstalledExplicitMarkdownSources(
   await writeFile(
     ac4ConfigPath,
     [
-      'import { binding, defineConfig, file } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
-      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'import { binding, defineConfig, file } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@boringparts/dock/node-test";',
       'const guideRun = defineNodeTestRun("guide-run", { files: ["guide.test.mjs"] });',
       "export default defineConfig({",
       "  plugins: [markdown, file, nodeTest],",
@@ -2702,7 +2729,7 @@ async function verifyInstalledExplicitMarkdownSources(
   await writeFile(
     finalConfigPath,
     [
-      'import { binding, defineConfig, file } from "@ykdz/dock";',
+      'import { binding, defineConfig, file } from "@boringparts/dock";',
       'export default defineConfig({ plugins: [file], bindings: [binding("keep-binding", [file.from("keep.txt").reference("keep ref")])] });',
       "",
     ].join("\n"),
@@ -2772,7 +2799,7 @@ async function verifyInstalledTypeScriptSmoke(
     );
   }
 
-  // Verify quote, match capture, named region, processor ID, and V3 baseline compatibility via @ykdz/dock/typescript.
+  // Verify quote, match capture, named region, processor ID, and V3 baseline compatibility via @boringparts/dock/typescript.
   await writeFile(
     join(dir, "selection-source.ts"),
     [
@@ -2792,10 +2819,10 @@ async function verifyInstalledTypeScriptSmoke(
     join(dir, "text-selection-verify.mjs"),
     [
       'import assert from "node:assert/strict";',
-      'import { defineConfig, readReference } from "@ykdz/dock";',
-      'import { typescript, typescriptPluginId } from "@ykdz/dock/typescript";',
-      'assert.equal(typescriptPluginId, "@ykdz/dock-reference-typescript");',
-      'assert.equal(typescript.id, "@ykdz/dock-reference-typescript");',
+      'import { defineConfig, readReference } from "@boringparts/dock";',
+      'import { typescript, typescriptPluginId } from "@boringparts/dock/typescript";',
+      'assert.equal(typescriptPluginId, "dock:typescript");',
+      'assert.equal(typescript.id, "dock:typescript");',
       "const config = defineConfig({ plugins: [typescript], bindings: [] });",
       'const quoted = await readReference(config, typescript.from("selection-source.ts").symbol("configure", "function").quote(\'return "ok";\').reference("ts-quote"));',
       "assert.equal(quoted.value, 'return \"ok\";');",
@@ -2820,8 +2847,8 @@ async function verifyInstalledTypeScriptSmoke(
   await writeFile(
     join(dir, "v3-typescript.config.mjs"),
     [
-      'import { binding, defineConfig } from "@ykdz/dock";',
-      'import { typescript } from "@ykdz/dock/typescript";',
+      'import { binding, defineConfig } from "@boringparts/dock";',
+      'import { typescript } from "@boringparts/dock/typescript";',
       "export default defineConfig({",
       '  baseline: "v3-typescript.baseline.json",',
       "  plugins: [typescript],",
@@ -2849,7 +2876,7 @@ async function verifyInstalledTypeScriptSmoke(
               definition: {
                 id: "calculate-expression",
                 target: {
-                  pluginId: "@ykdz/dock-reference-typescript",
+                  pluginId: "dock:typescript",
                   target: "symbol-source.ts",
                   fileInfo: "symbol-source.ts",
                 },
@@ -3620,7 +3647,7 @@ async function verifyLegacyBaselineHardMigration(
             definition: {
               id: "notes-port",
               target: {
-                pluginId: "@ykdz/dock-reference-file",
+                pluginId: "dock:file",
                 target: "notes.txt",
                 fileInfo: "notes.txt",
               },
@@ -3635,7 +3662,7 @@ async function verifyLegacyBaselineHardMigration(
             definition: {
               id: "guide-section",
               target: {
-                pluginId: "@ykdz/dock-reference-markdown",
+                pluginId: "dock:markdown",
                 target: "guide.md",
                 fileInfo: "guide.md",
               },
@@ -3650,7 +3677,7 @@ async function verifyLegacyBaselineHardMigration(
             definition: {
               id: "ts-greet",
               target: {
-                pluginId: "@ykdz/dock-reference-typescript",
+                pluginId: "dock:typescript",
                 target: "api.ts",
                 fileInfo: "api.ts",
               },
@@ -3667,7 +3694,7 @@ async function verifyLegacyBaselineHardMigration(
             definition: {
               id: "node-pass",
               target: {
-                pluginId: "@ykdz/dock-reference-node-test",
+                pluginId: "dock:node-test",
                 target: {
                   kind: "node-test-status",
                   run: {
@@ -3694,10 +3721,10 @@ async function verifyLegacyBaselineHardMigration(
   await writeFile(
     join(consumer, "dock.config.mjs"),
     [
-      'import { binding, defineConfig, file } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
-      'import { typescript } from "@ykdz/dock/typescript";',
-      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'import { binding, defineConfig, file } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
+      'import { typescript } from "@boringparts/dock/typescript";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@boringparts/dock/node-test";',
       "",
       'const testRun = defineNodeTestRun("migration-run", { files: ["test/app.test.mts"] });',
       "",
@@ -3834,7 +3861,7 @@ async function verifyV3BaselineDiagnostics(consumer: string): Promise<void> {
     [
       'import { readFileSync } from "node:fs";',
       'import { join } from "node:path";',
-      'import { binding, createReference, defineConfig, definePlugin } from "@ykdz/dock";',
+      'import { binding, createReference, defineConfig, definePlugin } from "@boringparts/dock";',
       "",
       "const plugin = definePlugin({",
       '  id: "consumer:v3-diagnostics",',
@@ -3916,13 +3943,13 @@ async function verifyV3BaselineDiagnostics(consumer: string): Promise<void> {
 
   await writeFile(join(consumer, "plain.txt"), "fact-v1\n", "utf8");
 
-  // Verify JS API check vs baseline-invalid error via child Node process importing installed @ykdz/dock.
+  // Verify JS API check vs baseline-invalid error via child Node process importing installed @boringparts/dock.
   await writeFile(
     join(consumer, "verify-js.mjs"),
     [
       'import assert from "node:assert/strict";',
       'import { readFile } from "node:fs/promises";',
-      'import { check, MaintenanceError, updateBaseline } from "@ykdz/dock";',
+      'import { check, MaintenanceError, updateBaseline } from "@boringparts/dock";',
       "const mode = process.argv[2];",
       'if (mode === "consistent") {',
       '  const report = await check("./dock.config.mjs");',
@@ -4071,7 +4098,7 @@ function requireReport(envelope: CliEnvelope): MaintenanceReport {
 
 function requireNodeDiagnostic(report: MaintenanceReport): NodeDiagnosticData {
   const diagnostic = report.pluginDiagnostics.find(
-    (item) => item.pluginId === "@ykdz/dock-reference-node-test",
+    (item) => item.pluginId === "dock:node-test",
   );
   assert.ok(diagnostic, "Report is missing Node test plugin diagnostics.");
   return diagnostic.data as NodeDiagnosticData;

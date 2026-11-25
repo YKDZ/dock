@@ -29,7 +29,7 @@ import type {
   VitestRunConfiguration,
 } from "./native-runner.ts";
 
-export const vitestPluginId = "@ykdz/dock-reference-vitest" as const;
+export const vitestPluginId = "dock:vitest" as const;
 
 export type VitestObservation<
   Key extends string = string,

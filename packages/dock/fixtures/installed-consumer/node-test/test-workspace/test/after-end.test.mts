@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { test } from "node:test";
 
-import { beginExecution } from "@ykdz/dock/node-test";
+import { beginExecution } from "@boringparts/dock/node-test";
 
 test("selected native test passes", () => {
   beginExecution();

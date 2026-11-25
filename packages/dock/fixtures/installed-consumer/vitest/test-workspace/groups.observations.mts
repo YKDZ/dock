@@ -1,4 +1,4 @@
-import { defineVitestObservation } from "@ykdz/dock/vitest";
+import { defineVitestObservation } from "@boringparts/dock/vitest";
 
 export const settings = defineVitestObservation("preview-settings", {
   mode: "auto",

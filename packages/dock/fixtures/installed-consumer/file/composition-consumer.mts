@@ -1,4 +1,4 @@
-import { binding, check, defineConfig, file } from "@ykdz/dock";
+import { binding, check, defineConfig, file } from "@boringparts/dock";
 
 import { splitConfig } from "./composition.mts";
 import { catalogPlugin, catalogReference } from "./external-plugin.mts";

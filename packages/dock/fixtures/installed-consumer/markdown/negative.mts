@@ -1,6 +1,6 @@
-import { defineConfig, file, readReference } from "@ykdz/dock";
-import { markdown } from "@ykdz/dock/markdown";
-import { nodeTest } from "@ykdz/dock/node-test";
+import { defineConfig, file, readReference } from "@boringparts/dock";
+import { markdown } from "@boringparts/dock/markdown";
+import { nodeTest } from "@boringparts/dock/node-test";
 
 const config = defineConfig({ plugins: [markdown], bindings: [] });
 const builder = markdown.from("guide.md");

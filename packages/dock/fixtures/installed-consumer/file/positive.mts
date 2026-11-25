@@ -10,7 +10,7 @@ import {
   type Reference,
   type ReferenceValue,
   type ReferencePlugin,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 import {
   catalogPlugin,

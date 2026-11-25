@@ -1,9 +1,9 @@
-import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
+import { binding, defineConfig, type ReferenceValue } from "@boringparts/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
   vitestSuite,
-} from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
 
 const declared = defineVitestObservation("declared", { count: 0 });
 const run = defineVitestRun("group member error types", {

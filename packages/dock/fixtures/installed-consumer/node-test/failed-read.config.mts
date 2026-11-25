@@ -1,9 +1,9 @@
-import { binding, defineConfig, file } from "@ykdz/dock";
+import { binding, defineConfig, file } from "@boringparts/dock";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 import { numericObservation } from "./observations.config.mts";
 

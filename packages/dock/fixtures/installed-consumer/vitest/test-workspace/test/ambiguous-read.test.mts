@@ -1,8 +1,8 @@
-import { defineConfig, file } from "@ykdz/dock";
+import { defineConfig, file } from "@boringparts/dock";
 import {
   defineVitestObservation,
   readReferenceInTest,
-} from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
 import { expect, test } from "vitest";
 
 const outcome = defineVitestObservation("read-outcome", "");

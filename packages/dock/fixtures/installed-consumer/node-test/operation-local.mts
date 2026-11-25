@@ -8,12 +8,12 @@ import {
   defineConfig,
   inspect,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 import {
   defineNodeTestRun,
   nodeTest,
   nodeTestStatus,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 const run = defineNodeTestRun("in-process-sequential-operations", {
   files: ["test/operation-local.test.mts"],

@@ -1,10 +1,10 @@
-import { binding, defineConfig } from "@ykdz/dock";
+import { binding, defineConfig } from "@boringparts/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
   vitest,
   vitestObservation,
-} from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
 
 const value = defineVitestObservation("business-value", "");
 const run = defineVitestRun("file read business observation", {

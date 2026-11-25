@@ -1,4 +1,4 @@
-import { binding, defineConfig, file } from "@ykdz/dock";
+import { binding, defineConfig, file } from "@boringparts/dock";
 
 import { isolationOneReference } from "./isolation-one-declaration.mjs";
 

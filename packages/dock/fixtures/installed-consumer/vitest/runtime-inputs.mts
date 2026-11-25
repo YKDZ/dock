@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { binding, createReference, defineConfig } from "@ykdz/dock";
+import { binding, createReference, defineConfig } from "@boringparts/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
@@ -8,7 +8,7 @@ import {
   vitestPluginId,
   vitestStatus,
   vitestSuite,
-} from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
 
 assert.throws(
   () => defineVitestRun("empty files", { files: [] }),

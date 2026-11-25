@@ -22,7 +22,7 @@ import {
   type TextSelectionStep,
 } from "@dock/text-selection";
 
-export const filePluginId = "@ykdz/dock-reference-file" as const;
+export const filePluginId = "dock:file" as const;
 
 export type FileTextSelection = {
   readonly kind: "text";
@@ -158,7 +158,7 @@ const implementation = definePlugin({
   },
 });
 
-/** Built-in plain-file reference plugin exported as `file` from `@ykdz/dock`. */
+/** Built-in plain-file reference plugin exported as `file` from `@boringparts/dock`. */
 export const file: FilePlugin = {
   ...implementation,
   from(target: string | URL): FileReferenceBuilder {

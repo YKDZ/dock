@@ -1,5 +1,9 @@
-import { binding, defineConfig } from "@ykdz/dock";
-import { defineVitestRun, vitest, vitestStatus } from "@ykdz/dock/vitest";
+import { binding, defineConfig } from "@boringparts/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@boringparts/dock/vitest";
 
 const firstRun = defineVitestRun("conflicting identity", {
   files: ["test/conflict-first.test.mts"],

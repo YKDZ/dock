@@ -61,7 +61,9 @@ function resolvePackageVersion(): string {
 }
 
 const version = resolvePackageVersion();
-const bridgeKey = Symbol.for(`@ykdz/dock/vitest/${version}/attempt-context`);
+const bridgeKey = Symbol.for(
+  `@boringparts/dock/vitest/${version}/attempt-context`,
+);
 
 const sharedGlobal = globalThis as typeof globalThis & {
   [bridgeKey]?: AttemptBridge;

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 
-import { beginExecution } from "@ykdz/dock/node-test";
+import { beginExecution } from "@boringparts/dock/node-test";
 
 test("parent fails", () => {
   test("subtest entered callback", async () => {

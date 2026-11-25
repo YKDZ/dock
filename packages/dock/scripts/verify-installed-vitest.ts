@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import type { ResolvedMaintenance } from "@ykdz/dock";
+import type { ResolvedMaintenance } from "@boringparts/dock";
 
 import {
   assertForbiddenDependencies,
@@ -128,7 +128,7 @@ const fixtureDirectory = join(
   "installed-consumer",
   "vitest",
 );
-const forbiddenLegacyPackages = [
+const forbiddenWorkspacePackages = [
   "@dock/core",
   "@dock/host",
   "@dock/text-selection",
@@ -138,12 +138,6 @@ const forbiddenLegacyPackages = [
   "@dock/vitest",
   "@dock/node-test",
   "@dock/tooling-config",
-  "@ykdz/dock-core",
-  "@ykdz/dock-reference-file",
-  "@ykdz/dock-reference-markdown",
-  "@ykdz/dock-reference-typescript",
-  "@ykdz/dock-reference-node-test",
-  "@ykdz/dock-reference-vitest",
 ] as const;
 
 type VitestVersion = "4.1.11" | "5.0.3";
@@ -153,7 +147,7 @@ async function main(): Promise<void> {
   assert.equal(
     artifacts.length,
     1,
-    "Installed Vitest verification expects the @ykdz/dock tarball path.",
+    "Installed Vitest verification expects the @boringparts/dock tarball path.",
   );
   const dockTarball = resolve(process.cwd(), artifacts[0]!);
   await access(dockTarball);
@@ -161,7 +155,7 @@ async function main(): Promise<void> {
 }
 
 /**
- * Verifies `@ykdz/dock/vitest` across Environment B (Vitest 4.1.11 with dual physical
+ * Verifies `@boringparts/dock/vitest` across Environment B (Vitest 4.1.11 with dual physical
  * installations and cross-framework co-registration) and Environment C (Vitest 5.0.3 peer compatibility).
  */
 export async function verifyInstalledVitest(
@@ -436,7 +430,7 @@ async function verifyCrossFrameworkScenario(
     assert.deepEqual(report.pluginErrors, []);
     assert.deepEqual(
       report.pluginDiagnostics.map(({ pluginId }) => pluginId).sort(),
-      ["@ykdz/dock-reference-node-test", "@ykdz/dock-reference-vitest"],
+      ["dock:node-test", "dock:vitest"],
     );
     for (const diagnostic of report.pluginDiagnostics) {
       const data = diagnostic.data as {
@@ -498,13 +492,13 @@ async function verifyCrossFrameworkScenario(
     {
       bindingId: "Node run",
       referenceId: "Node status",
-      pluginId: "@ykdz/dock-reference-node-test",
+      pluginId: "dock:node-test",
       started: "node",
     },
     {
       bindingId: "Vitest run",
       referenceId: "Vitest status",
-      pluginId: "@ykdz/dock-reference-vitest",
+      pluginId: "dock:vitest",
       started: "vitest",
     },
   ]) {
@@ -621,9 +615,7 @@ async function verifyUserConfig(dock: string, consumer: string): Promise<void> {
     | ResolvedMaintenance
     | undefined;
   assert.ok(resolution);
-  const plugin = resolution.plugins.find(
-    ({ id }) => id === "@ykdz/dock-reference-vitest",
-  );
+  const plugin = resolution.plugins.find(({ id }) => id === "dock:vitest");
   assert.ok(plugin?.description);
   const description = plugin.description.data as unknown as {
     readonly runs: readonly {
@@ -691,10 +683,10 @@ async function verifyObservationAndReadRoundTrip(
   const maintenanceRoot = join(consumer, "maintenance-root");
   if (expectDualPhysicalInstall) {
     const outerDock = await realpath(
-      join(consumer, "node_modules", "@ykdz", "dock"),
+      join(consumer, "node_modules", "@boringparts", "dock"),
     );
     const testDock = await realpath(
-      join(testRoot, "node_modules", "@ykdz", "dock"),
+      join(testRoot, "node_modules", "@boringparts", "dock"),
     );
     assert.notEqual(
       outerDock,
@@ -861,7 +853,7 @@ async function verifyObservationAndReadRoundTrip(
     parseEnvelope(consistentStructured.stdout),
   );
   const structuredDiagText = structuredReport.pluginDiagnostics
-    .find(({ pluginId }) => pluginId === "@ykdz/dock-reference-vitest")
+    .find(({ pluginId }) => pluginId === "dock:vitest")
     ?.text.join("\n");
   for (const fragment of [
     "read reference business-text-source",
@@ -1050,7 +1042,7 @@ async function verifyHappyRoundTrip(
   assertBindingHasNoErrors(checkedReport, "passing status");
   assertVitestDiagnostics(checkedReport, 1, 5, 1);
   const diagnosticText = checkedReport.pluginDiagnostics
-    .find(({ pluginId }) => pluginId === "@ykdz/dock-reference-vitest")
+    .find(({ pluginId }) => pluginId === "dock:vitest")
     ?.text.join("\n");
   assert.match(diagnosticText ?? "", /native command exited with code 1/);
   assert.deepEqual(await readFile(baselinePath), baselineBytes);
@@ -1783,8 +1775,8 @@ async function verifyOrdinaryVitest(consumer: string): Promise<void> {
 async function verifyDependencyBoundaries(consumer: string): Promise<void> {
   await assertForbiddenDependencies(
     consumer,
-    forbiddenLegacyPackages,
-    "Installed Vitest @ykdz/dock consumer",
+    forbiddenWorkspacePackages,
+    "Installed Vitest @boringparts/dock consumer",
   );
 }
 
@@ -1804,7 +1796,7 @@ function requireReport(envelope: CliEnvelope): MaintenanceReport {
 
 function vitestRuns(report: MaintenanceReport): readonly VitestRunDiagnostic[] {
   const diagnostics = report.pluginDiagnostics.find(
-    ({ pluginId }) => pluginId === "@ykdz/dock-reference-vitest",
+    ({ pluginId }) => pluginId === "dock:vitest",
   );
   assert.ok(diagnostics, "Missing Vitest plugin diagnostics");
   assert.ok(

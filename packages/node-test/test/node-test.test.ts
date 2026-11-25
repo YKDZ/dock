@@ -80,9 +80,9 @@ function docReference(id = "doc", path = "doc.txt"): DocReference {
   );
 }
 
-void test("preserves legacy nodeTestPluginId and collects native node:test status and observation", async () => {
-  assert.equal(nodeTestPluginId, "@ykdz/dock-reference-node-test");
-  assert.equal(nodeTest.id, "@ykdz/dock-reference-node-test");
+void test("uses dock:node-test plugin ID and collects native node:test status and observation", async () => {
+  assert.equal(nodeTestPluginId, "dock:node-test");
+  assert.equal(nodeTest.id, "dock:node-test");
 
   const root = await mkdtemp(join(tmpdir(), "dock-node-test-unit-"));
   try {

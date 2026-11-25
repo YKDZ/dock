@@ -11,7 +11,7 @@ import {
   type PluginReadResult,
   type PluginRequest,
   type Reference,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 // @ts-expect-error Text selection must be constructed via public builders rather than arbitrary JSON.
 file.from("guide.md").reference("invalid", { selection: { start: 0 } });

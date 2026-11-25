@@ -226,15 +226,15 @@ importers:
 
   apps/consumer-readme:
     devDependencies:
+      '@boringparts/dock':
+        specifier: workspace:*
+        version: link:../../packages/dock
       '@dock/tooling-config':
         specifier: workspace:*
         version: link:../../packages/tooling-config
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6
-      '@ykdz/dock':
-        specifier: workspace:*
-        version: link:../../packages/dock
       dock:
         specifier: workspace:*
         version: link:../..

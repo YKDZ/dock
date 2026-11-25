@@ -1,4 +1,4 @@
-import { file } from "@ykdz/dock";
+import { file } from "@boringparts/dock";
 
 // @ts-expect-error at requires a standard module URL.
 file.at(42);

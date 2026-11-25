@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { binding, check, defineConfig, readReference } from "@ykdz/dock";
-import { markdown } from "@ykdz/dock/markdown";
+import { binding, check, defineConfig, readReference } from "@boringparts/dock";
+import { markdown } from "@boringparts/dock/markdown";
 
 import config, {
   chapter,

@@ -35,7 +35,7 @@ import type {
   NodeTestRunResult,
 } from "./types.ts";
 
-export const nodeTestPluginId = "@ykdz/dock-reference-node-test" as const;
+export const nodeTestPluginId = "dock:node-test" as const;
 
 export type NodeTestObservation<
   Key extends string = string,

@@ -1,5 +1,5 @@
-import { binding, defineConfig } from "@ykdz/dock";
-import { markdown } from "@ykdz/dock/markdown";
+import { binding, defineConfig } from "@boringparts/dock";
+import { markdown } from "@boringparts/dock/markdown";
 
 export const sample = markdown
   .from("inline-script-guide.md")

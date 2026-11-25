@@ -5,7 +5,7 @@ import { delimiter, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { nodeTest } from "@ykdz/dock/node-test";
+import { nodeTest } from "@boringparts/dock/node-test";
 
 import config, { exampleTest, readme } from "../dock.config.ts";
 

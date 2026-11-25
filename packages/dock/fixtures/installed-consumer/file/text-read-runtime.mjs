@@ -6,7 +6,7 @@ import {
   definePlugin,
   file,
   readReference,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 const expectedValue = process.argv[2];
 const expectedStart = Number(process.argv[3]);

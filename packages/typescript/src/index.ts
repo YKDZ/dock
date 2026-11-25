@@ -24,7 +24,7 @@ import {
 } from "@dock/text-selection";
 import * as ts from "typescript";
 
-export const typescriptPluginId = "@ykdz/dock-reference-typescript" as const;
+export const typescriptPluginId = "dock:typescript" as const;
 
 export type TypeScriptDeclarationKind =
   | "function"

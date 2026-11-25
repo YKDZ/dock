@@ -1,4 +1,4 @@
-import { file } from "@ykdz/dock";
+import { file } from "@boringparts/dock";
 
 export const directReference = file
   .from("same-a.txt")

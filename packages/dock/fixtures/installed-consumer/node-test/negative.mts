@@ -1,11 +1,11 @@
-import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
+import { binding, defineConfig, type ReferenceValue } from "@boringparts/dock";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
   nodeTestStatus,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 // @ts-expect-error At least one native test file is required.
 defineNodeTestRun("empty-run", { files: [] });

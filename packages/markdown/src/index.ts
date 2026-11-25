@@ -41,7 +41,7 @@ import { gfmFromMarkdown } from "mdast-util-gfm";
 import { gfm } from "micromark-extension-gfm";
 import { parseFragment } from "parse5";
 
-export const markdownPluginId = "@ykdz/dock-reference-markdown" as const;
+export const markdownPluginId = "dock:markdown" as const;
 
 export type MarkdownNodeType =
   | "paragraph"

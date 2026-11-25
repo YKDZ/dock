@@ -2,8 +2,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { binding, check, defineConfig, updateBaseline } from "@ykdz/dock";
-import { defineVitestRun, vitest, vitestStatus } from "@ykdz/dock/vitest";
+import {
+  binding,
+  check,
+  defineConfig,
+  updateBaseline,
+} from "@boringparts/dock";
+import {
+  defineVitestRun,
+  vitest,
+  vitestStatus,
+} from "@boringparts/dock/vitest";
 
 const run = defineVitestRun("same-process consecutive maintenance", {
   files: ["test/operation-local.test.mts"],
@@ -42,7 +51,7 @@ function assertFreshRun(report: {
   }[];
 }): void {
   const plugin = report.pluginDiagnostics.find(
-    ({ pluginId }) => pluginId === "@ykdz/dock-reference-vitest",
+    ({ pluginId }) => pluginId === "dock:vitest",
   );
   assert.ok(plugin);
   assert.deepEqual(

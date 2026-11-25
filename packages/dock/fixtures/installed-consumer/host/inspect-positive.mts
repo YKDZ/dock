@@ -4,13 +4,13 @@ import {
   type MaintenanceScope,
   type ResolvedPlugin,
   type ResolvedMaintenance,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 import {
   check,
   updateBaseline,
   type CheckContext,
   type ReferenceResult,
-} from "@ykdz/dock/core";
+} from "@boringparts/dock/core";
 
 async function consume(config: Config, url: URL): Promise<void> {
   const scope: MaintenanceScope = { reference: ["guide"] };

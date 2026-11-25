@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { check, updateBaseline } from "@ykdz/dock/core";
+import { check, updateBaseline } from "@boringparts/dock/core";
 
 const seed = {
   references: [{ id: "guide", target: { path: "docs/guide.md" } }],

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { beginExecution } from "@ykdz/dock/node-test";
+import { beginExecution } from "@boringparts/dock/node-test";
 
 test("duplicate business identity", () => {
   beginExecution();

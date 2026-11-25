@@ -3,8 +3,8 @@ import {
   defineConfig,
   readReference,
   type PluginReadResult,
-} from "@ykdz/dock";
-import { typescript } from "@ykdz/dock/typescript";
+} from "@boringparts/dock";
+import { typescript } from "@boringparts/dock/typescript";
 
 const calculate = typescript
   .from("symbol-source.ts")

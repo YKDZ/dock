@@ -1,11 +1,11 @@
-import { binding, defineConfig, file } from "@ykdz/dock";
+import { binding, defineConfig, file } from "@boringparts/dock";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
   nodeTestStatus,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 export const currentText = file
   .at(import.meta.url)

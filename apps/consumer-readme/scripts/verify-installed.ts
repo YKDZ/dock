@@ -39,7 +39,7 @@ const artifacts = process.argv.slice(2);
 assert.equal(
   artifacts.length,
   1,
-  "README bootstrap verification requires the @ykdz/dock package tarball.",
+  "README bootstrap verification requires the @boringparts/dock package tarball.",
 );
 const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const require = createRequire(import.meta.url);
@@ -99,8 +99,8 @@ try {
   }
   const installedPackages = collectInstalledPackageNames(dependencyTree);
   assert.ok(
-    installedPackages.has("@ykdz/dock"),
-    "Consumer must install @ykdz/dock from the tarball.",
+    installedPackages.has("@boringparts/dock"),
+    "Consumer must install @boringparts/dock from the tarball.",
   );
   for (const forbidden of [
     "@dock/core",
@@ -112,12 +112,6 @@ try {
     "@dock/node-test",
     "@dock/vitest",
     "@dock/tooling-config",
-    "@ykdz/dock-core",
-    "@ykdz/dock-reference-file",
-    "@ykdz/dock-reference-markdown",
-    "@ykdz/dock-reference-typescript",
-    "@ykdz/dock-reference-node-test",
-    "@ykdz/dock-reference-vitest",
   ]) {
     assert.equal(
       installedPackages.has(forbidden),
@@ -196,7 +190,7 @@ try {
   ]);
   assert.deepEqual(report.pluginErrors, []);
   const nodePlugin = report.pluginDiagnostics.find(
-    ({ pluginId }) => pluginId === "@ykdz/dock-reference-node-test",
+    ({ pluginId }) => pluginId === "dock:node-test",
   );
   assert.ok(
     nodePlugin,
@@ -293,9 +287,9 @@ try {
     [
       'import { dirname, join, relative } from "node:path";',
       'import { fileURLToPath } from "node:url";',
-      'import { binding, defineConfig } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
-      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'import { binding, defineConfig } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@boringparts/dock/node-test";',
       'const root = dirname(fileURLToPath(import.meta.resolve("dock/README.md")));',
       "const consumerDir = dirname(fileURLToPath(import.meta.url));",
       'const readmeDoc = markdown.from("README.md");',
@@ -414,7 +408,7 @@ try {
   await runConsumerJs("verify-inline-inspect.mjs", [
     'import assert from "node:assert/strict";',
     'import { readFile } from "node:fs/promises";',
-    'import { inspect } from "@ykdz/dock";',
+    'import { inspect } from "@boringparts/dock";',
     'const jsInspected = await inspect("inline.config.ts");',
     "assert.deepEqual(",
     '  jsInspected.context.bindings.find((entry) => entry.id === "readme-inline-statement"),',
@@ -489,7 +483,7 @@ try {
   );
   await runConsumerJs("verify-inline-changed.mjs", [
     'import assert from "node:assert/strict";',
-    'import { check } from "@ykdz/dock";',
+    'import { check } from "@boringparts/dock";',
     'const report = await check("inline.config.ts");',
     'const inlineBinding = report.bindings.find((entry) => entry.bindingId === "readme-inline-statement");',
     'assert.equal(inlineBinding?.consistency, "inconsistent");',
@@ -612,7 +606,7 @@ try {
   await runConsumerJs("verify-corrupt-inline-js.mjs", [
     'import assert from "node:assert/strict";',
     'import { readFile } from "node:fs/promises";',
-    'import { check, inspect, MaintenanceError, updateBaseline } from "@ykdz/dock";',
+    'import { check, inspect, MaintenanceError, updateBaseline } from "@boringparts/dock";',
     'const before = await readFile("inline.baseline.json");',
     'for (const op of [() => inspect("inline.config.ts"), () => check("inline.config.ts"), () => updateBaseline("inline.config.ts")]) {',
     "  await assert.rejects(op, (error) => {",
@@ -660,9 +654,9 @@ try {
     [
       'import { dirname } from "node:path";',
       'import { fileURLToPath } from "node:url";',
-      'import { defineConfig, file } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
-      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'import { defineConfig, file } from "@boringparts/dock";',
+      'import { markdown } from "@boringparts/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@boringparts/dock/node-test";',
       "",
       "const root = dirname(fileURLToPath(import.meta.url));",
       'const guideRun = defineNodeTestRun("guide run", { files: ["scripts/guide.test.ts"] });',
@@ -768,7 +762,7 @@ try {
   await runConsumerJs("verify-guide-inspect.mjs", [
     'import assert from "node:assert/strict";',
     'import { readFile } from "node:fs/promises";',
-    'import { inspect } from "@ykdz/dock";',
+    'import { inspect } from "@boringparts/dock";',
     'const jsInspected = await inspect("guide.config.ts");',
     "assert.deepEqual(jsInspected.context.bindings, [",
     '  { id: "guide-exit-policy", references: ["dock:bind:guide-exit-policy", "guide fact", "guide-test"] },',
@@ -843,7 +837,7 @@ try {
 
   await runConsumerJs("verify-guide-drift.mjs", [
     'import assert from "node:assert/strict";',
-    'import { check } from "@ykdz/dock";',
+    'import { check } from "@boringparts/dock";',
     'const jsReport = await check("guide.config.ts");',
     'assert.equal(jsReport.bindings[0]?.bindingId, "guide-exit-policy");',
     'assert.equal(jsReport.bindings[0]?.consistency, "inconsistent");',
@@ -910,7 +904,7 @@ try {
   );
   await runConsumerJs("verify-guide-update.mjs", [
     'import assert from "node:assert/strict";',
-    'import { updateBaseline } from "@ykdz/dock";',
+    'import { updateBaseline } from "@boringparts/dock";',
     'const jsUpdated = await updateBaseline("guide.config.ts");',
     'assert.equal(jsUpdated.status, "updated");',
     'assert.equal(jsUpdated.report.bindings[0]?.bindingId, "guide-exit-policy");',
@@ -956,7 +950,7 @@ try {
 
   await runConsumerJs("verify-guide-consistent.mjs", [
     'import assert from "node:assert/strict";',
-    'import { check } from "@ykdz/dock";',
+    'import { check } from "@boringparts/dock";',
     'const jsConsistent = await check("guide.config.ts");',
     'assert.equal(jsConsistent.bindings[0]?.bindingId, "guide-exit-policy");',
     'assert.equal(jsConsistent.bindings[0]?.consistency, "consistent");',

@@ -1,11 +1,16 @@
-import { binding, defineConfig, file, type ReferenceValue } from "@ykdz/dock";
+import {
+  binding,
+  defineConfig,
+  file,
+  type ReferenceValue,
+} from "@boringparts/dock";
 import {
   defineNodeTestObservation,
   defineNodeTestRun,
   nodeTest,
   nodeTestObservation,
   nodeTestStatus,
-} from "@ykdz/dock/node-test";
+} from "@boringparts/dock/node-test";
 
 const run = defineNodeTestRun("status-check", {
   files: ["test/happy.test.mts"],

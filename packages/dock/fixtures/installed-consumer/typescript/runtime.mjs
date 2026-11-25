@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
-import { check, readReference } from "@ykdz/dock";
+import { check, readReference } from "@boringparts/dock";
 
 import config, { expression } from "./dock.config.mjs";
 

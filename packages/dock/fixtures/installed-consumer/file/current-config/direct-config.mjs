@@ -1,5 +1,5 @@
 import "./keep-worker-alive.mjs";
-import { binding, defineConfig, file } from "@ykdz/dock";
+import { binding, defineConfig, file } from "@boringparts/dock";
 
 import { directReference } from "./direct-declaration.mjs";
 

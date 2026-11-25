@@ -11,7 +11,7 @@
           "definition": {
             "id": "readme-example",
             "target": {
-              "pluginId": "@ykdz/dock-reference-node-test",
+              "pluginId": "dock:node-test",
               "target": {
                 "kind": "node-test-status",
                 "name": "README example completes check and baseline update"
@@ -27,7 +27,7 @@
           "definition": {
             "id": "readme-extension-guide",
             "target": {
-              "pluginId": "@ykdz/dock-reference-markdown",
+              "pluginId": "dock:markdown",
               "target": "README.md",
               "fileInfo": "../../README.md"
             },
@@ -41,7 +41,7 @@
               ]
             }
           },
-          "value": "要核对其他类型的内容，可以编写插件来读取相应的内容或执行结果。只要插件返回的值可以比较，就能把新引用与已有引用关联起来，照常检查和更新基线。\n\n例如，某个项目在 `package.json` 中指定了所需的 Node.js 版本。\n\n```json\n{ \"engines\": { \"node\": \">=22\" } }\n```\n\n安装说明 `install.md` 里写着“需要 Node.js 22 或更高版本”。要在版本要求变动时提醒维护者核对这句话，可以用插件读取 `engines.node`，再把这个字段与安装说明关联起来。将以下配置保存为 `dock.config.mjs`。\n\n```js\nimport { readFile } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\n\nimport {\n  binding,\n  createReference,\n  defineConfig,\n  definePlugin,\n  file,\n} from \"@ykdz/dock\";\n\nconst nodeEngine = definePlugin({\n  id: \"node-engine\",\n  validate({ target }) {\n    if (typeof target !== \"string\") {\n      throw new Error(\"Specify the package manifest path.\");\n    }\n  },\n  async collect(request, { root }) {\n    const results = [];\n    for (const reference of request.selectedReferences) {\n      const target = reference.target;\n      if (typeof target !== \"string\") {\n        throw new Error(\"Package manifest path must be a string.\");\n      }\n      const data = JSON.parse(await readFile(resolve(root, target), \"utf8\"));\n      const value = data.engines?.node;\n      results.push(\n        typeof value === \"string\"\n          ? { referenceId: reference.id, kind: \"value\", value }\n          : {\n              referenceId: reference.id,\n              kind: \"error\",\n              error: {\n                code: \"node-version-missing\",\n                message:\n                  \"Declare the version requirement with engines.node in package.json.\",\n              },\n            },\n      );\n    }\n    return { results };\n  },\n});\n\nconst engine = createReference(\"node-engine\", \"node-version\", \"package.json\");\nconst guide = file.from(\"install.md\").reference(\"install-guide\");\n\nexport default defineConfig({\n  plugins: [file, nodeEngine],\n  bindings: [binding(\"installation\", [guide, engine])],\n});\n```\n\n先保存当前的版本要求和安装说明，作为基线。\n\n```sh\ndock baseline update --config dock.config.mjs\n```\n\n把 `package.json` 中的 `engines.node` 改为 `\">=24\"`，再运行检查。\n\n```sh\ndock check --config dock.config.mjs\n```\n\nDock 会报告版本要求从 `>=22` 变为 `>=24`，并列出关联的 `install.md`。这样你就能看到，安装说明里写的最低版本还是 22。"
+          "value": "要核对其他类型的内容，可以编写插件来读取相应的内容或执行结果。只要插件返回的值可以比较，就能把新引用与已有引用关联起来，照常检查和更新基线。\n\n例如，某个项目在 `package.json` 中指定了所需的 Node.js 版本。\n\n```json\n{ \"engines\": { \"node\": \">=22\" } }\n```\n\n安装说明 `install.md` 里写着“需要 Node.js 22 或更高版本”。要在版本要求变动时提醒维护者核对这句话，可以用插件读取 `engines.node`，再把这个字段与安装说明关联起来。将以下配置保存为 `dock.config.mjs`。\n\n```js\nimport { readFile } from \"node:fs/promises\";\nimport { resolve } from \"node:path\";\n\nimport {\n  binding,\n  createReference,\n  defineConfig,\n  definePlugin,\n  file,\n} from \"@boringparts/dock\";\n\nconst nodeEngine = definePlugin({\n  id: \"node-engine\",\n  validate({ target }) {\n    if (typeof target !== \"string\") {\n      throw new Error(\"Specify the package manifest path.\");\n    }\n  },\n  async collect(request, { root }) {\n    const results = [];\n    for (const reference of request.selectedReferences) {\n      const target = reference.target;\n      if (typeof target !== \"string\") {\n        throw new Error(\"Package manifest path must be a string.\");\n      }\n      const data = JSON.parse(await readFile(resolve(root, target), \"utf8\"));\n      const value = data.engines?.node;\n      results.push(\n        typeof value === \"string\"\n          ? { referenceId: reference.id, kind: \"value\", value }\n          : {\n              referenceId: reference.id,\n              kind: \"error\",\n              error: {\n                code: \"node-version-missing\",\n                message:\n                  \"Declare the version requirement with engines.node in package.json.\",\n              },\n            },\n      );\n    }\n    return { results };\n  },\n});\n\nconst engine = createReference(\"node-engine\", \"node-version\", \"package.json\");\nconst guide = file.from(\"install.md\").reference(\"install-guide\");\n\nexport default defineConfig({\n  plugins: [file, nodeEngine],\n  bindings: [binding(\"installation\", [guide, engine])],\n});\n```\n\n先保存当前的版本要求和安装说明，作为基线。\n\n```sh\ndock baseline update --config dock.config.mjs\n```\n\n把 `package.json` 中的 `engines.node` 改为 `\">=24\"`，再运行检查。\n\n```sh\ndock check --config dock.config.mjs\n```\n\nDock 会报告版本要求从 `>=22` 变为 `>=24`，并列出关联的 `install.md`。这样你就能看到，安装说明里写的最低版本还是 22。"
         }
       }
     },
@@ -55,7 +55,7 @@
           "definition": {
             "id": "readme-concepts",
             "target": {
-              "pluginId": "@ykdz/dock-reference-markdown",
+              "pluginId": "dock:markdown",
               "target": "README.md",
               "fileInfo": "../../README.md"
             },
@@ -75,7 +75,7 @@
           "definition": {
             "id": "readme-example",
             "target": {
-              "pluginId": "@ykdz/dock-reference-node-test",
+              "pluginId": "dock:node-test",
               "target": {
                 "kind": "node-test-status",
                 "name": "README example completes check and baseline update"
@@ -91,7 +91,7 @@
           "definition": {
             "id": "readme-usage",
             "target": {
-              "pluginId": "@ykdz/dock-reference-markdown",
+              "pluginId": "dock:markdown",
               "target": "README.md",
               "fileInfo": "../../README.md"
             },

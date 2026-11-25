@@ -1,4 +1,4 @@
-import { binding, defineConfig, type ReferenceValue } from "@ykdz/dock";
+import { binding, defineConfig, type ReferenceValue } from "@boringparts/dock";
 import {
   defineVitestObservation,
   defineVitestRun,
@@ -6,7 +6,7 @@ import {
   vitestObservation,
   vitestStatus,
   vitestSuite,
-} from "@ykdz/dock/vitest";
+} from "@boringparts/dock/vitest";
 
 const settings = defineVitestObservation("preview-settings", {
   mode: "auto",

@@ -151,7 +151,7 @@ void describe("inspectTaskGate", () => {
             tags: ["quality:heavy"],
             script: "node scripts/check-installed.ts",
             command: "node scripts/check-installed.ts",
-            dependsOn: ["@ykdz/dock#pack"],
+            dependsOn: ["@boringparts/dock#pack"],
           },
           {
             name: "format:write",
@@ -163,26 +163,26 @@ void describe("inspectTaskGate", () => {
         ],
       },
       {
-        name: "@ykdz/dock",
+        name: "@boringparts/dock",
         tasks: [
           {
             name: "build",
-            fullName: "@ykdz/dock#build",
+            fullName: "@boringparts/dock#build",
             tags: ["quality:light"],
             script: "tsc -p tsconfig.build.json",
             command: "tsc -p tsconfig.build.json",
           },
           {
             name: "pack",
-            fullName: "@ykdz/dock#pack",
+            fullName: "@boringparts/dock#pack",
             tags: ["work:preparation"],
             script: "pnpm pack",
             command: "pnpm pack",
-            dependsOn: ["@ykdz/dock#build"],
+            dependsOn: ["@boringparts/dock#build"],
           },
           {
             name: "test:manual",
-            fullName: "@ykdz/dock#test:manual",
+            fullName: "@boringparts/dock#test:manual",
             tags: ["quality:conditional"],
             script: "node test/manual.test.ts",
             command: "node test/manual.test.ts",
@@ -201,11 +201,11 @@ void describe("inspectTaskGate", () => {
     assert.equal(checkResult.plans.length, 1);
     assert.deepEqual(
       checkResult.plans[0]?.tasks.map((task) => task.fullName),
-      ["//#lint", "@ykdz/dock#build"],
+      ["//#lint", "@boringparts/dock#build"],
     );
     assert.deepEqual(
       checkResult.conditionalTasks.map((task) => task.fullName),
-      ["@ykdz/dock#test:manual"],
+      ["@boringparts/dock#test:manual"],
     );
 
     const heavyResult = inspectTaskGate(
@@ -253,11 +253,11 @@ void describe("inspectTaskGate", () => {
         ],
       },
       {
-        name: "@ykdz/dock",
+        name: "@boringparts/dock",
         tasks: [
           {
             name: "build",
-            fullName: "@ykdz/dock#build",
+            fullName: "@boringparts/dock#build",
             tags: [],
             script: "tsc -p tsconfig.build.json",
             command: "tsc -p tsconfig.build.json",
@@ -269,7 +269,7 @@ void describe("inspectTaskGate", () => {
     const result = inspectTaskGate("check", cwd, entryCommand, turboCommand);
     assert.ok(
       result.diagnostics.some((line) =>
-        line.includes("@ykdz/dock#build is missing a unique role tag"),
+        line.includes("@boringparts/dock#build is missing a unique role tag"),
       ),
     );
   });
@@ -290,11 +290,11 @@ void describe("inspectTaskGate", () => {
         ],
       },
       {
-        name: "@ykdz/dock",
+        name: "@boringparts/dock",
         tasks: [
           {
             name: "build",
-            fullName: "@ykdz/dock#build",
+            fullName: "@boringparts/dock#build",
             tags: ["quality:unknown"],
             script: "tsc -p tsconfig.build.json",
             command: "tsc -p tsconfig.build.json",
@@ -306,7 +306,9 @@ void describe("inspectTaskGate", () => {
     const result = inspectTaskGate("check", cwd, entryCommand, turboCommand);
     assert.ok(
       result.diagnostics.some((line) =>
-        line.includes("@ykdz/dock#build uses unknown role tag quality:unknown"),
+        line.includes(
+          "@boringparts/dock#build uses unknown role tag quality:unknown",
+        ),
       ),
     );
   });
@@ -327,11 +329,11 @@ void describe("inspectTaskGate", () => {
         ],
       },
       {
-        name: "@ykdz/dock",
+        name: "@boringparts/dock",
         tasks: [
           {
             name: "build",
-            fullName: "@ykdz/dock#build",
+            fullName: "@boringparts/dock#build",
             tags: ["quality:light", "work:preparation"],
             script: "tsc -p tsconfig.build.json",
             command: "tsc -p tsconfig.build.json",
@@ -343,7 +345,7 @@ void describe("inspectTaskGate", () => {
     const result = inspectTaskGate("check", cwd, entryCommand, turboCommand);
     assert.ok(
       result.diagnostics.some((line) =>
-        line.includes("@ykdz/dock#build has multiple role tags"),
+        line.includes("@boringparts/dock#build has multiple role tags"),
       ),
     );
   });
@@ -496,16 +498,16 @@ void describe("inspectTaskGate", () => {
             name: "empty-aggregate",
             fullName: "//#empty-aggregate",
             tags: ["quality:light"],
-            dependsOn: ["@ykdz/dock#empty-leaf"],
+            dependsOn: ["@boringparts/dock#empty-leaf"],
           },
         ],
       },
       {
-        name: "@ykdz/dock",
+        name: "@boringparts/dock",
         tasks: [
           {
             name: "empty-leaf",
-            fullName: "@ykdz/dock#empty-leaf",
+            fullName: "@boringparts/dock#empty-leaf",
             tags: [],
           },
         ],

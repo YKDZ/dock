@@ -4,7 +4,7 @@ import {
   createReference,
   defineConfig,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 import {
   makeBinding,

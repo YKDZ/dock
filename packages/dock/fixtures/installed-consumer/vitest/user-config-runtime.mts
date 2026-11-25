@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { inspect } from "@ykdz/dock";
+import { inspect } from "@boringparts/dock";
 
 import config from "./user-config.config.mts";
 

@@ -1031,9 +1031,9 @@ void test("file.at and file.from(URL) keep module-relative targets stable across
   }
 });
 
-void test("file plugin preserves processor ID, recorded source line ranges, and V3 baseline compatibility", async () => {
-  assert.equal(file.id, "@ykdz/dock-reference-file");
-  assert.equal(filePluginId, "@ykdz/dock-reference-file");
+void test("file plugin uses dock:file processor ID, records source line ranges, and validates V3 baselines", async () => {
+  assert.equal(file.id, "dock:file");
+  assert.equal(filePluginId, "dock:file");
 
   const root = await mkdtemp(join(tmpdir(), "dock-file-v3-lines-"));
   const targetPath = join(root, "app.env");
@@ -1076,7 +1076,7 @@ void test("file plugin preserves processor ID, recorded source line ranges, and 
     assert.equal(readResult.value, "port=4173\nhost=localhost\n");
     assert.deepEqual(readResult.range, rawRead.range);
 
-    // Seed an existing V3 baseline using the historical @ykdz/dock-reference-file definition shape.
+    // Seed an existing V3 baseline using the dock:file definition shape.
     await writeFile(
       baselinePath,
       JSON.stringify({
@@ -1092,7 +1092,7 @@ void test("file plugin preserves processor ID, recorded source line ranges, and 
                 definition: {
                   id: "quoted-host",
                   target: {
-                    pluginId: "@ykdz/dock-reference-file",
+                    pluginId: "dock:file",
                     target: "app.env",
                     fileInfo: "app.env",
                   },
@@ -1107,7 +1107,7 @@ void test("file plugin preserves processor ID, recorded source line ranges, and 
                 definition: {
                   id: "matched-port",
                   target: {
-                    pluginId: "@ykdz/dock-reference-file",
+                    pluginId: "dock:file",
                     target: "app.env",
                     fileInfo: "app.env",
                   },
@@ -1124,7 +1124,7 @@ void test("file plugin preserves processor ID, recorded source line ranges, and 
                 definition: {
                   id: "runtime-region",
                   target: {
-                    pluginId: "@ykdz/dock-reference-file",
+                    pluginId: "dock:file",
                     target: "app.env",
                     fileInfo: "app.env",
                   },

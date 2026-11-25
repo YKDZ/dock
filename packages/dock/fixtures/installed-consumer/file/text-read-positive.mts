@@ -12,7 +12,7 @@ import {
   type PluginRequest,
   type Reference,
   type ReferenceValue,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 const selected = file
   .from("guide.md")

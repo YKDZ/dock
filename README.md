@@ -1,6 +1,6 @@
 # Dock
 
-<a target="_blank" href="https://www.npmjs.com/package/@ykdz/dock"><img alt="NPM Version" src="https://img.shields.io/npm/v/%40ykdz%2Fdock"></a>
+<a target="_blank" href="https://www.npmjs.com/package/@boringparts/dock"><img alt="NPM Version" src="https://img.shields.io/npm/v/%40boringparts%2Fdock"></a>
 
 Dock 帮助你维护文档与相关内容之间的联系。当选定的内容发生变化时，它会提醒你检查相关资料，减少修改代码后遗漏文档、互相关联的文档没有同步更新等常见偏移。
 
@@ -54,7 +54,7 @@ import {
   defineConfig,
   definePlugin,
   file,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 const nodeEngine = definePlugin({
   id: "node-engine",

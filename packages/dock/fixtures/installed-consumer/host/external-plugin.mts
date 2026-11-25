@@ -5,7 +5,7 @@ import {
   type PluginRequest,
   type Reference,
   type ReferenceOptions,
-} from "@ykdz/dock";
+} from "@boringparts/dock";
 
 export const catalogPluginId = "@fixture/catalog" as const;
 

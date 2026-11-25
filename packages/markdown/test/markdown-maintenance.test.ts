@@ -37,9 +37,9 @@ function createConfig(root: string) {
   return defineConfig({ plugins: [markdown], bindings: [], root });
 }
 
-void test("markdown plugin preserves legacy plugin ID", () => {
-  assert.equal(markdownPluginId, "@ykdz/dock-reference-markdown");
-  assert.equal(markdown.id, "@ykdz/dock-reference-markdown");
+void test("markdown plugin uses dock:markdown plugin ID", () => {
+  assert.equal(markdownPluginId, "dock:markdown");
+  assert.equal(markdown.id, "dock:markdown");
 });
 
 void test("section, full heading path, and text steps sequentially select source UTF-16 ranges", async () => {
