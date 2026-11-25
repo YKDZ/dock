@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { pathToFileURL } from "node:url";
 
 import {
   binding,
@@ -1686,6 +1686,376 @@ void test("inline dock:bind keeps stable identity across paragraph reordering an
       });
       assert.equal(await readFile(baselinePath, "utf8"), savedBytes);
     }
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("broken external markdown reference target on baselined inline binding reports missing-file on affected binding without failing discovery", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-broken-ext-"));
+  const baselinePath = join(root, "dock.baseline.json");
+  try {
+    await writeFile(
+      join(root, "guide.md"),
+      [
+        "# Guide",
+        "",
+        '<!-- dock:bind {"id":"inline-ext","with":["other-doc"]} -->',
+        "See external doc.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(
+      join(root, "other.md"),
+      "# Spec\n\nExternal body.\n",
+      "utf8",
+    );
+    await writeFile(join(root, "keep.md"), "# Keep\n\nStill valid.\n", "utf8");
+
+    const config = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [markdown],
+      sources: [markdown.source("guide.md")],
+      references: [
+        markdown.from("other.md").section("Spec").reference("other-doc"),
+      ],
+      bindings: [
+        binding("keep-binding", [
+          markdown.from("keep.md").section("Keep").reference("keep-ref"),
+        ]),
+      ],
+    });
+
+    const initial = await updateBaseline(config);
+    assert.equal(initial.status, "updated");
+    const savedBytes = await readFile(baselinePath);
+
+    await rm(join(root, "other.md"));
+
+    const checked = await check(config);
+    const affected = checked.bindings.find(
+      (entry) => entry.bindingId === "inline-ext",
+    );
+    const unaffected = checked.bindings.find(
+      (entry) => entry.bindingId === "keep-binding",
+    );
+    assert.ok(affected && "errors" in affected);
+    assert.equal(affected.errors[0]?.referenceId, "other-doc");
+    assert.equal(affected.errors[0]?.code, "missing-file");
+    assert.ok(unaffected && "consistency" in unaffected);
+    assert.equal(unaffected.consistency, "consistent");
+
+    const rejected = await updateBaseline(config);
+    assert.equal(rejected.status, "rejected");
+    assert.deepEqual(await readFile(baselinePath), savedBytes);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("explicit markdown.source onboards a new guide with zero TypeScript bindings, shared declarations, and accurate scope filtering", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-new-guide-"));
+  const baselinePath = join(root, "dock.baseline.json");
+  try {
+    await writeFile(
+      join(root, "guide.md"),
+      "# Empty Guide\n\nNo bindings yet.\n",
+      "utf8",
+    );
+    await writeFile(join(root, "facts-a.txt"), "fact-a\n", "utf8");
+    await writeFile(join(root, "facts-b.txt"), "fact-b\n", "utf8");
+    await writeFile(join(root, "unused.txt"), "unused\n", "utf8");
+
+    const refA = markdown.from("facts-a.txt").reference("ref a");
+    const refB = markdown.from("facts-b.txt").reference("ref-b");
+    const unusedRef = markdown.from("unused.txt").reference("unused-ref");
+
+    // 0 inline bindings: inspect lists standalone references without guide.md in files; updateBaseline rejects empty-selection.
+    const emptyGuideConfig = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [markdown],
+      sources: [markdown.source("guide.md")],
+      references: [refA, refB, unusedRef],
+    });
+    const emptyInspected = await inspect(emptyGuideConfig);
+    assert.deepEqual(emptyInspected.context.bindings, []);
+    assert.deepEqual(emptyInspected.context.scope, []);
+    assert.deepEqual(
+      emptyInspected.context.references.map((ref) => ref.id),
+      ["ref a", "ref-b", "unused-ref"],
+    );
+    assert.equal(
+      emptyInspected.files.some((file) => file.path === join(root, "guide.md")),
+      false,
+    );
+    const emptyChecked = await check(emptyGuideConfig);
+    assert.deepEqual(emptyChecked.scope, []);
+    assert.deepEqual(emptyChecked.bindings, []);
+    const emptyUpdated = await updateBaseline(emptyGuideConfig);
+    assert.equal(emptyUpdated.status, "rejected");
+    if (emptyUpdated.status === "rejected") {
+      assert.equal(emptyUpdated.errors[0]?.code, "empty-selection");
+    }
+
+    // Add inline dock:bind to guide.md while unused-ref remains standalone.
+    await writeFile(
+      join(root, "guide.md"),
+      [
+        "# New Guide",
+        "",
+        '<!-- dock:bind {"id":"guide-intro","with":["ref a","ref-b"]} -->',
+        "",
+        "Guide statement linked to ref a and ref-b.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const inspected = await inspect(emptyGuideConfig);
+    assert.deepEqual(inspected.context.bindings, [
+      {
+        id: "guide-intro",
+        references: ["dock:bind:guide-intro", "ref a", "ref-b"],
+      },
+    ]);
+    assert.deepEqual(
+      inspected.context.references.map((ref) => ref.id),
+      ["ref a", "ref-b", "unused-ref", "dock:bind:guide-intro"],
+    );
+    assert.deepEqual(inspected.declarationSources.bindings["guide-intro"], [
+      "guide.md:3",
+    ]);
+    assert.ok(
+      inspected.files.some(
+        (file) =>
+          file.path === join(root, "guide.md") &&
+          file.references.includes("dock:bind:guide-intro"),
+      ),
+    );
+
+    for (const scope of [
+      { binding: ["guide-intro"] },
+      { reference: ["ref a"] },
+      { reference: ["dock:bind:guide-intro"] },
+      { file: ["guide.md"] },
+    ]) {
+      const scopedInspected = await inspect(emptyGuideConfig, scope);
+      assert.deepEqual(scopedInspected.context.scope, ["guide-intro"]);
+      assert.deepEqual(scopedInspected.plugins[0]?.selectedReferences, [
+        "ref a",
+        "ref-b",
+        "dock:bind:guide-intro",
+      ]);
+      const scopedChecked = await check(emptyGuideConfig, scope);
+      assert.deepEqual(scopedChecked.scope, ["guide-intro"]);
+      const scopedBinding = scopedChecked.bindings[0];
+      assert.ok(scopedBinding && "current" in scopedBinding);
+      assert.equal(
+        scopedBinding.current.references["dock:bind:guide-intro"]?.value,
+        "Guide statement linked to ref a and ref-b.",
+      );
+    }
+
+    const updated = await updateBaseline(emptyGuideConfig, {
+      file: ["guide.md"],
+    });
+    assert.equal(updated.status, "updated");
+    const verified = await check(emptyGuideConfig);
+    assert.equal(verified.bindings[0]?.consistency, "consistent");
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("multi-path inclusion deduplicates inline bindings and ignores unconfigured markdown files", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-dedup-"));
+  try {
+    const guidePath = join(root, "guide.md");
+    await writeFile(
+      guidePath,
+      [
+        "# Guide",
+        "",
+        "## Intro",
+        "",
+        "Intro text.",
+        "",
+        "## Rules",
+        "",
+        '<!-- dock:bind {"id":"rule-inline","with":["intro-ref","standalone-ref"]} -->',
+        "Rules must match standalone-ref.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+    await writeFile(join(root, "facts.txt"), "fact=ok\n", "utf8");
+    await writeFile(
+      join(root, "random.md"),
+      [
+        "<!-- dock:start unclosed-random -->",
+        '<!-- dock:bind {"id":"rule-inline","with":[]} -->',
+        "<!-- dock:bind {broken json -->",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const introRef = markdown
+      .from("guide.md")
+      .section("Intro")
+      .reference("intro-ref");
+    const rulesHeadingRef = markdown
+      .from(pathToFileURL(guidePath))
+      .section("Rules")
+      .reference("rules-ref");
+    const standaloneRef = markdown
+      .from("facts.txt")
+      .reference("standalone-ref");
+
+    const config = defineConfig({
+      root,
+      plugins: [markdown],
+      sources: [
+        markdown.source("guide.md"),
+        markdown.source(pathToFileURL(guidePath)),
+      ],
+      references: [rulesHeadingRef, standaloneRef],
+      bindings: [binding("intro-policy", [introRef])],
+    });
+
+    const inspected = await inspect(config);
+    assert.deepEqual(
+      inspected.context.bindings.map((entry) => entry.id),
+      ["intro-policy", "rule-inline"],
+    );
+    const report = await check(config);
+    assert.equal(report.bindings.length, 2);
+    assert.deepEqual(report.scope, ["intro-policy", "rule-inline"]);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+void test("unreadable source, corrupted inline declaration, untracking, partial check safety, and scoped cleanup preserve history correctly", async () => {
+  const root = await mkdtemp(join(tmpdir(), "dock-markdown-untrack-"));
+  const baselinePath = join(root, "dock.baseline.json");
+  const guidePath = join(root, "guide.md");
+  try {
+    await writeFile(join(root, "fact-1.txt"), "one\n", "utf8");
+    await writeFile(join(root, "fact-2.txt"), "two\n", "utf8");
+    await writeFile(join(root, "keep.txt"), "keep\n", "utf8");
+    await writeFile(
+      guidePath,
+      [
+        "# Guide",
+        "",
+        '<!-- dock:bind {"id":"inline-one","with":["ref-1"]} -->',
+        "Statement one.",
+        "",
+        '<!-- dock:bind {"id":"inline-two","with":["ref-2"]} -->',
+        "Statement two.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const ref1 = markdown.from("fact-1.txt").reference("ref-1");
+    const ref2 = markdown.from("fact-2.txt").reference("ref-2");
+    const keepRef = markdown.from("keep.txt").reference("keep-ref");
+    const fullConfig = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [markdown],
+      sources: [markdown.source("guide.md")],
+      references: [ref1, ref2],
+      bindings: [binding("keep-binding", [keepRef])],
+    });
+
+    const initial = await updateBaseline(fullConfig);
+    assert.equal(initial.status, "updated");
+    const v3Bytes = await readFile(baselinePath, "utf8");
+
+    // 1) Unreadable declaration source (deleted and directory conflict): rejects and preserves baseline without untracking.
+    await rm(guidePath);
+    for (const setupUnreadable of [
+      async () => {},
+      async () => {
+        await mkdir(guidePath);
+      },
+    ]) {
+      await setupUnreadable();
+      for (const op of [
+        () => check(fullConfig),
+        () => updateBaseline(fullConfig),
+      ]) {
+        await assert.rejects(op, (error: unknown) => {
+          assert.ok(error instanceof MaintenanceError);
+          assert.equal(error.code, "declaration-source-read-failed");
+          assert.match(error.message, /guide\.md/);
+          return true;
+        });
+        assert.equal(await readFile(baselinePath, "utf8"), v3Bytes);
+      }
+      await rm(guidePath, { recursive: true, force: true });
+    }
+
+    // 2) Intentional untracking by removing both inline-one and inline-two from guide.md.
+    await writeFile(
+      guidePath,
+      "# Guide\n\nAll inline bindings removed.\n",
+      "utf8",
+    );
+
+    // Partial check on keep-binding does NOT infer or delete inline-one / inline-two.
+    const partialCheck = await check(fullConfig, { binding: ["keep-binding"] });
+    assert.deepEqual(partialCheck.scope, ["keep-binding"]);
+    assert.equal(partialCheck.bindings.length, 1);
+    assert.equal(partialCheck.bindings[0]?.consistency, "consistent");
+
+    // Full check marks both removed bindings as untracked.
+    const fullCheck = await check(fullConfig);
+    for (const id of ["inline-one", "inline-two"]) {
+      const entry = fullCheck.bindings.find((item) => item.bindingId === id);
+      assert.ok(entry && "untracked" in entry && entry.untracked);
+    }
+
+    // Scoped update removes ONLY inline-one, leaving inline-two and keep-binding in baseline.
+    const scopedUpdate = await updateBaseline(fullConfig, {
+      binding: ["inline-one"],
+    });
+    assert.equal(scopedUpdate.status, "updated");
+    const afterScopedBaseline = JSON.parse(
+      await readFile(baselinePath, "utf8"),
+    ) as { bindings: Record<string, unknown> };
+    assert.deepEqual(Object.keys(afterScopedBaseline.bindings).sort(), [
+      "inline-two",
+      "keep-binding",
+    ]);
+
+    // Removing source from config AND deleting guide.md still untracks inline-two cleanly.
+    await rm(guidePath);
+    const sourceRemovedConfig = defineConfig({
+      root,
+      baseline: baselinePath,
+      plugins: [markdown],
+      bindings: [binding("keep-binding", [keepRef])],
+    });
+    const untrackedViaConfig = await check(sourceRemovedConfig);
+    const twoEntry = untrackedViaConfig.bindings.find(
+      (item) => item.bindingId === "inline-two",
+    );
+    assert.ok(twoEntry && "untracked" in twoEntry && twoEntry.untracked);
+
+    const finalUpdate = await updateBaseline(sourceRemovedConfig);
+    assert.equal(finalUpdate.status, "updated");
+    const finalBaseline = JSON.parse(await readFile(baselinePath, "utf8")) as {
+      bindings: Record<string, unknown>;
+    };
+    assert.deepEqual(Object.keys(finalBaseline.bindings), ["keep-binding"]);
+    const finalCheck = await check(sourceRemovedConfig);
+    assert.equal(finalCheck.bindings[0]?.consistency, "consistent");
   } finally {
     await rm(root, { recursive: true, force: true });
   }

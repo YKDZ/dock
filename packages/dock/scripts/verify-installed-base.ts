@@ -42,6 +42,7 @@ type MaintenanceReport = {
   readonly bindings: readonly {
     readonly bindingId: string;
     readonly consistency?: string;
+    readonly untracked?: boolean;
     readonly current?: {
       readonly references: Record<
         string,
@@ -2061,6 +2062,452 @@ async function verifyInstalledMarkdownSmoke(
     0,
     inlineCorruptJs.stdout + inlineCorruptJs.stderr,
   );
+
+  await verifyInstalledExplicitMarkdownSources(
+    bin,
+    join(dir, "explicit-markdown-sources"),
+  );
+}
+
+async function verifyInstalledExplicitMarkdownSources(
+  bin: string,
+  dir: string,
+): Promise<void> {
+  await mkdir(dir, { recursive: true });
+  const guidePath = join(dir, "guide.md");
+  const baselinePath = join(dir, "dock.baseline.json");
+  const factPath = join(dir, "fact.txt");
+  const keepPath = join(dir, "keep.txt");
+  const testPath = join(dir, "guide.test.mjs");
+  const unusedTestPath = join(dir, "unused.test.mjs");
+  const unusedMarkerPath = join(dir, "unused-executed.txt");
+
+  await writeFile(factPath, "exit=1\n", "utf8");
+  await writeFile(keepPath, "stable\n", "utf8");
+  await writeFile(
+    testPath,
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFileSync } from "node:fs";',
+      'import test from "node:test";',
+      'test("guide status", () => {',
+      '  assert.equal(readFileSync("fact.txt", "utf8").trim(), "exit=1");',
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    unusedTestPath,
+    [
+      'import { writeFileSync } from "node:fs";',
+      'import test from "node:test";',
+      'test("unused test", () => {',
+      '  writeFileSync("unused-executed.txt", "ran", "utf8");',
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    guidePath,
+    [
+      "# Guide",
+      "",
+      '<!-- dock:bind {"id":"inline-one","with":["fact ref","guide test"]} -->',
+      "",
+      "Check exits 1 when fact.txt says exit=1.",
+      "",
+      '<!-- dock:bind {"id":"inline-two","with":["fact ref"]} -->',
+      "",
+      "Second inline statement.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "random.md"),
+    [
+      "<!-- dock:start unclosed-random -->",
+      '<!-- dock:bind {"id":"inline-one","with":[]} -->',
+      "<!-- dock:bind {broken json -->",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  // Runtime TypeError verification for invalid config shapes + AC 1/2/3/4 across JS and CLI.
+  const sourceOnlyConfigPath = join(dir, "source-only.config.mjs");
+  await writeFile(
+    sourceOnlyConfigPath,
+    [
+      'import { defineConfig, file } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'const guideRun = defineNodeTestRun("guide-run", { files: ["guide.test.mjs"] });',
+      'const unusedRun = defineNodeTestRun("unused-run", { files: ["unused.test.mjs"] });',
+      "export default defineConfig({",
+      "  plugins: [markdown, file, nodeTest],",
+      '  sources: [markdown.source("guide.md")],',
+      "  references: [",
+      '    file.from("fact.txt").reference("fact ref"),',
+      '    nodeTestStatus("guide test", guideRun, { file: "guide.test.mjs", name: "guide status" }),',
+      '    nodeTestStatus("unused ref", unusedRun, { file: "unused.test.mjs", name: "unused test" }),',
+      "  ],",
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  await writeFile(
+    join(dir, "runtime-ac1-ac2.mjs"),
+    [
+      'import assert from "node:assert/strict";',
+      'import { readFile } from "node:fs/promises";',
+      'import { check, defineConfig, file, inspect } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      "",
+      "assert.throws(",
+      "  () => defineConfig({ plugins: [] }),",
+      "  (error) => error instanceof TypeError && /bindings or sources/i.test(error.message),",
+      ");",
+      "assert.throws(",
+      '  () => defineConfig({ plugins: [markdown], references: [file.from("fact.txt").reference("r")] }),',
+      "  (error) => error instanceof TypeError && /bindings or sources/i.test(error.message),",
+      ");",
+      "",
+      'const inspected = await inspect("source-only.config.mjs");',
+      "assert.deepEqual(",
+      "  inspected.context.bindings.map((b) => b.id),",
+      '  ["inline-one", "inline-two"],',
+      ");",
+      "assert.ok(",
+      '  inspected.files.some((entry) => entry.path.endsWith("/guide.md") && entry.references.includes("dock:bind:inline-one")),',
+      ");",
+      'const inspectedByFile = await inspect("source-only.config.mjs", { file: ["guide.md"] });',
+      'assert.deepEqual(inspectedByFile.context.scope, ["inline-one", "inline-two"]);',
+      'const checkedByRef = await check("source-only.config.mjs", { reference: ["dock:bind:inline-one"] });',
+      'assert.deepEqual(checkedByRef.scope, ["inline-one"]);',
+      'const checkedByStandaloneRef = await check("source-only.config.mjs", { reference: ["fact ref"] });',
+      'assert.deepEqual(checkedByStandaloneRef.scope, ["inline-one", "inline-two"]);',
+      "await assert.rejects(",
+      `  () => readFile(${JSON.stringify(unusedMarkerPath)}, "utf8"),`,
+      '  { code: "ENOENT" },',
+      ");",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const ac1Js = await run(
+    process.execPath,
+    [join(dir, "runtime-ac1-ac2.mjs")],
+    dir,
+  );
+  assert.equal(ac1Js.code, 0, ac1Js.stdout + ac1Js.stderr);
+
+  const cliInspect = await run(
+    bin,
+    ["inspect", "--config", "source-only.config.mjs"],
+    dir,
+  );
+  assert.equal(cliInspect.code, 0, cliInspect.stderr);
+  assert.match(
+    cliInspect.stdout,
+    /Target file .*guide\.md:.*dock:bind:inline-one/,
+  );
+
+  const cliFileCheck = await run(
+    bin,
+    [
+      "check",
+      "--config",
+      "source-only.config.mjs",
+      "--file",
+      "guide.md",
+      "--output",
+      "structured",
+    ],
+    dir,
+  );
+  assert.equal(cliFileCheck.code, 1, cliFileCheck.stderr);
+  const cliFileEnvelope = parseEnvelope(cliFileCheck.stdout);
+  assert.equal(cliFileEnvelope.variant, "changed");
+  assert.deepEqual(requireReport(cliFileEnvelope).scope, [
+    "inline-one",
+    "inline-two",
+  ]);
+  await assert.rejects(readFile(unusedMarkerPath, "utf8"), { code: "ENOENT" });
+
+  // AC 2: Multi-path deduplication + keep-binding + out-of-scope random.md ignored.
+  const combinedConfigPath = join(dir, "combined.config.mjs");
+  await writeFile(
+    combinedConfigPath,
+    [
+      'import { binding, defineConfig, file } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'const guideRun = defineNodeTestRun("guide-run", { files: ["guide.test.mjs"] });',
+      'const factRef = file.from("fact.txt").reference("fact ref");',
+      'const keepRef = file.from("keep.txt").reference("keep ref");',
+      'const guideTestRef = nodeTestStatus("guide test", guideRun, { file: "guide.test.mjs", name: "guide status" });',
+      "export default defineConfig({",
+      "  plugins: [markdown, file, nodeTest],",
+      '  sources: [markdown.source("guide.md"), markdown.source(new URL("./guide.md", import.meta.url))],',
+      "  references: [",
+      "    factRef,",
+      "    guideTestRef,",
+      '    markdown.from("guide.md").node({ type: "paragraph", contains: "Second inline" }).reference("second-para"),',
+      "  ],",
+      "  bindings: [",
+      '    binding("keep-binding", [keepRef, markdown.from("guide.md").node({ type: "paragraph", contains: "Check exits 1" }).reference("first-para")]),',
+      "  ],",
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+
+  const combinedUpdate = await run(
+    bin,
+    ["baseline", "update", "--config", "combined.config.mjs"],
+    dir,
+  );
+  assert.equal(
+    combinedUpdate.code,
+    0,
+    combinedUpdate.stdout + combinedUpdate.stderr,
+  );
+  const savedBaseline = await readFile(baselinePath);
+  const consistentCombined = await run(
+    bin,
+    ["check", "--config", "combined.config.mjs"],
+    dir,
+  );
+  assert.equal(
+    consistentCombined.code,
+    0,
+    consistentCombined.stdout + consistentCombined.stderr,
+  );
+
+  // AC 3 (1): Unreadable source preserves baseline bytes and rejects update.
+  const originalGuide = await readFile(guidePath, "utf8");
+  await rm(guidePath);
+  for (const args of [
+    ["check", "--config", "combined.config.mjs"],
+    ["baseline", "update", "--config", "combined.config.mjs"],
+  ]) {
+    const failed = await run(bin, args, dir);
+    assert.equal(failed.code, 1, failed.stdout + failed.stderr);
+    assert.match(
+      failed.stderr,
+      /Maintenance failed \(declaration-source-read-failed\)/,
+    );
+    assert.match(failed.stderr, /guide\.md/);
+    assert.doesNotMatch(failed.stderr, /untracked/i);
+    assert.deepEqual(await readFile(baselinePath), savedBaseline);
+  }
+
+  // AC 3 (2): Corrupted inline declaration preserves baseline bytes and rejects update.
+  await writeFile(
+    guidePath,
+    originalGuide.replace(
+      '<!-- dock:bind {"id":"inline-one","with":["fact ref","guide test"]} -->',
+      '<!-- dock:bind {"id":"inline-one","with":[]} -->',
+    ),
+    "utf8",
+  );
+  for (const args of [
+    ["check", "--config", "combined.config.mjs"],
+    ["baseline", "update", "--config", "combined.config.mjs"],
+  ]) {
+    const failed = await run(bin, args, dir);
+    assert.equal(failed.code, 1, failed.stdout + failed.stderr);
+    assert.match(failed.stderr, /Maintenance failed \(declaration-invalid\)/);
+    assert.match(failed.stderr, /guide\.md:3/);
+    assert.doesNotMatch(failed.stderr, /untracked/i);
+    assert.deepEqual(await readFile(baselinePath), savedBaseline);
+  }
+
+  // AC 3 (3): Broken referenced target (failing nodeTest + deleted fact.txt) isolates errors to affected bindings while unaffected sibling stays consistent.
+  await writeFile(guidePath, originalGuide, "utf8");
+  await rm(factPath);
+  const brokenTargetCheck = await run(
+    bin,
+    ["check", "--config", "combined.config.mjs", "--output", "structured"],
+    dir,
+  );
+  assert.equal(brokenTargetCheck.code, 1, brokenTargetCheck.stderr);
+  const brokenReport = requireReport(parseEnvelope(brokenTargetCheck.stdout));
+  assertBindingError(brokenReport, "inline-two", "missing-file");
+  assert.equal(
+    brokenReport.bindings.find((b) => b.bindingId === "keep-binding")
+      ?.consistency,
+    "consistent",
+  );
+  const brokenUpdate = await run(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "combined.config.mjs",
+      "--output",
+      "structured",
+    ],
+    dir,
+  );
+  assert.equal(brokenUpdate.code, 1, brokenUpdate.stderr);
+  assert.equal(parseEnvelope(brokenUpdate.stdout).variant, "rejected");
+  assert.deepEqual(await readFile(baselinePath), savedBaseline);
+
+  // Restore fact.txt with drifted content so nodeTest fails while keep-binding (when decoupled from fact.txt) stays consistent.
+  await writeFile(factPath, "exit=2\n", "utf8");
+  const failingTestCheck = await run(
+    bin,
+    ["check", "--config", "combined.config.mjs", "--output", "structured"],
+    dir,
+  );
+  assert.equal(failingTestCheck.code, 1, failingTestCheck.stderr);
+  const failingTestReport = requireReport(
+    parseEnvelope(failingTestCheck.stdout),
+  );
+  assertBindingError(failingTestReport, "inline-one", "test-failed");
+  assert.equal(
+    failingTestReport.bindings.find((b) => b.bindingId === "keep-binding")
+      ?.consistency,
+    "consistent",
+  );
+  const failingTestUpdate = await run(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "combined.config.mjs",
+      "--output",
+      "structured",
+    ],
+    dir,
+  );
+  assert.equal(failingTestUpdate.code, 1, failingTestUpdate.stderr);
+  assert.equal(parseEnvelope(failingTestUpdate.stdout).variant, "rejected");
+  assert.deepEqual(await readFile(baselinePath), savedBaseline);
+
+  // Restore fact.txt and re-baseline with decoupled keep-binding for AC 4.
+  await writeFile(factPath, "exit=1\n", "utf8");
+  const ac4ConfigPath = join(dir, "ac4.config.mjs");
+  await writeFile(
+    ac4ConfigPath,
+    [
+      'import { binding, defineConfig, file } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { defineNodeTestRun, nodeTest, nodeTestStatus } from "@ykdz/dock/node-test";',
+      'const guideRun = defineNodeTestRun("guide-run", { files: ["guide.test.mjs"] });',
+      "export default defineConfig({",
+      "  plugins: [markdown, file, nodeTest],",
+      '  sources: [markdown.source("guide.md")],',
+      "  references: [",
+      '    file.from("fact.txt").reference("fact ref"),',
+      '    nodeTestStatus("guide test", guideRun, { file: "guide.test.mjs", name: "guide status" }),',
+      "  ],",
+      '  bindings: [binding("keep-binding", [file.from("keep.txt").reference("keep ref")])],',
+      "});",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const ac4Init = await run(
+    bin,
+    ["baseline", "update", "--config", "ac4.config.mjs"],
+    dir,
+  );
+  assert.equal(ac4Init.code, 0, ac4Init.stdout + ac4Init.stderr);
+
+  // AC 4: Remove inline-one and inline-two from guide.md -> partial check keeps them, full check reports untracked, scoped update removes only inline-one.
+  await writeFile(guidePath, "# Guide\n\nNo inline bindings.\n", "utf8");
+  const partialCheck = await run(
+    bin,
+    ["check", "--config", "ac4.config.mjs", "--binding", "keep-binding"],
+    dir,
+  );
+  assert.equal(partialCheck.code, 0, partialCheck.stdout + partialCheck.stderr);
+  assert.equal(
+    partialCheck.stdout,
+    "Scope: keep-binding\nAll checked bindings are consistent with baseline.\n",
+  );
+
+  const untrackedFull = await run(
+    bin,
+    ["check", "--config", "ac4.config.mjs", "--output", "structured"],
+    dir,
+  );
+  assert.equal(untrackedFull.code, 1, untrackedFull.stderr);
+  const untrackedReport = requireReport(parseEnvelope(untrackedFull.stdout));
+  assert.equal(
+    untrackedReport.bindings.find((b) => b.bindingId === "inline-one")
+      ?.untracked,
+    true,
+  );
+  assert.equal(
+    untrackedReport.bindings.find((b) => b.bindingId === "inline-two")
+      ?.untracked,
+    true,
+  );
+
+  const scopedCleanup = await run(
+    bin,
+    [
+      "baseline",
+      "update",
+      "--config",
+      "ac4.config.mjs",
+      "--binding",
+      "inline-one",
+    ],
+    dir,
+  );
+  assert.equal(
+    scopedCleanup.code,
+    0,
+    scopedCleanup.stdout + scopedCleanup.stderr,
+  );
+  const afterScopedJson = JSON.parse(await readFile(baselinePath, "utf8")) as {
+    bindings: Record<string, unknown>;
+  };
+  assert.deepEqual(Object.keys(afterScopedJson.bindings).sort(), [
+    "inline-two",
+    "keep-binding",
+  ]);
+
+  // Also verify removing markdown.source("guide.md") and deleting guide.md removes inline-two on full update.
+  await rm(guidePath);
+  const finalConfigPath = join(dir, "ac4-final.config.mjs");
+  await writeFile(
+    finalConfigPath,
+    [
+      'import { binding, defineConfig, file } from "@ykdz/dock";',
+      'export default defineConfig({ plugins: [file], bindings: [binding("keep-binding", [file.from("keep.txt").reference("keep ref")])] });',
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  const finalCleanup = await run(
+    bin,
+    ["baseline", "update", "--config", "ac4-final.config.mjs"],
+    dir,
+  );
+  assert.equal(finalCleanup.code, 0, finalCleanup.stdout + finalCleanup.stderr);
+  const finalJson = JSON.parse(await readFile(baselinePath, "utf8")) as {
+    bindings: Record<string, unknown>;
+  };
+  assert.deepEqual(Object.keys(finalJson.bindings), ["keep-binding"]);
+  const finalCheck = await run(
+    bin,
+    ["check", "--config", "ac4-final.config.mjs"],
+    dir,
+  );
+  assert.equal(finalCheck.code, 0, finalCheck.stdout + finalCheck.stderr);
 }
 
 async function verifyInstalledTypeScriptSmoke(
