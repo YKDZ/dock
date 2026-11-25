@@ -1,5 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { copyJsonValue, type JsonValue } from "@dock/core";
 import {
@@ -36,9 +38,29 @@ type AttemptBridge = {
 
 type TestMetadata = Record<string, unknown>;
 
-const { version } = JSON.parse(
-  readFileSync(new URL("../../package.json", import.meta.url), "utf8"),
-) as { version: string };
+function resolvePackageVersion(): string {
+  let directory = dirname(fileURLToPath(import.meta.url));
+  while (true) {
+    const candidate = join(directory, "package.json");
+    if (existsSync(candidate)) {
+      const manifest = JSON.parse(readFileSync(candidate, "utf8")) as {
+        readonly version?: unknown;
+      };
+      if (typeof manifest.version === "string" && manifest.version.length > 0) {
+        return manifest.version;
+      }
+    }
+    const parent = dirname(directory);
+    if (parent === directory) {
+      throw new Error(
+        "Unable to locate package.json for Vitest attempt context.",
+      );
+    }
+    directory = parent;
+  }
+}
+
+const version = resolvePackageVersion();
 const bridgeKey = Symbol.for(`@ykdz/dock/vitest/${version}/attempt-context`);
 
 const sharedGlobal = globalThis as typeof globalThis & {
