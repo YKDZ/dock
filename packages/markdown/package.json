@@ -1,0 +1,42 @@
+{
+  "name": "@dock/markdown",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && tsc -p tsconfig.build.json --pretty false",
+    "test": "node --conditions=source --test --test-reporter=spec 'test/**/*.test.ts'",
+    "format:check": "oxfmt --list-different .",
+    "format:write": "oxfmt --write .",
+    "lint": "oxlint --quiet --format=unix --ignore-pattern node_modules .",
+    "lint:fix": "oxlint --format=unix . --fix",
+    "typecheck": "tsc -p tsconfig.node.json --noEmit --pretty false"
+  },
+  "dependencies": {
+    "@dock/core": "workspace:*",
+    "@dock/host": "workspace:*",
+    "@dock/text-selection": "workspace:*",
+    "mdast-util-from-markdown": "2.0.2",
+    "mdast-util-gfm": "3.0.0",
+    "micromark-extension-gfm": "3.0.0",
+    "parse5": "8.0.0"
+  },
+  "devDependencies": {
+    "@dock/tooling-config": "workspace:*",
+    "@types/node": "catalog:",
+    "oxfmt": "catalog:",
+    "oxlint": "catalog:",
+    "tsrs": "catalog:",
+    "typescript-7": "catalog:"
+  },
+  "engines": {
+    "node": "^26.13.1"
+  }
+}

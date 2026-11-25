@@ -305,6 +305,9 @@ importers:
       '@dock/host':
         specifier: workspace:*
         version: link:../host
+      '@dock/markdown':
+        specifier: workspace:*
+        version: link:../markdown
       '@dock/node-test':
         specifier: workspace:*
         version: link:../node-test
@@ -314,6 +317,9 @@ importers:
       '@dock/tooling-config':
         specifier: workspace:*
         version: link:../tooling-config
+      '@dock/typescript':
+        specifier: workspace:*
+        version: link:../typescript
       '@dock/vitest':
         specifier: workspace:*
         version: link:../vitest
@@ -389,6 +395,49 @@ importers:
         specifier: 'catalog:'
         version: typescript@7.0.2
 
+  packages/markdown:
+    dependencies:
+      '@dock/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dock/host':
+        specifier: workspace:*
+        version: link:../host
+      '@dock/text-selection':
+        specifier: workspace:*
+        version: link:../text-selection
+      mdast-util-from-markdown:
+        specifier: 2.0.2
+        version: 2.0.2
+      mdast-util-gfm:
+        specifier: 3.0.0
+        version: 3.0.0
+      micromark-extension-gfm:
+        specifier: 3.0.0
+        version: 3.0.0
+      parse5:
+        specifier: 8.0.0
+        version: 8.0.0
+    devDependencies:
+      '@dock/tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.79.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.94.0
+      tsrs:
+        specifier: 'catalog:'
+        version: 7.1.0-beta.tsrs4
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
   packages/node-test:
     dependencies:
       '@dock/core':
@@ -444,6 +493,40 @@ importers:
 
   packages/tooling-config:
     devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 26.6.6
+      oxfmt:
+        specifier: 'catalog:'
+        version: 0.79.0
+      oxlint:
+        specifier: 'catalog:'
+        version: 1.94.0
+      tsrs:
+        specifier: 'catalog:'
+        version: 7.1.0-beta.tsrs4
+      typescript-7:
+        specifier: 'catalog:'
+        version: typescript@7.0.2
+
+  packages/typescript:
+    dependencies:
+      '@dock/core':
+        specifier: workspace:*
+        version: link:../core
+      '@dock/host':
+        specifier: workspace:*
+        version: link:../host
+      '@dock/text-selection':
+        specifier: workspace:*
+        version: link:../text-selection
+      typescript:
+        specifier: 5.9.3
+        version: 5.9.3
+    devDependencies:
+      '@dock/tooling-config':
+        specifier: workspace:*
+        version: link:../tooling-config
       '@types/node':
         specifier: 'catalog:'
         version: 26.6.6

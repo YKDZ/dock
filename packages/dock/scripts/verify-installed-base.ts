@@ -119,6 +119,8 @@ const forbiddenBasePackages = [
   "@dock/host",
   "@dock/text-selection",
   "@dock/file",
+  "@dock/markdown",
+  "@dock/typescript",
   "@dock/vitest",
   "@dock/node-test",
   "@ykdz/dock-core",
@@ -1454,13 +1456,15 @@ async function verifyInstalledMarkdownSmoke(
     );
   }
 
-  // Verify quote, match capture, and named region reading directly via @ykdz/dock/markdown.
+  // Verify quote, match capture, named region, processor ID, and V3 baseline compatibility via @ykdz/dock/markdown.
   await writeFile(
     join(dir, "text-selection-verify.mjs"),
     [
       'import assert from "node:assert/strict";',
       'import { defineConfig, readReference } from "@ykdz/dock";',
-      'import { markdown } from "@ykdz/dock/markdown";',
+      'import { markdown, markdownPluginId } from "@ykdz/dock/markdown";',
+      'assert.equal(markdownPluginId, "@ykdz/dock-reference-markdown");',
+      'assert.equal(markdown.id, "@ykdz/dock-reference-markdown");',
       "const config = defineConfig({ plugins: [markdown], bindings: [] });",
       'const quoted = await readReference(config, markdown.from("guide.md").section(["指南", "安装"]).quote("安装片段：版本一。").reference("md-quote"));',
       'assert.equal(quoted.value, "安装片段：版本一。");',
@@ -1480,6 +1484,97 @@ async function verifyInstalledMarkdownSmoke(
     mdTextSelection.code,
     0,
     `Installed Markdown text-selection check failed:\n${mdTextSelection.stdout}\n${mdTextSelection.stderr}`,
+  );
+
+  await writeFile(
+    join(dir, "v3-markdown.config.mjs"),
+    [
+      'import { binding, defineConfig } from "@ykdz/dock";',
+      'import { markdown } from "@ykdz/dock/markdown";',
+      "export default defineConfig({",
+      '  baseline: "v3-markdown.baseline.json",',
+      "  plugins: [markdown],",
+      "  bindings: [",
+      '    binding("v3-md-policy", [',
+      '      markdown.from("guide.md").section("标记位置").marker("stable-port").reference("stable-port"),',
+      '      markdown.from("guide.md").tableCell({ column: "说明", row: { column: "名称", value: "api" } }).reference("table-cell"),',
+      "    ]),",
+      "  ],",
+      "});",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "v3-markdown.baseline.json"),
+    JSON.stringify({
+      version: 3,
+      bindings: {
+        "v3-md-policy": {
+          definition: {
+            id: "v3-md-policy",
+            references: ["stable-port", "table-cell"],
+          },
+          references: {
+            "stable-port": {
+              definition: {
+                id: "stable-port",
+                target: {
+                  pluginId: "@ykdz/dock-reference-markdown",
+                  target: "guide.md",
+                  fileInfo: "guide.md",
+                },
+                selection: {
+                  kind: "markdown",
+                  steps: [
+                    { kind: "section", heading: "标记位置" },
+                    { kind: "marker", id: "stable-port" },
+                  ],
+                },
+              },
+              value: "8080",
+            },
+            "table-cell": {
+              definition: {
+                id: "table-cell",
+                target: {
+                  pluginId: "@ykdz/dock-reference-markdown",
+                  target: "guide.md",
+                  fileInfo: "guide.md",
+                },
+                selection: {
+                  kind: "markdown",
+                  steps: [
+                    {
+                      kind: "tableCell",
+                      selector: {
+                        column: "说明",
+                        row: { column: "名称", value: "api" },
+                      },
+                    },
+                  ],
+                },
+              },
+              value: "**当前值**",
+            },
+          },
+        },
+      },
+    }),
+    "utf8",
+  );
+  const v3MarkdownCheck = await run(
+    bin,
+    ["check", "--config", "v3-markdown.config.mjs"],
+    dir,
+  );
+  assert.equal(
+    v3MarkdownCheck.code,
+    0,
+    v3MarkdownCheck.stdout + v3MarkdownCheck.stderr,
+  );
+  assert.equal(
+    v3MarkdownCheck.stdout,
+    "Scope: v3-md-policy\nAll checked bindings are consistent with baseline.\n",
   );
 
   const updated = await run(
@@ -1516,6 +1611,17 @@ async function verifyInstalledMarkdownSmoke(
     originalGuide.replace("<!-- dock:end stable-port -->", ""),
     "utf8",
   );
+  const removedTargetCheck = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs", "--binding", "markdown-policy"],
+    dir,
+  );
+  assert.equal(removedTargetCheck.code, 1, removedTargetCheck.stderr);
+  assert.match(
+    removedTargetCheck.stdout,
+    /Error stable-port \(missing-selection\) \(guide\.md:46-48\):/,
+  );
+
   const missingMarker = await run(
     bin,
     [
@@ -1536,6 +1642,22 @@ async function verifyInstalledMarkdownSmoke(
     "missing-selection",
   );
   assert.deepEqual(await readFile(baselinePath), savedBaseline);
+
+  await writeFile(
+    guidePath,
+    `${originalGuide}\n<!-- dock:start stable-port -->9090<!-- dock:end stable-port -->\n`,
+    "utf8",
+  );
+  const ambiguousTargetCheck = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs", "--binding", "markdown-policy"],
+    dir,
+  );
+  assert.equal(ambiguousTargetCheck.code, 1, ambiguousTargetCheck.stderr);
+  assert.match(
+    ambiguousTargetCheck.stdout,
+    /Error stable-port \(ambiguous-selection\) \(guide\.md:46-50\):/,
+  );
 }
 
 async function verifyInstalledTypeScriptSmoke(
@@ -1584,7 +1706,7 @@ async function verifyInstalledTypeScriptSmoke(
     );
   }
 
-  // Verify quote, match capture, and named region reading directly via @ykdz/dock/typescript.
+  // Verify quote, match capture, named region, processor ID, and V3 baseline compatibility via @ykdz/dock/typescript.
   await writeFile(
     join(dir, "selection-source.ts"),
     [
@@ -1605,7 +1727,9 @@ async function verifyInstalledTypeScriptSmoke(
     [
       'import assert from "node:assert/strict";',
       'import { defineConfig, readReference } from "@ykdz/dock";',
-      'import { typescript } from "@ykdz/dock/typescript";',
+      'import { typescript, typescriptPluginId } from "@ykdz/dock/typescript";',
+      'assert.equal(typescriptPluginId, "@ykdz/dock-reference-typescript");',
+      'assert.equal(typescript.id, "@ykdz/dock-reference-typescript");',
       "const config = defineConfig({ plugins: [typescript], bindings: [] });",
       'const quoted = await readReference(config, typescript.from("selection-source.ts").symbol("configure", "function").quote(\'return "ok";\').reference("ts-quote"));',
       "assert.equal(quoted.value, 'return \"ok\";');",
@@ -1625,6 +1749,77 @@ async function verifyInstalledTypeScriptSmoke(
     tsTextSelection.code,
     0,
     `Installed TypeScript text-selection check failed:\n${tsTextSelection.stdout}\n${tsTextSelection.stderr}`,
+  );
+
+  await writeFile(
+    join(dir, "v3-typescript.config.mjs"),
+    [
+      'import { binding, defineConfig } from "@ykdz/dock";',
+      'import { typescript } from "@ykdz/dock/typescript";',
+      "export default defineConfig({",
+      '  baseline: "v3-typescript.baseline.json",',
+      "  plugins: [typescript],",
+      "  bindings: [",
+      '    binding("v3-ts-policy", [',
+      '      typescript.from("symbol-source.ts").symbol("calculate", "function").match("return (input \\\\+ \\\\d+);", 1).reference("calculate-expression"),',
+      "    ]),",
+      "  ],",
+      "});",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    join(dir, "v3-typescript.baseline.json"),
+    JSON.stringify({
+      version: 3,
+      bindings: {
+        "v3-ts-policy": {
+          definition: {
+            id: "v3-ts-policy",
+            references: ["calculate-expression"],
+          },
+          references: {
+            "calculate-expression": {
+              definition: {
+                id: "calculate-expression",
+                target: {
+                  pluginId: "@ykdz/dock-reference-typescript",
+                  target: "symbol-source.ts",
+                  fileInfo: "symbol-source.ts",
+                },
+                selection: {
+                  kind: "typescript",
+                  steps: [
+                    {
+                      kind: "symbol",
+                      name: ["calculate"],
+                      declaration: "function",
+                    },
+                    {
+                      kind: "match",
+                      pattern: "return (input \\+ \\d+);",
+                      group: 1,
+                    },
+                  ],
+                },
+              },
+              value: "input + 1",
+            },
+          },
+        },
+      },
+    }),
+    "utf8",
+  );
+  const v3TsCheck = await run(
+    bin,
+    ["check", "--config", "v3-typescript.config.mjs"],
+    dir,
+  );
+  assert.equal(v3TsCheck.code, 0, v3TsCheck.stdout + v3TsCheck.stderr);
+  assert.equal(
+    v3TsCheck.stdout,
+    "Scope: v3-ts-policy\nAll checked bindings are consistent with baseline.\n",
   );
 
   const updated = await run(
@@ -1654,11 +1849,44 @@ async function verifyInstalledTypeScriptSmoke(
     "Scope: typescript-policy\nAll checked bindings are consistent with baseline.\n",
   );
 
+  const symbolSourcePath = join(dir, "symbol-source.ts");
+  const originalSymbolSource = await readFile(symbolSourcePath, "utf8");
   await writeFile(
-    join(dir, "symbol-source.ts"),
-    "function broken( {\n",
+    symbolSourcePath,
+    originalSymbolSource.replace(
+      "export function calculate(input: number): number {\n  return input + 1;\n}",
+      "// calculate removed",
+    ),
     "utf8",
   );
+  const removedSymbolCheck = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs"],
+    dir,
+  );
+  assert.equal(removedSymbolCheck.code, 1, removedSymbolCheck.stderr);
+  assert.match(
+    removedSymbolCheck.stdout,
+    /Error calculate-expression \(missing-symbol\) \(symbol-source\.ts:1-18\):/,
+  );
+
+  await writeFile(
+    symbolSourcePath,
+    `${originalSymbolSource}\nexport function calculate(input: number): number {\n  return input + 2;\n}\n`,
+    "utf8",
+  );
+  const ambiguousSymbolCheck = await run(
+    bin,
+    ["check", "--config", "dock.config.mjs"],
+    dir,
+  );
+  assert.equal(ambiguousSymbolCheck.code, 1, ambiguousSymbolCheck.stderr);
+  assert.match(
+    ambiguousSymbolCheck.stdout,
+    /Error calculate-expression \(ambiguous-symbol\) \(symbol-source\.ts:1-24\):/,
+  );
+
+  await writeFile(symbolSourcePath, "function broken( {\n", "utf8");
   const syntaxFailure = await run(
     bin,
     [

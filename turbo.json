@@ -10,6 +10,8 @@
             "dock-text-selection",
             "dock-host",
             "dock-file",
+            "dock-markdown",
+            "dock-typescript",
             "dock-vitest",
             "dock-node-test",
             "dock-public"
@@ -41,6 +43,26 @@
           ]
         }
       },
+      "dock-markdown": {
+        "dependencies": {
+          "allow": [
+            "dock-core",
+            "dock-host",
+            "dock-text-selection",
+            "dock-tooling"
+          ]
+        }
+      },
+      "dock-typescript": {
+        "dependencies": {
+          "allow": [
+            "dock-core",
+            "dock-host",
+            "dock-text-selection",
+            "dock-tooling"
+          ]
+        }
+      },
       "dock-vitest": {
         "dependencies": {
           "allow": ["dock-core", "dock-host", "dock-tooling"]
@@ -58,6 +80,8 @@
             "dock-text-selection",
             "dock-host",
             "dock-file",
+            "dock-markdown",
+            "dock-typescript",
             "dock-node-test",
             "dock-vitest",
             "dock-tooling"
