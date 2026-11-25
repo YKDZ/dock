@@ -26,6 +26,8 @@ export type PluginDiscoveryInput<
   readonly references: readonly Ref[];
   readonly sources: readonly Source[];
   readonly missingBaselineFiles: readonly string[];
+  /** Reference IDs referenced by `config.bindings` before inline declaration discovery. */
+  readonly boundReferenceIds?: ReadonlySet<string>;
 };
 
 export type PluginDiscoveredBinding = {

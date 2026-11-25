@@ -182,6 +182,8 @@ const implementation = definePlugin({
     const loadSource = createMarkdownBatchLoader();
     const explicitSourcePaths = new Set<string>();
     const referencedPaths = new Set<string>();
+    const boundReferencedPaths = new Set<string>();
+    const boundReferenceIds = input.boundReferenceIds;
     const missingBaselinePaths = new Set<string>(input.missingBaselineFiles);
 
     for (const source of input.sources) {
@@ -190,7 +192,14 @@ const implementation = definePlugin({
     }
     for (const reference of input.references) {
       assertMarkdownTarget(reference.target);
-      referencedPaths.add(resolveTarget(reference.target, context.root));
+      const targetPath = resolveTarget(reference.target, context.root);
+      referencedPaths.add(targetPath);
+      if (
+        boundReferenceIds === undefined ||
+        boundReferenceIds.has(reference.id)
+      ) {
+        boundReferencedPaths.add(targetPath);
+      }
     }
 
     const configuredPaths = new Set<string>([
@@ -249,29 +258,25 @@ const implementation = definePlugin({
         });
       }
 
-      for (const issue of scanned.issues) {
-        if (issue.kind === "bind") {
+      const bindIssues = scanned.issues.filter(
+        (issue) => issue.kind === "bind",
+      );
+      if (bindIssues.length > 0) {
+        for (const issue of scanned.issues) {
           issues.push({
             code: "declaration-invalid",
             message: issue.message(displayPath),
           });
         }
-      }
-
-      if (
-        explicitSourcePaths.has(absolutePath) &&
-        !referencedPaths.has(absolutePath) &&
-        scanned.inlineBindings.length === 0
+      } else if (
+        !boundReferencedPaths.has(absolutePath) &&
+        scanned.inlineBindings.length === 0 &&
+        scanned.issues.length > 0
       ) {
-        const markerIssues = scanned.issues.filter(
-          (issue) => issue.kind !== "bind",
-        );
-        if (markerIssues.length > 0) {
-          issues.push({
-            code: "invalid-marker",
-            message: formatDirectiveIssues(displayPath, markerIssues),
-          });
-        }
+        issues.push({
+          code: "invalid-marker",
+          message: formatDirectiveIssues(displayPath, scanned.issues),
+        });
       }
     }
 

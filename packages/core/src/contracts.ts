@@ -197,7 +197,7 @@ export type BaselineValidationIssue = {
 };
 
 export type ParseBaselineJsonOptions = {
-  /** Optional hook allowing `@dock/host` to validate its `{ pluginId, target, fileInfo }` outer wrapper on `definition.target`. */
+  /** Optional callback for caller-defined validation of `definition.target` records. */
   readonly validateTargetDefinition?: (
     node: JsonCstNode,
     path: string,

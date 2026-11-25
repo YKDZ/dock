@@ -24,3 +24,42 @@ void test("plain file plugin preserves raw text when registered alongside markdo
     await rm(root, { recursive: true, force: true });
   }
 });
+
+void test("@ykdz/dock/core exposes only the public domain API without internal CST helpers", async () => {
+  const coreModule = (await import("@ykdz/dock/core")) as Record<
+    string,
+    unknown
+  >;
+  for (const expected of [
+    "assertBaseline",
+    "assertJsonValue",
+    "BaselineValidationError",
+    "canonicalJson",
+    "check",
+    "copyJsonValue",
+    "isJsonValue",
+    "parseBaselineJson",
+    "resolveCheckScope",
+    "updateBaseline",
+  ]) {
+    assert.equal(
+      expected in coreModule,
+      true,
+      `Expected @ykdz/dock/core to export ${expected}`,
+    );
+  }
+  for (const internal of [
+    "parseJsonDocument",
+    "cstToJsonValue",
+    "isWellFormedJsonString",
+    "JsonSyntaxError",
+    "assertBindingDefinition",
+    "assertReferenceDefinition",
+  ]) {
+    assert.equal(
+      internal in coreModule,
+      false,
+      `Expected @ykdz/dock/core NOT to export internal helper ${internal}`,
+    );
+  }
+});

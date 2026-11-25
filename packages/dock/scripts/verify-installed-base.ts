@@ -287,11 +287,8 @@ async function verifyMissingVitestPeerBehavior(
     `  BaselineValidationError,`,
     `  canonicalJson,`,
     `  check as checkCore,`,
-    `  cstToJsonValue,`,
     `  isJsonValue,`,
-    `  JsonSyntaxError,`,
     `  parseBaselineJson,`,
-    `  parseJsonDocument,`,
     `  updateBaseline as updateCoreBaseline,`,
     `  type Baseline,`,
     `  type CheckError,`,
@@ -321,8 +318,7 @@ async function verifyMissingVitestPeerBehavior(
     `void valueCheck; void typedConfig; void typedCoreReport; void typedCoreError;`,
     `void check; void inspect; void readReference; void updateBaseline;`,
     `void canonicalJson; void isJsonValue; void updateCoreBaseline;`,
-    `void parseJsonDocument; void cstToJsonValue; void parseBaselineJson;`,
-    `void JsonSyntaxError; void BaselineValidationError;`,
+    `void parseBaselineJson; void BaselineValidationError;`,
     `void markdownPluginId; void typescriptPluginId; void nodeTestPluginId;`,
     `export type { CheckReport };`,
   ];
@@ -2200,12 +2196,12 @@ async function verifyInstalledMarkdownSmoke(
       ],
     },
     {
-      name: "ID conflict with existing TypeScript binding",
+      name: "ID conflict with existing config binding",
       guide: [
         "# CLI Guide",
         "",
         '<!-- dock:bind {"id":"exit-docs","with":["cli exit code"]} -->',
-        "Conflicts with TS binding.",
+        "Conflicts with config binding.",
         "",
         "## Exit Codes",
         "",
@@ -2216,7 +2212,7 @@ async function verifyInstalledMarkdownSmoke(
       patterns: [
         /Duplicate binding ID "exit-docs"/,
         /inline-guide\.md:3/,
-        /TypeScript config bindings/,
+        /conflicts with existing declaration in config\./,
       ],
     },
   ];
