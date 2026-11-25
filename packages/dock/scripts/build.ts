@@ -23,6 +23,10 @@ const INTERNAL_ENTRIES: readonly InternalEntry[] = [
   { specifier: "@dock/core", packageSlug: "core" },
   { specifier: "@dock/host", packageSlug: "host" },
   { specifier: "@dock/host/maintenance-worker", packageSlug: "host" },
+  { specifier: "@dock/vitest", packageSlug: "vitest" },
+  { specifier: "@dock/vitest/setup", packageSlug: "vitest" },
+  { specifier: "@dock/vitest/reporter", packageSlug: "vitest" },
+  { specifier: "@dock/vitest/overlay-config", packageSlug: "vitest" },
 ];
 
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));

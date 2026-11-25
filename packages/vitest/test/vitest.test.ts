@@ -7,11 +7,16 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   binding,
   check,
+  createReference,
   defineConfig,
-  file,
+  definePlugin,
   MaintenanceError,
+  type PluginBatchResult,
+  type PluginContext,
+  type PluginRequest,
+  type Reference,
   updateBaseline,
-} from "@ykdz/dock";
+} from "@dock/host";
 import {
   defineVitestObservation,
   defineVitestRun,
@@ -20,14 +25,55 @@ import {
   vitestPluginId,
   vitestStatus,
   vitestSuite,
-} from "@ykdz/dock/vitest";
+} from "@dock/vitest";
 
-const packageDirectory = dirname(
-  dirname(dirname(fileURLToPath(import.meta.url))),
-);
+const packageDirectory = dirname(dirname(fileURLToPath(import.meta.url)));
 const vitestSourceUrl = pathToFileURL(
-  join(packageDirectory, "src", "vitest", "index.ts"),
+  join(packageDirectory, "src", "index.ts"),
 ).href;
+
+type LocalTextFileReference = Reference<
+  "fixture:text-file",
+  string,
+  string,
+  string
+>;
+
+const localTextFilePlugin = definePlugin({
+  id: "fixture:text-file",
+  validate(reference: LocalTextFileReference): void {
+    if (typeof reference.target !== "string" || reference.target.length === 0) {
+      throw new TypeError("Text file target must be a non-empty path.");
+    }
+  },
+  fileInfo(reference: LocalTextFileReference): string {
+    return reference.target;
+  },
+  async collect(
+    request: PluginRequest<LocalTextFileReference>,
+    context: PluginContext,
+  ): Promise<PluginBatchResult<string>> {
+    const results = await Promise.all(
+      request.selectedReferences.map(async (reference) => ({
+        referenceId: reference.id,
+        kind: "value" as const,
+        value: await readFile(join(context.root, reference.target), "utf8"),
+      })),
+    );
+    return { results };
+  },
+});
+
+function localTextFileReference(
+  id: string,
+  path: string,
+): LocalTextFileReference {
+  return createReference<"fixture:text-file", string, string, string>(
+    "fixture:text-file",
+    id,
+    path,
+  );
+}
 
 void test("vitest baseline comparison ignores shared run arrangement and config switches, catches re-targeting, and preserves baseline bytes on errors", async () => {
   const cacheDirectory = join(packageDirectory, "node_modules", ".cache");
@@ -158,10 +204,10 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
     });
     const initialConfig = defineConfig({
       root,
-      plugins: [file, vitest],
+      plugins: [localTextFilePlugin, vitest],
       bindings: [
         binding("alpha-status-binding", [
-          file.from("doc.txt").reference("doc"),
+          localTextFileReference("doc", "doc.txt"),
           vitestStatus("alpha-status", initialRun, {
             file: "suite/primary.test.mjs",
             name: "alpha passes",
@@ -242,10 +288,10 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
     });
     const rearrangedConfig = defineConfig({
       root,
-      plugins: [file, vitest],
+      plugins: [localTextFilePlugin, vitest],
       bindings: [
         binding("alpha-status-binding", [
-          file.from("doc.txt").reference("doc"),
+          localTextFileReference("doc", "doc.txt"),
           vitestStatus("alpha-status", rearrangedRun, {
             file: "suite/primary.test.mjs",
             name: "alpha passes",
@@ -288,10 +334,10 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
     const afterMovedTestRoot = await check(
       defineConfig({
         root,
-        plugins: [file, vitest],
+        plugins: [localTextFilePlugin, vitest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            localTextFileReference("doc", "doc.txt"),
             vitestStatus("alpha-status", movedTestRootRun, {
               file: "primary.test.mjs",
               name: "alpha passes",
@@ -368,10 +414,10 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
     const retargetedFileCheck = await check(
       defineConfig({
         root,
-        plugins: [file, vitest],
+        plugins: [localTextFilePlugin, vitest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            localTextFileReference("doc", "doc.txt"),
             vitestStatus("alpha-status", retargetedFileRun, {
               file: "primary.test.mjs",
               name: "alpha passes",
@@ -412,10 +458,10 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
     const changedSelectionsCheck = await check(
       defineConfig({
         root,
-        plugins: [file, vitest],
+        plugins: [localTextFilePlugin, vitest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            localTextFileReference("doc", "doc.txt"),
             vitestStatus("alpha-status", rearrangedRun, {
               file: "suite/primary.test.mjs",
               name: "beta passes",
@@ -458,10 +504,10 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
     const filteredUpdate = await updateBaseline(
       defineConfig({
         root,
-        plugins: [file, vitest],
+        plugins: [localTextFilePlugin, vitest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            localTextFileReference("doc", "doc.txt"),
             vitestStatus("alpha-status", filteredRun, {
               file: "primary.test.mjs",
               name: "alpha passes",
@@ -482,10 +528,10 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
     const skippedUpdate = await updateBaseline(
       defineConfig({
         root,
-        plugins: [file, vitest],
+        plugins: [localTextFilePlugin, vitest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            localTextFileReference("doc", "doc.txt"),
             vitestStatus("alpha-status", rearrangedRun, {
               file: "suite/primary.test.mjs",
               name: "skipped case",
@@ -543,10 +589,10 @@ void test("vitest baseline comparison ignores shared run arrangement and config 
     const teardownFailedUpdate = await updateBaseline(
       defineConfig({
         root,
-        plugins: [file, vitest],
+        plugins: [localTextFilePlugin, vitest],
         bindings: [
           binding("alpha-status-binding", [
-            file.from("doc.txt").reference("doc"),
+            localTextFileReference("doc", "doc.txt"),
             vitestStatus("alpha-status", initialRun, {
               file: "suite/primary.test.mjs",
               name: "alpha passes",
